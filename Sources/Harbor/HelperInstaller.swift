@@ -65,8 +65,9 @@ enum HelperInstaller {
         LOC=/usr/local/libexec/HarborLocalizations.bundle
         rm -rf "$LOC"
         mkdir -p "$LOC/Contents/Resources"
-        if [[ -d "$RES/en.lproj" ]]; then cp -R "$RES/en.lproj" "$LOC/Contents/Resources/"; fi
-        if [[ -d "$RES/ru.lproj" ]]; then cp -R "$RES/ru.lproj" "$LOC/Contents/Resources/"; fi
+        for loc in "$RES"/*.lproj; do
+          if [[ -d "$loc" ]]; then cp -R "$loc" "$LOC/Contents/Resources/"; fi
+        done
         cat > "$LOC/Contents/Info.plist" <<'PLIST'
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

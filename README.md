@@ -1,4 +1,8 @@
-# Harbor
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Harbor">
+</p>
+
+<h1 align="center">Harbor</h1>
 
 Harbor is a native macOS client for WireGuard. It keeps your configs on this Mac, brings a tunnel up, and lets chosen addresses skip the tunnel and use the regular network.
 
@@ -46,7 +50,7 @@ Open Settings from the gear, the menu bar, or Command-Comma.
 
 ## Language
 
-Harbor follows the system language. English and Russian are included.
+Harbor follows the system language. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included.
 
 ## Build
 

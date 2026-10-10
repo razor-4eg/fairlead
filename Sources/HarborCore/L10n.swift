@@ -17,7 +17,8 @@ public enum HarborL10n {
 
     public static func addressCount(_ count: Int) -> String {
         let form: String
-        if resolvedLanguage() == "ru" {
+        switch resolvedLanguage() {
+        case "ru":
             let mod100 = count % 100
             let mod10 = count % 10
             if (11...14).contains(mod100) {
@@ -29,7 +30,11 @@ public enum HarborL10n {
             } else {
                 form = "many"
             }
-        } else {
+        case "fr":
+            form = count <= 1 ? "one" : "other"
+        case "zh-Hans":
+            form = "other"
+        default:
             form = count == 1 ? "one" : "other"
         }
         return format("%d addresses.\(form)", count)
@@ -59,7 +64,7 @@ public enum HarborL10n {
     private static func loadCatalogs() -> [[String: [String]]] {
         if let catalogCache { return catalogCache }
         var catalogs: [[String: [String]]] = []
-        for code in ["en", "ru"] {
+        for code in Self.languages {
             guard let path = bundle.path(forResource: code, ofType: "lproj")
                 ?? Bundle.main.path(forResource: code, ofType: "lproj"),
                   let loc = Bundle(path: path),
@@ -99,8 +104,10 @@ public enum HarborL10n {
         return nil
     }
 
+    private static let languages = ["en", "ru", "de", "es", "fr", "pt", "zh-Hans"]
+
     private static var activeLocale: Locale {
-        Locale(identifier: resolvedLanguage() == "ru" ? "ru" : "en")
+        Locale(identifier: resolvedLanguage())
     }
 
     private static func resolvedLanguage() -> String {
@@ -109,7 +116,14 @@ public enum HarborL10n {
             ?? Bundle.main.preferredLocalizations.first
             ?? Locale.preferredLanguages.first
             ?? "en"
-        return raw.lowercased().hasPrefix("ru") ? "ru" : "en"
+        return canonical(raw)
+    }
+
+    private static func canonical(_ raw: String) -> String {
+        let lower = raw.replacingOccurrences(of: "_", with: "-").lowercased()
+        if lower.hasPrefix("zh") { return "zh-Hans" }
+        let code = lower.split(separator: "-").first.map(String.init) ?? lower
+        return languages.contains(code) ? code : "en"
     }
 
     private static func localizedBundle() -> Bundle {
