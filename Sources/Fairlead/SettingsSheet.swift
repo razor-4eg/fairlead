@@ -1,4 +1,4 @@
-import HarborCore
+import FairleadCore
 import SwiftUI
 
 struct SettingsSheet: View {
@@ -20,7 +20,7 @@ struct SettingsSheet: View {
                         Text("Open at login")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.text)
-                        Text("Harbor starts when you sign in. A default tunnel connects on its own.")
+                        Text("Fairlead starts when you sign in. A default tunnel connects on its own.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -48,7 +48,7 @@ struct SettingsSheet: View {
                     Text("Default tunnel")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.text)
-                    Text("Harbor selects this tunnel when it opens and connects it.")
+                    Text("Fairlead selects this tunnel when it opens and connects it.")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -79,7 +79,7 @@ struct SettingsSheet: View {
 
             HStack {
                 Spacer()
-                HarborButton(title: "Close") { dismiss() }
+                FairleadButton(title: "Close") { dismiss() }
             }
         }
         .padding(24)
@@ -94,7 +94,7 @@ struct SettingsSheet: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.text)
             toolRow("wireguard-go", path: model.tools.wireguardGo)
-            toolRow("Helper", path: model.helperOnline ? HarborPaths.socket : nil)
+            toolRow("Helper", path: model.helperOnline ? FairleadPaths.socket : nil)
             Text("wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
@@ -109,9 +109,9 @@ struct SettingsSheet: View {
                 .frame(height: 72)
             }
             HStack {
-                HarborButton(title: "Config folder") { model.openConfigFolder() }
+                FairleadButton(title: "Config folder") { model.openConfigFolder() }
                 Spacer()
-                HarborButton(title: "Start helper", prominent: true) {
+                FairleadButton(title: "Start helper", prominent: true) {
                     Task { await model.installHelper() }
                 }
             }
@@ -133,7 +133,7 @@ struct SettingsSheet: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.text)
                 .frame(width: 120, alignment: .leading)
-            Text(path ?? HarborL10n.text("not found"))
+            Text(path ?? FairleadL10n.text("not found"))
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Theme.muted)
                 .lineLimit(1)

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Looks up Harbor strings in the app bundle, or in the helper's localization bundle.
-public enum HarborL10n {
+/// Looks up Fairlead strings in the app bundle, or in the helper's localization bundle.
+public enum FairleadL10n {
     public static var bundle: Bundle = .main
     /// When set, overrides the process language. The helper uses the signed-in user's language.
     public static var languageOverride: String?

@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import HarborCore
+import FairleadCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -85,7 +85,7 @@ final class AppModel: ObservableObject {
     }
 
     func syncLoginItem() {
-        let approval = HarborL10n.text("macOS still needs approval. Open System Settings → General → Login Items and allow Harbor.")
+        let approval = FairleadL10n.text("macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead.")
         let status = LoginItem.status
         if status == .enabled {
             settings.launchAtLogin = true
@@ -143,7 +143,7 @@ final class AppModel: ObservableObject {
         }
         helperStale = true
         let task = Task { @MainActor in
-            self.banner = HarborL10n.text("The running helper is an older copy. Harbor will replace it.")
+            self.banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
             await self.installHelper()
             self.helperStale = HelperInstaller.needsUpdate()
         }
@@ -157,7 +157,7 @@ final class AppModel: ObservableObject {
 
     func createTunnel() {
         let number = tunnels.count + 1
-        let tunnel = Tunnel.blank(name: HarborL10n.format("Tunnel %d", number))
+        let tunnel = Tunnel.blank(name: FairleadL10n.format("Tunnel %d", number))
         tunnels.append(tunnel)
         selection = tunnel.id
         editing = tunnel
@@ -183,7 +183,7 @@ final class AppModel: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [UTType(filenameExtension: "conf") ?? .data]
-        panel.prompt = HarborL10n.text("Import")
+        panel.prompt = FairleadL10n.text("Import")
         guard panel.runModal() == .OK else { return }
         importFiles(panel.urls)
     }
@@ -192,7 +192,7 @@ final class AppModel: ObservableObject {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = sanitized(tunnel.name) + ".conf"
         panel.allowedContentTypes = [UTType(filenameExtension: "conf") ?? .plainText]
-        panel.prompt = HarborL10n.text("Export")
+        panel.prompt = FairleadL10n.text("Export")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? tunnel.configText.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -246,7 +246,7 @@ final class AppModel: ObservableObject {
         await ensureCurrentHelper()
         if HelperInstaller.needsUpdate() {
             if banner == nil {
-                banner = HarborL10n.text("The running helper is an older copy. Harbor will replace it.")
+                banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
             }
             showSettings = true
             return
@@ -267,7 +267,7 @@ final class AppModel: ObservableObject {
         guard let response else {
             mutate(tunnel.id) { $0.phase = .idle }
             helperOnline = false
-            banner = HarborL10n.text("The helper did not respond. Start it and try again.")
+            banner = FairleadL10n.text("The helper did not respond. Start it and try again.")
             showSettings = true
             return
         }
@@ -278,7 +278,7 @@ final class AppModel: ObservableObject {
             mutate(tunnel.id) { $0.phase = .idle }
         }
         if let warnings = response.warnings, !warnings.isEmpty {
-            mutate(tunnel.id) { $0.warnings = warnings.map(HarborL10n.display) }
+            mutate(tunnel.id) { $0.warnings = warnings.map(FairleadL10n.display) }
         }
         noteRouteFailure(response.error, ok: response.ok, tunnel: tunnel)
         await refresh()
@@ -298,7 +298,7 @@ final class AppModel: ObservableObject {
            error.contains("direct routes were not applied") || error.contains("прямых маршрутов") {
             return
         }
-        banner = HarborL10n.display(error)
+        banner = FairleadL10n.display(error)
     }
 
     func disconnect(_ tunnel: Tunnel) async {
@@ -313,18 +313,18 @@ final class AppModel: ObservableObject {
         pushedRoutes[tunnel.slug] = nil
         if response == nil {
             helperOnline = false
-            banner = HarborL10n.text("Could not reach the helper to disconnect.")
+            banner = FairleadL10n.text("Could not reach the helper to disconnect.")
         } else if let error = response?.error, response?.ok == false {
-            banner = HarborL10n.display(error)
+            banner = FairleadL10n.display(error)
         }
         await refresh()
     }
 
     func addIP(to id: UUID, raw: String, note: String) -> String? {
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return nil }
-        guard let cidr = CIDR.parse(raw) else { return HarborL10n.text("Enter an IP or network, for example 203.0.113.10 or 10.1.0.0/16.") }
-        if cidr.prefix == 0 { return HarborL10n.text("That network is too broad and would disable the whole tunnel.") }
-        if tunnel.ipRules.contains(where: { $0.cidr == cidr.string }) { return HarborL10n.text("That address is already listed.") }
+        guard let cidr = CIDR.parse(raw) else { return FairleadL10n.text("Enter an IP or network, for example 203.0.113.10 or 10.1.0.0/16.") }
+        if cidr.prefix == 0 { return FairleadL10n.text("That network is too broad and would disable the whole tunnel.") }
+        if tunnel.ipRules.contains(where: { $0.cidr == cidr.string }) { return FairleadL10n.text("That address is already listed.") }
         tunnel.ipRules.append(IPRule(cidr: cidr.string, note: note))
         replace(tunnel)
         return nil
@@ -349,7 +349,7 @@ final class AppModel: ObservableObject {
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.application]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.prompt = HarborL10n.text("Add")
+        panel.prompt = FairleadL10n.text("Add")
         guard panel.runModal() == .OK else { return }
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
         for url in panel.urls {
@@ -389,14 +389,14 @@ final class AppModel: ObservableObject {
     func addDomain(to id: UUID, raw: String, note: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.contains("*") {
-            return HarborL10n.text("Wildcards such as *.example.com are not supported.")
+            return FairleadL10n.text("Wildcards such as *.example.com are not supported.")
         }
         guard let name = DomainName.normalize(trimmed) else {
-            return HarborL10n.text("Enter a domain, for example example.com.")
+            return FairleadL10n.text("Enter a domain, for example example.com.")
         }
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return nil }
         if tunnel.domainRules.contains(where: { $0.name == name }) {
-            return HarborL10n.text("That domain is already listed.")
+            return FairleadL10n.text("That domain is already listed.")
         }
         tunnel.domainRules.append(DomainRule(name: name, note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
         replace(tunnel)
@@ -433,7 +433,7 @@ final class AppModel: ObservableObject {
         if helperOnline {
             banner = nil
         } else {
-            banner = HarborL10n.text("The helper is installed, but the socket is not responding yet.")
+            banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
         }
     }
 
@@ -477,7 +477,7 @@ final class AppModel: ObservableObject {
             pushedRoutes[tunnel.slug] = managed.bypass
         }
         if let warnings = response.warnings {
-            mutate(tunnel.id) { $0.warnings = warnings.map(HarborL10n.display) }
+            mutate(tunnel.id) { $0.warnings = warnings.map(FairleadL10n.display) }
         }
         noteRouteFailure(response.error, ok: response.ok, tunnel: tunnel)
     }

@@ -1,14 +1,29 @@
 import Foundation
 
 enum AppSupport {
-    /// `HARBOR_SUPPORT`, when set, is the folder that holds tunnels and settings.
+    /// `FAIRLEAD_SUPPORT`, when set, is the folder that holds tunnels and settings.
     static var folder: URL {
-        if let override = ProcessInfo.processInfo.environment["HARBOR_SUPPORT"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment["FAIRLEAD_SUPPORT"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("Harbor", isDirectory: true)
+        let folder = base.appendingPathComponent("Fairlead", isDirectory: true)
+        adoptPreviousFolder(folder, base: base)
+        return folder
+    }
+
+    /// Copies tunnels and settings saved under the previous name, once.
+    private static func adoptPreviousFolder(_ folder: URL, base: URL) {
+        let previous = base.appendingPathComponent("Harbor", isDirectory: true)
+        let files = FileManager.default
+        for name in ["tunnels.json", "settings.json"] {
+            let destination = folder.appendingPathComponent(name)
+            let source = previous.appendingPathComponent(name)
+            if files.fileExists(atPath: destination.path) || !files.fileExists(atPath: source.path) { continue }
+            try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? files.copyItem(at: source, to: destination)
+        }
     }
 }
 

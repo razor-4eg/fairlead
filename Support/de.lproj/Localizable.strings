@@ -1,4 +1,4 @@
-/* Harbor */
+/* Fairlead */
 "Search" = "Suchen";
 "Tunnels" = "Tunnel";
 "Helper is running" = "Helfer läuft";
@@ -37,7 +37,7 @@
 "Apps" = "Apps";
 "Nothing here yet. Add an IP or network that should bypass WireGuard." = "Noch nichts hier. Füge eine IP oder ein Netz hinzu, das WireGuard umgehen soll.";
 "Add app" = "App hinzufügen";
-"Choose an .app. Harbor remembers where it connects and keeps those addresses out of the tunnel." = "Wähle eine .app. Harbor merkt sich, wohin sie sich verbindet, und hält diese Adressen aus dem Tunnel heraus.";
+"Choose an .app. Fairlead remembers where it connects and keeps those addresses out of the tunnel." = "Wähle eine .app. Fairlead merkt sich, wohin sie sich verbindet, und hält diese Adressen aus dem Tunnel heraus.";
 "Local network directly" = "Lokales Netz direkt";
 "The current Wi-Fi or Ethernet network. It appears after you connect." = "Das aktuelle WLAN- oder Ethernet-Netz. Es erscheint nach dem Verbinden.";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 oder 10.1.0.0/16";
@@ -78,8 +78,8 @@
 "Import config…" = "Konfiguration importieren…";
 "Tunnel" = "Tunnel";
 "Connect or disconnect" = "Verbinden oder trennen";
-"Open Harbor" = "Harbor öffnen";
-"Quit Harbor" = "Harbor beenden";
+"Open Fairlead" = "Fairlead öffnen";
+"Quit Fairlead" = "Fairlead beenden";
 "Tunnel %d" = "Tunnel %d";
 "Export" = "Exportieren";
 "Add" = "Hinzufügen";
@@ -152,7 +152,7 @@
 "Unknown command." = "Unbekannter Befehl.";
 "Run the helper with administrator privileges." = "Starte den Helfer mit Administratorrechten.";
 "User %@ was not found." = "Benutzer %@ wurde nicht gefunden.";
-"HarborHelper is missing next to Harbor. Build the app with scripts/build-app.sh." = "HarborHelper fehlt neben Harbor. Baue die App mit scripts/build-app.sh.";
+"FairleadHelper is missing next to Fairlead. Build the app with scripts/build-app.sh." = "FairleadHelper fehlt neben Fairlead. Baue die App mit scripts/build-app.sh.";
 "Could not prepare the installation." = "Die Installation konnte nicht vorbereitet werden.";
 "The system did not confirm that the helper started." = "Das System hat den Start des Helfers nicht bestätigt.";
 "wireguard-tools installed." = "wireguard-tools installiert.";
@@ -163,19 +163,19 @@
 "Settings" = "Einstellungen";
 "Settings…" = "Einstellungen…";
 "Open at login" = "Beim Anmelden öffnen";
-"Harbor starts when you sign in. A default tunnel connects on its own." = "Harbor startet, wenn du dich anmeldest. Ein Standardtunnel verbindet sich von selbst.";
+"Fairlead starts when you sign in. A default tunnel connects on its own." = "Fairlead startet, wenn du dich anmeldest. Ein Standardtunnel verbindet sich von selbst.";
 "Default tunnel" = "Standardtunnel";
 "None" = "Keiner";
-"Harbor selects this tunnel when it opens and connects it." = "Harbor wählt diesen Tunnel beim Öffnen und verbindet ihn.";
-"macOS still needs approval. Open System Settings → General → Login Items and allow Harbor." = "macOS wartet noch auf die Erlaubnis. Öffne Systemeinstellungen → Allgemein → Anmeldeobjekte und erlaube Harbor.";
-"The running helper is an older copy. Harbor will replace it." = "Der laufende Helfer ist eine ältere Fassung. Harbor ersetzt ihn.";
-"wireguard-go is not included in this copy of Harbor." = "Diese Kopie von Harbor enthält wireguard-go nicht.";
+"Fairlead selects this tunnel when it opens and connects it." = "Fairlead wählt diesen Tunnel beim Öffnen und verbindet ihn.";
+"macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS wartet noch auf die Erlaubnis. Öffne Systemeinstellungen → Allgemein → Anmeldeobjekte und erlaube Fairlead.";
+"The running helper is an older copy. Fairlead will replace it." = "Der laufende Helfer ist eine ältere Fassung. Fairlead ersetzt ihn.";
+"wireguard-go is not included in this copy of Fairlead." = "Diese Kopie von Fairlead enthält wireguard-go nicht.";
 "Could not resolve the endpoint." = "Der Endpunkt konnte nicht aufgelöst werden.";
 "wireguard-go did not create an interface." = "wireguard-go hat keine Schnittstelle erstellt.";
 "wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go ist enthalten. Der Helfer fragt einmal nach dem Administratorpasswort und hebt dann Tunnel und direkte Routen selbst an. Konfigurationen mit Schlüsseln bleiben auf diesem Mac.";
 "Domains" = "Domains";
 "Nothing here yet. Add a domain that should bypass WireGuard." = "Noch nichts. Füge eine Domain hinzu, die WireGuard umgehen soll.";
-"Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Harbor löst den Namen über das normale Netz auf und schickt diese Adressen direkt. Eine gemeinsame Adresse, etwa von einem CDN, gilt dann für jedes Programm. Die Liste wird aktualisiert, wenn der DNS-Eintrag abläuft.";
+"Fairlead resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Fairlead löst den Namen über das normale Netz auf und schickt diese Adressen direkt. Eine gemeinsame Adresse, etwa von einem CDN, gilt dann für jedes Programm. Die Liste wird aktualisiert, wenn der DNS-Eintrag abläuft.";
 "Enter a domain, for example example.com." = "Gib eine Domain ein, zum Beispiel example.com.";
 "Wildcards such as *.example.com are not supported." = "Platzhalter wie *.example.com werden nicht unterstützt.";
 "That domain is already listed." = "Diese Domain steht schon in der Liste.";

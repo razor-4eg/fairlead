@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import HarborCore
+import FairleadCore
 
 struct TunnelRuntime: Codable, Equatable {
     var configPath: String
@@ -37,14 +37,14 @@ private let stateLock = NSLock()
 private var state = HelperState(tunnels: [:])
 
 private func fail(_ text: String) -> Never {
-    fputs("harbor-helper: \(text)\n", stderr)
+    fputs("fairlead-helper: \(text)\n", stderr)
     exit(1)
 }
 
 private func refreshHelperLanguage() {
-    let bundleURL = URL(fileURLWithPath: "/usr/local/libexec/HarborLocalizations.bundle")
+    let bundleURL = URL(fileURLWithPath: "/usr/local/libexec/FairleadLocalizations.bundle")
     if let bundle = Bundle(url: bundleURL) {
-        HarborL10n.bundle = bundle
+        FairleadL10n.bundle = bundle
     }
     guard let account = getpwnam(user) else { return }
     let home = String(cString: account.pointee.pw_dir)
@@ -55,7 +55,7 @@ private func refreshHelperLanguage() {
           let first = languages.first else {
         return
     }
-    HarborL10n.languageOverride = first
+    FairleadL10n.languageOverride = first
 }
 
 private func username() -> String {
@@ -63,7 +63,7 @@ private func username() -> String {
     if let index = args.firstIndex(of: "--user"), index + 1 < args.count {
         return args[index + 1]
     }
-    fail(HarborL10n.text("--user is required."))
+    fail(FairleadL10n.text("--user is required."))
 }
 
 func run(_ arguments: [String]) -> CommandResult {
@@ -112,7 +112,7 @@ func run(_ arguments: [String]) -> CommandResult {
 }
 
 private func loadState() {
-    guard let data = FileManager.default.contents(atPath: HarborPaths.state),
+    guard let data = FileManager.default.contents(atPath: FairleadPaths.state),
           let decoded = try? JSONDecoder().decode(HelperState.self, from: data) else {
         state = HelperState(tunnels: [:])
         return
@@ -124,13 +124,13 @@ private func saveState() {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     guard let data = try? encoder.encode(state) else { return }
-    let url = URL(fileURLWithPath: HarborPaths.state)
+    let url = URL(fileURLWithPath: FairleadPaths.state)
     try? data.write(to: url, options: .atomic)
-    chmod(HarborPaths.state, 0o600)
+    chmod(FairleadPaths.state, 0o600)
 }
 
 private func validSlug(_ name: String) -> Bool {
-    guard name.count == 11, name.hasPrefix("hbr") else { return false }
+    guard name.count == 11, name.hasPrefix("fld") || name.hasPrefix("hbr") else { return false }
     return name.dropFirst(3).allSatisfy(\.isHexDigit)
 }
 
@@ -204,24 +204,33 @@ private func processList() -> [ListedProcess] {
     return list
 }
 
-private func isHarborUserspace(_ command: String) -> Bool {
-    if command.contains("harbor-helper") { return false }
-    if command.contains("HARBOR_MANAGED=1") { return true }
-    if command.contains("/usr/local/libexec/harbor-wg-go") { return true }
-    if command.contains("WG_TUN_NAME_FILE=/var/run/wireguard/hbr") { return true }
-    if command.contains("/var/run/harbor/") && (command.contains("wg-quick") || command.contains("wireguard-go")) {
+private func isFairleadUserspace(_ command: String) -> Bool {
+    if command.contains("fairlead-helper") || command.contains("harbor-helper") { return false }
+    if command.contains("FAIRLEAD_MANAGED=1") || command.contains("HARBOR_MANAGED=1") { return true }
+    if command.contains("/usr/local/libexec/fairlead-wireguard-go")
+        || command.contains("/usr/local/libexec/harbor-wireguard-go")
+        || command.contains("/usr/local/libexec/fairlead-wg-go")
+        || command.contains("/usr/local/libexec/harbor-wg-go") {
+        return true
+    }
+    if command.contains("WG_TUN_NAME_FILE=/var/run/wireguard/fld")
+        || command.contains("WG_TUN_NAME_FILE=/var/run/wireguard/hbr") {
+        return true
+    }
+    if (command.contains("/var/run/fairlead/") || command.contains("/var/run/harbor/"))
+        && (command.contains("wg-quick") || command.contains("wireguard-go")) {
         return true
     }
     return false
 }
 
-private func harborProcessTree() -> [ListedProcess] {
+private func fairleadProcessTree() -> [ListedProcess] {
     let list = processList()
     var seeds = Set<Int32>()
-    for proc in list where proc.pid != getpid() && isHarborUserspace(proc.command) {
+    for proc in list where proc.pid != getpid() && isFairleadUserspace(proc.command) {
         seeds.insert(proc.pid)
     }
-    if let text = try? String(contentsOfFile: "/var/run/harbor/wireguard-go.pid", encoding: .utf8),
+    if let text = try? String(contentsOfFile: "/var/run/fairlead/wireguard-go.pid", encoding: .utf8),
        let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
        pid != getpid(),
        let proc = list.first(where: { $0.pid == pid }),
@@ -247,9 +256,9 @@ private func isTunnelBlocker(_ command: String) -> Bool {
 // The route monitor keeps running after wg-quick returns. On the next connect
 // its exit trap deletes the new interface, and wg-quick still exits 0.
 func stopManagedProcesses() {
-    let targets = harborProcessTree()
+    let targets = fairleadProcessTree()
     guard !targets.isEmpty else { return }
-    fputs("harbor-helper: stopping \(targets.count) leftover tunnel processes\n", stderr)
+    fputs("fairlead-helper: stopping \(targets.count) leftover tunnel processes\n", stderr)
     for proc in targets where isTunnelBlocker(proc.command) {
         kill(proc.pid, SIGKILL)
     }
@@ -258,27 +267,27 @@ func stopManagedProcesses() {
     }
     let deadline = Date().addingTimeInterval(8)
     while Date() < deadline {
-        let live = harborProcessTree().filter { !isTunnelBlocker($0.command) }
+        let live = fairleadProcessTree().filter { !isTunnelBlocker($0.command) }
         if live.isEmpty { break }
         usleep(100_000)
     }
-    for proc in harborProcessTree() where !isTunnelBlocker(proc.command) {
+    for proc in fairleadProcessTree() where !isTunnelBlocker(proc.command) {
         kill(proc.pid, SIGKILL)
     }
 }
 
 func removeInterfaceFiles(slug: String) {
-    let nameFile = "\(HarborPaths.wireguardRun)/\(slug).name"
+    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
     var iface: String?
     if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
         let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty { iface = name }
     }
     if let iface, iface.allSatisfy({ $0.isLetter || $0.isNumber }) {
-        unlink("\(HarborPaths.wireguardRun)/\(iface).sock")
+        unlink("\(FairleadPaths.wireguardRun)/\(iface).sock")
     }
     unlink(nameFile)
-    unlink("/var/run/harbor/wireguard-go.pid")
+    unlink("/var/run/fairlead/wireguard-go.pid")
 }
 
 private func routeSnapshot(_ cidr: CIDR) -> RouteSnapshot {
@@ -289,7 +298,7 @@ private func routeSnapshot(_ cidr: CIDR) -> RouteSnapshot {
 private func addOwnedRoute(_ cidr: CIDR, runtime: TunnelRuntime) -> String? {
     let gateway = cidr.family == .v4 ? runtime.gatewayV4 : runtime.gatewayV6
     guard let gateway else {
-        return HarborL10n.format("No gateway for %@.", cidr.string)
+        return FairleadL10n.format("No gateway for %@.", cidr.string)
     }
     let family = cidr.family == .v4 ? "inet" : "inet6"
     let result = run(["/sbin/route", "-q", "-n", "add", "-\(family)", cidr.string, gateway])
@@ -301,7 +310,7 @@ private func addOwnedRoute(_ cidr: CIDR, runtime: TunnelRuntime) -> String? {
         return nil
     }
     let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-    return detail.isEmpty ? HarborL10n.format("Could not add route %@.", cidr.string) : detail
+    return detail.isEmpty ? FairleadL10n.format("Could not add route %@.", cidr.string) : detail
 }
 
 private func deleteOwnedRoute(_ cidrString: String) {
@@ -313,7 +322,7 @@ private func deleteOwnedRoute(_ cidrString: String) {
 
 private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool) -> (warnings: [String], error: String?) {
     guard var runtime = state.tunnels[slug] else {
-        return ([], HarborL10n.text("The tunnel is not running."))
+        return ([], FairleadL10n.text("The tunnel is not running."))
     }
     let planned = BypassPlanner.routes(
         BypassInput(
@@ -365,14 +374,14 @@ private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool) -> (wa
 }
 
 private func writeConfig(slug: String, config: String) throws -> String {
-    guard config.utf8.count <= 256_000 else { throw HelperError.message(HarborL10n.text("The config is too large.")) }
-    guard !config.contains("\0") else { throw HelperError.message(HarborL10n.text("The config is damaged.")) }
+    guard config.utf8.count <= 256_000 else { throw HelperError.message(FairleadL10n.text("The config is too large.")) }
+    guard !config.contains("\0") else { throw HelperError.message(FairleadL10n.text("The config is damaged.")) }
     var document = WGDocument.parse(config)
     let issues = ConfigCheck.issues(in: document)
     if let first = issues.first {
         throw HelperError.message(first.message)
     }
-    // Hooks run as root inside wg-quick. Harbor never executes them.
+    // Hooks run as root inside wg-quick. Fairlead never executes them.
     let hooks: Set<String> = ["preup", "postup", "predown", "postdown", "saveconfig"]
     for index in document.sections.indices {
         document.sections[index].entries.removeAll { entry in
@@ -380,18 +389,18 @@ private func writeConfig(slug: String, config: String) throws -> String {
             return hooks.contains(key)
         }
     }
-    let path = "\(HarborPaths.directory)/\(slug).conf"
+    let path = "\(FairleadPaths.directory)/\(slug).conf"
     do {
         try document.render().write(toFile: path, atomically: true, encoding: .utf8)
     } catch {
-        throw HelperError.message(HarborL10n.text("Could not write the config."))
+        throw HelperError.message(FairleadL10n.text("Could not write the config."))
     }
     chmod(path, 0o600)
     return path
 }
 
 private func bringDown(slug: String) -> String? {
-    let path = state.tunnels[slug]?.configPath ?? "\(HarborPaths.directory)/\(slug).conf"
+    let path = state.tunnels[slug]?.configPath ?? "\(FairleadPaths.directory)/\(slug).conf"
     let realBefore = state.tunnels[slug]?.realInterface
     stopManagedProcesses()
     bringUserspaceDown(slug: slug, interfaceName: realBefore)
@@ -401,14 +410,14 @@ private func bringDown(slug: String) -> String? {
     state.tunnels[slug] = nil
     saveState()
     try? FileManager.default.removeItem(atPath: path)
-    fputs("harbor-helper: tunnel down \(slug)\n", stderr)
+    fputs("fairlead-helper: tunnel down \(slug)\n", stderr)
     return nil
 }
 
 private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: Bool) -> RPCResponse {
     let tools = ToolLocator.locate()
     guard tools.ready else {
-        return RPCResponse(id: "", ok: false, error: HarborL10n.text("wireguard-go is not included in this copy of Harbor."), tools: tools)
+        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("wireguard-go is not included in this copy of Fairlead."), tools: tools)
     }
     if state.tunnels[slug] != nil {
         if let error = bringDown(slug: slug) {
@@ -435,7 +444,7 @@ private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: 
     guard let real = raised.interface else {
         bringUserspaceDown(slug: slug, interfaceName: nil)
         try? FileManager.default.removeItem(atPath: path)
-        let message = raised.error ?? HarborL10n.text("wireguard-go did not create an interface.")
+        let message = raised.error ?? FairleadL10n.text("wireguard-go did not create an interface.")
         return RPCResponse(id: "", ok: false, error: message, tools: tools)
     }
     var runtime = TunnelRuntime(
@@ -457,7 +466,7 @@ private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: 
         return RPCResponse(
             id: "",
             ok: false,
-            error: HarborL10n.format("The tunnel is up, but some direct routes were not applied.\n%@", error),
+            error: FairleadL10n.format("The tunnel is up, but some direct routes were not applied.\n%@", error),
             warnings: applied.warnings,
             tools: tools,
             managed: [managed(slug, runtime)],
@@ -534,10 +543,10 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         return snapshotResponse(id: request.id)
     case "up":
         guard let name = request.name, validSlug(name) else {
-            return RPCResponse(id: request.id, ok: false, error: HarborL10n.text("Invalid tunnel name."))
+            return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Invalid tunnel name."))
         }
         guard let config = request.config, !config.isEmpty else {
-            return RPCResponse(id: request.id, ok: false, error: HarborL10n.text("The config is empty."))
+            return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("The config is empty."))
         }
         var response = bringUp(
             slug: name,
@@ -549,7 +558,7 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         return response
     case "down":
         guard let name = request.name, validSlug(name) else {
-            return RPCResponse(id: request.id, ok: false, error: HarborL10n.text("Invalid tunnel name."))
+            return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Invalid tunnel name."))
         }
         if let error = bringDown(slug: name) {
             return RPCResponse(id: request.id, ok: false, error: error)
@@ -557,7 +566,7 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         return snapshotResponse(id: request.id)
     case "bypass":
         guard let name = request.name, validSlug(name) else {
-            return RPCResponse(id: request.id, ok: false, error: HarborL10n.text("Invalid tunnel name."))
+            return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Invalid tunnel name."))
         }
         let applied = applyBypass(slug: name, cidrs: request.cidrs ?? [], excludeLAN: request.excludeLAN ?? false)
         var response = snapshotResponse(id: request.id)
@@ -568,7 +577,7 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         }
         return response
     default:
-        return RPCResponse(id: request.id, ok: false, error: HarborL10n.text("Unknown command."))
+        return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Unknown command."))
     }
 }
 
@@ -593,7 +602,7 @@ private func serve(fd: Int32) {
                 try SocketFrame.write(client, payload)
             } catch {
                 if locked { stateLock.unlock() }
-                fputs("harbor-helper: \(error)\n", stderr)
+                fputs("fairlead-helper: \(error)\n", stderr)
             }
         }
     }
@@ -604,23 +613,23 @@ setbuf(stdout, nil)
 setbuf(stderr, nil)
 let user = username()
 refreshHelperLanguage()
-guard geteuid() == 0 else { fail(HarborL10n.text("Run the helper with administrator privileges.")) }
-guard let account = getpwnam(user) else { fail(HarborL10n.format("User %@ was not found.", user)) }
+guard geteuid() == 0 else { fail(FairleadL10n.text("Run the helper with administrator privileges.")) }
+guard let account = getpwnam(user) else { fail(FairleadL10n.format("User %@ was not found.", user)) }
 let uid = account.pointee.pw_uid
 let gid = account.pointee.pw_gid
 
-try? FileManager.default.createDirectory(atPath: HarborPaths.directory, withIntermediateDirectories: true)
-chmod(HarborPaths.directory, 0o755)
+try? FileManager.default.createDirectory(atPath: FairleadPaths.directory, withIntermediateDirectories: true)
+chmod(FairleadPaths.directory, 0o755)
 reconcile()
 
 let fd: Int32
 do {
-    fd = try SocketFrame.bind(path: HarborPaths.socket)
+    fd = try SocketFrame.bind(path: FairleadPaths.socket)
 } catch {
     fail(String(describing: error))
 }
-chown(HarborPaths.socket, uid, gid)
-chmod(HarborPaths.socket, 0o600)
-try? "\(getpid())\n".write(toFile: "/var/run/harbor/helper.pid", atomically: true, encoding: .utf8)
-fputs("harbor-helper: listening for \(user)\n", stderr)
+chown(FairleadPaths.socket, uid, gid)
+chmod(FairleadPaths.socket, 0o600)
+try? "\(getpid())\n".write(toFile: "/var/run/fairlead/helper.pid", atomically: true, encoding: .utf8)
+fputs("fairlead-helper: listening for \(user)\n", stderr)
 serve(fd: fd)

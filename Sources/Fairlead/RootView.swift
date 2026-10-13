@@ -1,5 +1,5 @@
 import AppKit
-import HarborCore
+import FairleadCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -42,7 +42,7 @@ struct RootView: View {
             SettingsSheet()
         }
         .confirmationDialog(
-            Text(HarborL10n.format("Delete the tunnel “%@”?", pendingDelete?.name ?? "")),
+            Text(FairleadL10n.format("Delete the tunnel “%@”?", pendingDelete?.name ?? "")),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
@@ -80,7 +80,7 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Mark(size: 16)
-                Text("HARBOR")
+                Text("FAIRLEAD")
                     .font(.system(size: 12, weight: .semibold))
                     .tracking(2.2)
                     .foregroundStyle(Theme.text)
@@ -116,7 +116,7 @@ struct SidebarView: View {
             .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .padding(.horizontal, 14)
 
-            Text(HarborL10n.text("Tunnels").uppercased())
+            Text(FairleadL10n.text("Tunnels").uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(1.1)
                 .foregroundStyle(Theme.faint)
@@ -140,7 +140,7 @@ struct SidebarView: View {
                     Circle()
                         .fill(model.helperOnline && model.tools.ready && !model.helperStale ? Theme.accent : Theme.faint)
                         .frame(width: 6, height: 6)
-                    Text(HarborL10n.text(helperStatus))
+                    Text(FairleadL10n.text(helperStatus))
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.muted)
                     Spacer()
@@ -149,8 +149,8 @@ struct SidebarView: View {
                 .onTapGesture { model.showSettings = true }
 
                 HStack(spacing: 8) {
-                    HarborButton(title: "New", systemImage: "plus") { model.createTunnel() }
-                    HarborButton(title: "Import", systemImage: "square.and.arrow.down") { model.importPanel() }
+                    FairleadButton(title: "New", systemImage: "plus") { model.createTunnel() }
+                    FairleadButton(title: "Import", systemImage: "square.and.arrow.down") { model.importPanel() }
                 }
             }
             .padding(14)
@@ -203,7 +203,7 @@ struct SidebarRow: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .contextMenu {
-            Button(HarborL10n.text(connected ? "Disconnect" : "Connect")) { model.toggle(tunnel.id) }
+            Button(FairleadL10n.text(connected ? "Disconnect" : "Connect")) { model.toggle(tunnel.id) }
             Button("Edit") { model.editing = tunnel }
             Button("Export…") { model.export(tunnel) }
             Divider()

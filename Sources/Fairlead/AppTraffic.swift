@@ -1,6 +1,6 @@
 import CProc
 import Foundation
-import HarborCore
+import FairleadCore
 
 enum AppTraffic {
     static func scan(rules: [AppRule], skip: Set<String>) -> [UUID: [String]] {

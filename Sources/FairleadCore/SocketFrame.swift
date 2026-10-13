@@ -8,9 +8,9 @@ public enum SocketFrameError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .disconnected: return HarborL10n.text("The connection to the helper closed.")
+        case .disconnected: return FairleadL10n.text("The connection to the helper closed.")
         case .failed(let message): return message
-        case .tooLarge: return HarborL10n.text("The helper response is too large.")
+        case .tooLarge: return FairleadL10n.text("The helper response is too large.")
         }
     }
 }
@@ -40,12 +40,12 @@ public enum SocketFrame {
 
     public static func connect(path: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw SocketFrameError.failed(HarborL10n.text("Could not open the socket.")) }
+        guard fd >= 0 else { throw SocketFrameError.failed(FairleadL10n.text("Could not open the socket.")) }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         guard setUnixPath(path, into: &addr) else {
             close(fd)
-            throw SocketFrameError.failed(HarborL10n.text("The socket path is too long."))
+            throw SocketFrameError.failed(FairleadL10n.text("The socket path is too long."))
         }
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
         let rc = withUnsafePointer(to: &addr) { ptr in
@@ -55,7 +55,7 @@ public enum SocketFrame {
         }
         guard rc == 0 else {
             close(fd)
-            throw SocketFrameError.failed(HarborL10n.text("The helper is not running."))
+            throw SocketFrameError.failed(FairleadL10n.text("The helper is not running."))
         }
         return fd
     }
@@ -63,12 +63,12 @@ public enum SocketFrame {
     public static func bind(path: String) throws -> Int32 {
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw SocketFrameError.failed(HarborL10n.text("Could not create the socket.")) }
+        guard fd >= 0 else { throw SocketFrameError.failed(FairleadL10n.text("Could not create the socket.")) }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         guard setUnixPath(path, into: &addr) else {
             close(fd)
-            throw SocketFrameError.failed(HarborL10n.text("The socket path is too long."))
+            throw SocketFrameError.failed(FairleadL10n.text("The socket path is too long."))
         }
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
         let rc = withUnsafePointer(to: &addr) { ptr in
@@ -79,11 +79,11 @@ public enum SocketFrame {
         guard rc == 0 else {
             let message = String(cString: strerror(errno))
             close(fd)
-            throw SocketFrameError.failed(HarborL10n.format("Could not bind the socket: %@.", message))
+            throw SocketFrameError.failed(FairleadL10n.format("Could not bind the socket: %@.", message))
         }
         guard listen(fd, 8) == 0 else {
             close(fd)
-            throw SocketFrameError.failed(HarborL10n.text("Could not listen on the socket."))
+            throw SocketFrameError.failed(FairleadL10n.text("Could not listen on the socket."))
         }
         return fd
     }
@@ -139,7 +139,7 @@ public enum SocketFrame {
 
 public enum RPCClient {
     public static func call(_ request: RPCRequest, timeout: Int = 20) throws -> RPCResponse {
-        let fd = try SocketFrame.connect(path: HarborPaths.socket)
+        let fd = try SocketFrame.connect(path: FairleadPaths.socket)
         defer { close(fd) }
         SocketFrame.setTimeout(fd, seconds: timeout)
         let payload = try RPCFrame.encode(request)

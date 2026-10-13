@@ -1,5 +1,5 @@
 import AppKit
-import HarborCore
+import FairleadCore
 import SwiftUI
 
 struct EditorSheet: View {
@@ -88,8 +88,8 @@ struct EditorSheet: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
                 Spacer()
-                HarborButton(title: "Cancel") { dismiss() }
-                HarborButton(title: "Save", prominent: issues.isEmpty && !name.trimmingCharacters(in: .whitespaces).isEmpty) {
+                FairleadButton(title: "Cancel") { dismiss() }
+                FairleadButton(title: "Save", prominent: issues.isEmpty && !name.trimmingCharacters(in: .whitespaces).isEmpty) {
                     save()
                 }
                 .disabled(issues.isEmpty == false || name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -120,7 +120,7 @@ struct EditorSheet: View {
             sectionTitle("Interface")
             keyField
             if let derived = WGKeys.publicKey(forPrivateKey: interfaceValue("PrivateKey")), !derived.isEmpty {
-                Text(HarborL10n.format("Public key  %@", derived))
+                Text(FairleadL10n.format("Public key  %@", derived))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.muted)
                     .textSelection(.enabled)
@@ -148,7 +148,7 @@ struct EditorSheet: View {
                     }
                 }
                 .quietField()
-                Button(HarborL10n.text(revealKey ? "Hide" : "Show")) { revealKey.toggle() }
+                Button(FairleadL10n.text(revealKey ? "Hide" : "Show")) { revealKey.toggle() }
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
@@ -163,7 +163,7 @@ struct EditorSheet: View {
     private func peerFields(_ index: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                sectionTitle(HarborL10n.format("Peer %d", document.peerIndexes.firstIndex(of: index).map { $0 + 1 } ?? 1))
+                sectionTitle(FairleadL10n.format("Peer %d", document.peerIndexes.firstIndex(of: index).map { $0 + 1 } ?? 1))
                 Spacer()
                 if document.peerIndexes.count > 1 {
                     Button("Remove peer") { document.removeSection(at: index) }

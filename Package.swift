@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "Harbor",
+    name: "Fairlead",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Harbor", targets: ["Harbor"]),
-        .executable(name: "HarborHelper", targets: ["HarborHelper"]),
+        .executable(name: "Fairlead", targets: ["Fairlead"]),
+        .executable(name: "FairleadHelper", targets: ["FairleadHelper"]),
     ],
     targets: [
         .target(
@@ -14,23 +14,23 @@ let package = Package(
             linkerSettings: [.linkedLibrary("proc")]
         ),
         .target(
-            name: "HarborCore",
+            name: "FairleadCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "HarborHelper",
-            dependencies: ["HarborCore"],
+            name: "FairleadHelper",
+            dependencies: ["FairleadCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "Harbor",
-            dependencies: ["HarborCore", "CProc"],
+            name: "Fairlead",
+            dependencies: ["FairleadCore", "CProc"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "HarborChecks",
-            dependencies: ["HarborCore"],
-            path: "Tests/HarborChecks",
+            name: "FairleadChecks",
+            dependencies: ["FairleadCore"],
+            path: "Tests/FairleadChecks",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

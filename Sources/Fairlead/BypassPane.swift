@@ -1,5 +1,5 @@
 import AppKit
-import HarborCore
+import FairleadCore
 import SwiftUI
 
 struct BypassPane: View {
@@ -75,13 +75,13 @@ struct BypassPane: View {
             } else {
                 appIntro
                 HStack {
-                    HarborButton(title: "Add app", systemImage: "plus") {
+                    FairleadButton(title: "Add app", systemImage: "plus") {
                         model.addApplications(to: tunnel.id)
                     }
                     Spacer()
                 }
                 if tunnel.appRules.isEmpty {
-                    Text("Choose an .app. Harbor remembers where it connects and keeps those addresses out of the tunnel.")
+                    Text("Choose an .app. Fairlead remembers where it connects and keeps those addresses out of the tunnel.")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.muted)
                         .padding(.vertical, 8)
@@ -133,7 +133,7 @@ struct BypassPane: View {
 
     private var lanCaption: String {
         if live.lanCIDRs.isEmpty {
-            return HarborL10n.text("The current Wi-Fi or Ethernet network. It appears after you connect.")
+            return FairleadL10n.text("The current Wi-Fi or Ethernet network. It appears after you connect.")
         }
         return live.lanCIDRs.joined(separator: ", ")
     }
@@ -197,7 +197,7 @@ struct BypassPane: View {
     }
 
     private var domainIntro: some View {
-        Text("Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires.")
+        Text("Fairlead resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires.")
             .font(.system(size: 12))
             .foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -266,7 +266,7 @@ struct BypassPane: View {
                 .buttonStyle(.plain)
             }
             if !rule.addresses.isEmpty {
-                Button(HarborL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
+                Button(FairleadL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
                     if expanded { openDomains.remove(rule.id) } else { openDomains.insert(rule.id) }
                 }
                 .buttonStyle(.plain)
@@ -290,13 +290,13 @@ struct BypassPane: View {
 
     private func domainStatus(_ rule: DomainRule) -> String {
         if !rule.addresses.isEmpty {
-            return HarborL10n.addressCount(rule.addresses.count)
+            return FairleadL10n.addressCount(rule.addresses.count)
         }
         if rule.enabled, rule.refreshAt == nil {
-            return HarborL10n.text("Resolving…")
+            return FairleadL10n.text("Resolving…")
         }
         if rule.enabled {
-            return HarborL10n.format("Could not resolve %@.", rule.name)
+            return FairleadL10n.format("Could not resolve %@.", rule.name)
         }
         return ""
     }
@@ -325,7 +325,7 @@ struct BypassPane: View {
                     Text(rule.name)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.text)
-                    Text(missing ? HarborL10n.text("App not found") : HarborL10n.addressCount(rule.learned.count))
+                    Text(missing ? FairleadL10n.text("App not found") : FairleadL10n.addressCount(rule.learned.count))
                         .font(.system(size: 11))
                         .foregroundStyle(missing ? Theme.danger : Theme.muted)
                 }
@@ -354,7 +354,7 @@ struct BypassPane: View {
                 .buttonStyle(.plain)
             }
             if !rule.learned.isEmpty {
-                Button(HarborL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
+                Button(FairleadL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
                     if expanded { openApps.remove(rule.id) } else { openApps.insert(rule.id) }
                 }
                 .buttonStyle(.plain)

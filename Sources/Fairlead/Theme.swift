@@ -1,5 +1,5 @@
 import AppKit
-import HarborCore
+import FairleadCore
 import SwiftUI
 
 enum Theme {
@@ -65,7 +65,7 @@ final class CloseProxy: NSObject, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if HarborDelegate.terminating {
+        if FairleadDelegate.terminating {
             return original?.windowShouldClose?(sender) ?? true
         }
         sender.orderOut(nil)
@@ -154,7 +154,7 @@ extension View {
     func quietField() -> some View { modifier(QuietField()) }
 }
 
-struct HarborButton: View {
+struct FairleadButton: View {
     var title: LocalizedStringKey
     var systemImage: String?
     var prominent = false
@@ -182,7 +182,7 @@ struct HarborButton: View {
 
 enum Format {
     static func bytes(_ value: UInt64) -> String {
-        let units = ["B", "KB", "MB", "GB", "TB"].map { HarborL10n.text($0) }
+        let units = ["B", "KB", "MB", "GB", "TB"].map { FairleadL10n.text($0) }
         var amount = Double(value)
         var index = 0
         while amount >= 1024, index < units.count - 1 {
@@ -195,21 +195,21 @@ enum Format {
     }
 
     static func rate(_ bytesPerSecond: Double) -> String {
-        bytes(UInt64(max(0, bytesPerSecond))) + HarborL10n.text("/s")
+        bytes(UInt64(max(0, bytesPerSecond))) + FairleadL10n.text("/s")
     }
 
     static func ago(_ date: Date?, now: Date) -> String {
-        guard let date else { return HarborL10n.text("none") }
+        guard let date else { return FairleadL10n.text("none") }
         let seconds = max(0, Int(now.timeIntervalSince(date)))
-        if seconds < 5 { return HarborL10n.text("just now") }
-        if seconds < 60 { return HarborL10n.format("%d s ago", seconds) }
-        if seconds < 3600 { return HarborL10n.format("%d min ago", seconds / 60) }
-        if seconds < 86_400 { return HarborL10n.format("%d h ago", seconds / 3600) }
-        return HarborL10n.text("a while ago")
+        if seconds < 5 { return FairleadL10n.text("just now") }
+        if seconds < 60 { return FairleadL10n.format("%d s ago", seconds) }
+        if seconds < 3600 { return FairleadL10n.format("%d min ago", seconds / 60) }
+        if seconds < 86_400 { return FairleadL10n.format("%d h ago", seconds / 3600) }
+        return FairleadL10n.text("a while ago")
     }
 
     static func host(from endpoint: String) -> String {
-        guard !endpoint.isEmpty, endpoint != "(none)" else { return HarborL10n.text("no endpoint") }
+        guard !endpoint.isEmpty, endpoint != "(none)" else { return FairleadL10n.text("no endpoint") }
         return endpoint
     }
 }

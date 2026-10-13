@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draw the Harbor icon: full-bleed plate, antialiased ring and dot."""
+"""Draw the Fairlead icon: full-bleed plate, antialiased ring and dot."""
 
 import struct
 import subprocess

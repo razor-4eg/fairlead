@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class HarborDelegate: NSObject, NSApplicationDelegate {
+final class FairleadDelegate: NSObject, NSApplicationDelegate {
     static var terminating = false
     let model = AppModel()
     private var stoppedTunnels = false
@@ -38,8 +38,8 @@ final class HarborDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct HarborApp: App {
-    @NSApplicationDelegateAdaptor(HarborDelegate.self) private var delegate
+struct FairleadApp: App {
+    @NSApplicationDelegateAdaptor(FairleadDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -102,20 +102,20 @@ struct MenuBarContent: View {
 
     var body: some View {
         if model.tunnels.isEmpty {
-            Button("Open Harbor") { showWindow() }
+            Button("Open Fairlead") { showWindow() }
         } else {
             ForEach(model.tunnels) { tunnel in
                 Button(model.menuTitle(tunnel)) { model.toggle(tunnel.id) }
             }
             Divider()
-            Button("Open Harbor") { showWindow() }
+            Button("Open Fairlead") { showWindow() }
         }
         Divider()
         Button("Settings…") {
             showWindow()
             model.showSettings = true
         }
-        Button("Quit Harbor") { NSApp.terminate(nil) }
+        Button("Quit Fairlead") { NSApp.terminate(nil) }
     }
 
     private func showWindow() {

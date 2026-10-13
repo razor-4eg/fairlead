@@ -1,28 +1,28 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" alt="Harbor">
+  <img src="docs/icon.png" width="128" alt="Fairlead">
 </p>
 
-<h1 align="center">Harbor</h1>
+<h1 align="center">Fairlead</h1>
 
-Harbor is a macOS app for WireGuard. You import a config, connect, and can keep selected traffic on your normal network.
+Fairlead is a macOS app for WireGuard. You import a config, connect, and can keep selected traffic on your normal network.
 
-WireGuard is a trademark of Jason A. Donenfeld. Harbor is an independent client.
+WireGuard is a trademark of Jason A. Donenfeld. Fairlead is an independent client.
 
 ## Install
 
-Copy `Harbor.app` to `/Applications` and open it.
+Copy `Fairlead.app` to `/Applications` and open it.
 
 From a build on the same machine:
 
 ```bash
 scripts/build-app.sh
-ditto dist/Harbor.app /Applications/Harbor.app
-open /Applications/Harbor.app
+ditto dist/Fairlead.app /Applications/Fairlead.app
+open /Applications/Fairlead.app
 ```
 
-`wireguard-go` is shipped inside the app. The first connection asks for an administrator password and installs a helper. After that the helper starts with the system. Configs and keys are stored in `~/Library/Application Support/Harbor` and are readable only by your user.
+`wireguard-go` is shipped inside the app. The first connection asks for an administrator password and installs a helper. After that the helper starts with the system. Configs and keys are stored in `~/Library/Application Support/Fairlead` and are readable only by your user.
 
-Closing the window leaves Harbor in the menu bar and removes its Dock icon. Open the window again from the menu bar. Quit from the menu bar to disconnect: Harbor removes the routes it added and restores DNS.
+Closing the window leaves Fairlead in the menu bar and removes its Dock icon. Open the window again from the menu bar. Quit from the menu bar to disconnect: Fairlead removes the routes it added and restores DNS.
 
 ## Gatekeeper
 
@@ -34,8 +34,8 @@ Since macOS Sequoia, Control-click → Open does not approve an unnotarized app.
 
 **System Settings**
 
-1. Double-click Harbor. If macOS says it cannot check the app for malicious software, click Done. Move to Trash deletes the app.
-2. Open System Settings → Privacy & Security and scroll to the bottom. Harbor is listed there as blocked.
+1. Double-click Fairlead. If macOS says it cannot check the app for malicious software, click Done. Move to Trash deletes the app.
+2. Open System Settings → Privacy & Security and scroll to the bottom. Fairlead is listed there as blocked.
 3. Click Open Anyway, then confirm and authenticate.
 
 The approval applies to that copy. Installing a new copy can bring the prompt back.
@@ -45,7 +45,7 @@ The approval applies to that copy. Installing a new copy can bring the prompt ba
 Remove quarantine before the first launch:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Harbor.app
+xattr -dr com.apple.quarantine /Applications/Fairlead.app
 ```
 
 This deletes `com.apple.quarantine` from the bundle and its contents. Do it only for an app you trust: the command skips Gatekeeper's first-launch check. If the attribute is already absent, the command reports that and the app can be opened. For a root-owned copy, prefix the same command with `sudo`.
@@ -67,9 +67,9 @@ The window shows the endpoint, address, handshake, and live down and up rates. T
 AllowedIPs in the config decide what enters the tunnel. Direct sends the rest out through the normal gateway.
 
 - An IP address or a network, with an optional note. A rule can be switched off without deleting it.
-- A domain, such as `example.com`. Harbor resolves it with the DNS of your normal network and updates the addresses when the record expires. `*.example.com` is not accepted. If the name points at a shared address, such as a CDN, that address is direct for every program.
+- A domain, such as `example.com`. Fairlead resolves it with the DNS of your normal network and updates the addresses when the record expires. `*.example.com` is not accepted. If the name points at a shared address, such as a CDN, that address is direct for every program.
 - The current Wi-Fi or Ethernet network. Those routes are added when you connect.
-- An app. Harbor remembers the addresses that app connects to. A connection that is already open moves to the direct path after it reconnects.
+- An app. Fairlead remembers the addresses that app connects to. A connection that is already open moves to the direct path after it reconnects.
 
 The routes apply to the whole system, so an address learned for one app or one domain is direct everywhere.
 
@@ -89,9 +89,9 @@ PreUp, PostUp, PreDown, PostDown, and SaveConfig are removed before the tunnel s
 
 Open Settings from the gear, the menu bar, or Command-Comma.
 
-**Open at login.** Harbor starts when you sign in. If macOS still needs approval, the switch stays on and Settings points to System Settings → General → Login Items.
+**Open at login.** Fairlead starts when you sign in. If macOS still needs approval, the switch stays on and Settings points to System Settings → General → Login Items.
 
-**Default tunnel.** Harbor selects this tunnel when it opens and connects it. Together with Open at login, the tunnel comes up after you sign in. None opens Harbor without connecting.
+**Default tunnel.** Fairlead selects this tunnel when it opens and connects it. Together with Open at login, the tunnel comes up after you sign in. None opens Fairlead without connecting.
 
 **Components.** Shows `wireguard-go` and the helper. Start helper installs the helper, or replaces it when the installed copy is older than the app, after the administrator password. Config folder opens the directory with your configs.
 
@@ -99,7 +99,7 @@ Open Settings from the gear, the menu bar, or Command-Comma.
 
 ## Language
 
-Harbor uses the system language. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included.
+Fairlead uses the system language. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included.
 
 ## Build
 
@@ -107,7 +107,7 @@ Install Xcode Command Line Tools, then:
 
 ```bash
 scripts/build-app.sh
-open dist/Harbor.app
+open dist/Fairlead.app
 ```
 
-The script writes `dist/Harbor.app` and ad-hoc signs it. `wireguard-go` comes from `Support/wireguard-go`. It is the MIT-licensed userspace implementation from the WireGuard project. The license is `Support/wireguard-go.LICENSE`.
+The script writes `dist/Fairlead.app` and ad-hoc signs it. `wireguard-go` comes from `Support/wireguard-go`. It is the MIT-licensed userspace implementation from the WireGuard project. The license is `Support/wireguard-go.LICENSE`.

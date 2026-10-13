@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import HarborCore
+import FairleadCore
 
 struct DNSBackup: Codable, Equatable {
     var service: String
@@ -61,10 +61,10 @@ func bringUserspaceUp(
     gatewayIface: String?
 ) -> UserspaceUp {
     guard let binary = ToolLocator.locate().wireguardGo else {
-        return UserspaceUp(interface: nil, error: HarborL10n.text("wireguard-go is not included in this copy of Harbor."))
+        return UserspaceUp(interface: nil, error: FairleadL10n.text("wireguard-go is not included in this copy of Fairlead."))
     }
     guard let ifaceIndex = document.interfaceIndex else {
-        return UserspaceUp(interface: nil, error: HarborL10n.text("The config has no Interface section."))
+        return UserspaceUp(interface: nil, error: FairleadL10n.text("The config has no Interface section."))
     }
     var endpoints: [Int: String] = [:]
     var hops: [EndpointHop] = []
@@ -72,7 +72,7 @@ func bringUserspaceUp(
         let original = document.peerEndpoint(peer)
         guard let host = EndpointParse.host(from: original), !host.isEmpty else { continue }
         guard let ip = resolveHost(host), let socket = WireGuardUAPI.socketEndpoint(ip: ip, original: original) else {
-            return UserspaceUp(interface: nil, error: HarborL10n.text("Could not resolve the endpoint."))
+            return UserspaceUp(interface: nil, error: FairleadL10n.text("Could not resolve the endpoint."))
         }
         endpoints[peer] = socket
         let family = ip.contains(":") ? "inet6" : "inet"
@@ -82,7 +82,7 @@ func bringUserspaceUp(
         }
     }
     guard let message = WireGuardUAPI.setMessage(document: document, endpoints: endpoints) else {
-        return UserspaceUp(interface: nil, error: HarborL10n.text("The config is damaged."))
+        return UserspaceUp(interface: nil, error: FairleadL10n.text("The config is damaged."))
     }
     if let error = startUserspace(slug: slug, binary: binary) {
         return UserspaceUp(interface: nil, error: error)
@@ -90,13 +90,13 @@ func bringUserspaceUp(
     guard let real = waitForUserspace(slug: slug) else {
         let detail = userspaceLogTail()
         abortUserspace(slug: slug, routes: [], dns: [])
-        let base = HarborL10n.text("wireguard-go did not create an interface.")
+        let base = FairleadL10n.text("wireguard-go did not create an interface.")
         let error = detail.isEmpty ? base : base + "\n" + detail
         return UserspaceUp(interface: nil, error: error)
     }
     guard let response = uapiExchange(iface: real, message: message), response.contains("errno=0") else {
         abortUserspace(slug: slug, routes: [], dns: [])
-        return UserspaceUp(interface: nil, error: HarborL10n.text("wireguard-go did not create an interface."))
+        return UserspaceUp(interface: nil, error: FairleadL10n.text("wireguard-go did not create an interface."))
     }
     let addresses = document.interfaceAddresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
     for address in addresses where !address.isEmpty {
@@ -110,7 +110,7 @@ func bringUserspaceUp(
         if result.code != 0 {
             abortUserspace(slug: slug, routes: [], dns: [])
             let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-            return UserspaceUp(interface: nil, error: detail.isEmpty ? HarborL10n.text("wireguard-go did not create an interface.") : detail)
+            return UserspaceUp(interface: nil, error: detail.isEmpty ? FairleadL10n.text("wireguard-go did not create an interface.") : detail)
         }
     }
     let mtu = tunnelMTU(document: document, iface: gatewayIface)
@@ -132,12 +132,12 @@ func bringUserspaceUp(
             if needsV4 && hops.first(where: { $0.family == "inet" }) == nil && endpoints.values.contains(where: { !$0.contains("[") }) {
                 abortUserspace(slug: slug, routes: [], dns: [])
                 let sample = endpoints.values.first ?? ""
-                return UserspaceUp(interface: nil, error: HarborL10n.format("No gateway for %@.", sample))
+                return UserspaceUp(interface: nil, error: FairleadL10n.format("No gateway for %@.", sample))
             }
             if needsV6 && hops.first(where: { $0.family == "inet6" }) == nil && endpoints.values.contains(where: { $0.hasPrefix("[") }) {
                 abortUserspace(slug: slug, routes: [], dns: [])
                 let sample = endpoints.values.first ?? ""
-                return UserspaceUp(interface: nil, error: HarborL10n.format("No gateway for %@.", sample))
+                return UserspaceUp(interface: nil, error: FairleadL10n.format("No gateway for %@.", sample))
             }
         }
         for route in destinations {
@@ -147,7 +147,7 @@ func bringUserspaceUp(
             } else {
                 abortUserspace(slug: slug, routes: stored, dns: [])
                 let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-                return UserspaceUp(interface: nil, error: detail.isEmpty ? HarborL10n.format("Could not add route %@.", route.destination) : detail)
+                return UserspaceUp(interface: nil, error: detail.isEmpty ? FairleadL10n.format("Could not add route %@.", route.destination) : detail)
             }
         }
         for hop in hops {
@@ -170,7 +170,7 @@ func bringUserspaceUp(
     )
     saveTunnelMeta(slug: slug, meta)
     startMonitor(meta)
-    fputs("harbor-helper: tunnel \(real) up\n", stderr)
+    fputs("fairlead-helper: tunnel \(real) up\n", stderr)
     return UserspaceUp(interface: real, error: nil)
 }
 
@@ -185,7 +185,7 @@ func bringUserspaceDown(slug: String, interfaceName: String?) {
     stopUserspaceProcess()
     let name = meta?.interfaceName ?? interfaceName
     if let name, name.allSatisfy({ $0.isLetter || $0.isNumber }) {
-        unlink("\(HarborPaths.wireguardRun)/\(name).sock")
+        unlink("\(FairleadPaths.wireguardRun)/\(name).sock")
     }
     removeInterfaceFiles(slug: slug)
     removeTunnelMeta(slug: slug)
@@ -202,15 +202,15 @@ private func abortUserspace(slug: String, routes: [String], dns: [DNSBackup]) {
 
 private func startUserspace(slug: String, binary: String) -> String? {
     stopUserspaceProcess()
-    try? FileManager.default.createDirectory(atPath: HarborPaths.wireguardRun, withIntermediateDirectories: true)
-    let nameFile = "\(HarborPaths.wireguardRun)/\(slug).name"
+    try? FileManager.default.createDirectory(atPath: FairleadPaths.wireguardRun, withIntermediateDirectories: true)
+    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
     unlink(nameFile)
-    let logPath = "/var/log/harbor-wireguard-go.log"
+    let logPath = "/var/log/fairlead-wireguard-go.log"
     if !FileManager.default.fileExists(atPath: logPath) {
         FileManager.default.createFile(atPath: logPath, contents: nil)
     }
     guard let log = FileHandle(forWritingAtPath: logPath) else {
-        return HarborL10n.text("wireguard-go did not create an interface.")
+        return FairleadL10n.text("wireguard-go did not create an interface.")
     }
     log.seekToEndOfFile()
     let process = Process()
@@ -232,7 +232,7 @@ private func startUserspace(slug: String, binary: String) -> String? {
     }
     userspaceProcess = process
     userspaceLog = log
-    try? "\(process.processIdentifier)\n".write(toFile: "/var/run/harbor/wireguard-go.pid", atomically: true, encoding: .utf8)
+    try? "\(process.processIdentifier)\n".write(toFile: "/var/run/fairlead/wireguard-go.pid", atomically: true, encoding: .utf8)
     return nil
 }
 
@@ -245,7 +245,7 @@ private func stopUserspaceProcess() {
     userspaceProcess = nil
     try? userspaceLog?.close()
     userspaceLog = nil
-    guard let text = try? String(contentsOfFile: "/var/run/harbor/wireguard-go.pid", encoding: .utf8),
+    guard let text = try? String(contentsOfFile: "/var/run/fairlead/wireguard-go.pid", encoding: .utf8),
           let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
           pid > 1, pid != tracked else { return }
     let listed = run(["/bin/ps", "-p", "\(pid)", "-o", "command="])
@@ -255,12 +255,12 @@ private func stopUserspaceProcess() {
 }
 
 private func waitForUserspace(slug: String) -> String? {
-    let nameFile = "\(HarborPaths.wireguardRun)/\(slug).name"
+    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
     for _ in 0..<100 {
         if let process = userspaceProcess, !process.isRunning { return nil }
         if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
             let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let sock = "\(HarborPaths.wireguardRun)/\(name).sock"
+            let sock = "\(FairleadPaths.wireguardRun)/\(name).sock"
             if !name.isEmpty,
                name.allSatisfy({ $0.isLetter || $0.isNumber }),
                FileManager.default.fileExists(atPath: sock),
@@ -274,7 +274,7 @@ private func waitForUserspace(slug: String) -> String? {
 }
 
 private func userspaceLogTail() -> String {
-    guard let data = FileManager.default.contents(atPath: "/var/log/harbor-wireguard-go.log"),
+    guard let data = FileManager.default.contents(atPath: "/var/log/fairlead-wireguard-go.log"),
           let text = String(data: data, encoding: .utf8) else { return "" }
     return text.split(separator: "\n").suffix(8).joined(separator: "\n")
 }
@@ -288,7 +288,7 @@ private func uapiExchange(iface: String, message: String) -> String? {
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
-    let path = "\(HarborPaths.wireguardRun)/\(iface).sock"
+    let path = "\(FairleadPaths.wireguardRun)/\(iface).sock"
     guard SocketFrame.setUnixPath(path, into: &addr) else { return nil }
     let length = socklen_t(MemoryLayout<sockaddr_un>.size)
     let connected = withUnsafePointer(to: &addr) { pointer in
@@ -455,7 +455,7 @@ private func deleteStoredRoute(_ stored: String) {
 }
 
 private func metaURL(_ slug: String) -> URL {
-    URL(fileURLWithPath: HarborPaths.directory).appendingPathComponent("\(slug).meta.json")
+    URL(fileURLWithPath: FairleadPaths.directory).appendingPathComponent("\(slug).meta.json")
 }
 
 private func loadTunnelMeta(slug: String) -> TunnelMeta? {

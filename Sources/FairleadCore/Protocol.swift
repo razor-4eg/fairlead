@@ -115,7 +115,7 @@ public enum RPCFrame {
 public enum ToolLocator {
     public static func locate() -> ToolReport {
         var wireguard = [
-            "/usr/local/libexec/harbor-wireguard-go",
+            "/usr/local/libexec/fairlead-wireguard-go",
             "/opt/homebrew/bin/wireguard-go",
             "/usr/local/bin/wireguard-go",
         ]

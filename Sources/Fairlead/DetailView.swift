@@ -1,4 +1,4 @@
-import HarborCore
+import FairleadCore
 import SwiftUI
 
 struct DetailView: View {
@@ -27,8 +27,8 @@ struct DetailView: View {
                 .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
             HStack(spacing: 8) {
-                HarborButton(title: "Create", prominent: true) { model.createTunnel() }
-                HarborButton(title: "Import") { model.importPanel() }
+                FairleadButton(title: "Create", prominent: true) { model.createTunnel() }
+                FairleadButton(title: "Import") { model.importPanel() }
             }
             .padding(.top, 6)
         }
@@ -63,7 +63,7 @@ struct DetailView: View {
                             .foregroundStyle(Theme.faint)
                     }
                     Spacer()
-                    HarborButton(title: "Edit") { model.editing = tunnel }
+                    FairleadButton(title: "Edit") { model.editing = tunnel }
                     Menu {
                         Button("Export…") { model.export(tunnel) }
                         Button("Delete", role: .destructive) { pendingDelete = tunnel }
@@ -88,7 +88,7 @@ struct DetailView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.muted)
                         if let iface = live.realInterface, live.phase == .connected {
-                            Text(HarborL10n.format("%@  ·  gateway %@", iface, live.gateway ?? "—"))
+                            Text(FairleadL10n.format("%@  ·  gateway %@", iface, live.gateway ?? "—"))
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Theme.faint)
                         }
@@ -115,33 +115,33 @@ struct DetailView: View {
 
     private var statusMessage: String? {
         if model.tools.wireguardGo == nil {
-            return HarborL10n.text("wireguard-go is not included in this copy of Harbor.")
+            return FairleadL10n.text("wireguard-go is not included in this copy of Fairlead.")
         }
         if !model.helperOnline {
-            return HarborL10n.text("The system helper is not running. A tunnel cannot start without it.")
+            return FairleadL10n.text("The system helper is not running. A tunnel cannot start without it.")
         }
         return nil
     }
 
     private func statusTitle(_ phase: Phase) -> String {
         switch phase {
-        case .idle: return HarborL10n.text("Off")
-        case .connecting: return HarborL10n.text("Connecting")
-        case .connected: return HarborL10n.text("Connected")
-        case .disconnecting: return HarborL10n.text("Disconnecting")
+        case .idle: return FairleadL10n.text("Off")
+        case .connecting: return FairleadL10n.text("Connecting")
+        case .connected: return FairleadL10n.text("Connected")
+        case .disconnecting: return FairleadL10n.text("Disconnecting")
         }
     }
 
     private func statusDetail(_ live: LiveTunnel) -> String {
         switch live.phase {
         case .connected:
-            return HarborL10n.format("Handshake %@", Format.ago(live.handshake, now: model.now))
+            return FairleadL10n.format("Handshake %@", Format.ago(live.handshake, now: model.now))
         case .connecting:
-            return HarborL10n.text("Bringing up the interface and routes")
+            return FairleadL10n.text("Bringing up the interface and routes")
         case .disconnecting:
-            return HarborL10n.text("Restoring the previous routes")
+            return FairleadL10n.text("Restoring the previous routes")
         case .idle:
-            return HarborL10n.text("Traffic is bypassing WireGuard")
+            return FairleadL10n.text("Traffic is bypassing WireGuard")
         }
     }
 }
@@ -181,7 +181,7 @@ struct PowerButton: View {
             spin = isBusy
         }
         .animation(busy ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default, value: spin)
-        .help(Text(HarborL10n.text(connected ? "Disconnect" : "Connect")))
+        .help(Text(FairleadL10n.text(connected ? "Disconnect" : "Connect")))
     }
 }
 
@@ -191,7 +191,7 @@ struct StatCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(HarborL10n.text(caption).uppercased())
+            Text(FairleadL10n.text(caption).uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(Theme.faint)
@@ -227,7 +227,7 @@ struct Notice: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button(HarborL10n.text(tone == .danger ? "Close" : "Set up")) { action() }
+            Button(FairleadL10n.text(tone == .danger ? "Close" : "Set up")) { action() }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(tone == .danger ? Theme.danger : Theme.accent)

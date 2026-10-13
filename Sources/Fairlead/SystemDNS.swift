@@ -1,5 +1,5 @@
 import Foundation
-import HarborCore
+import FairleadCore
 
 enum SystemDNS {
     static func current() -> ScutilDNS.Snapshot {

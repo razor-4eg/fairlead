@@ -238,45 +238,45 @@ public enum ConfigCheck {
     public static func issues(in document: WGDocument) -> [ConfigIssue] {
         var issues: [ConfigIssue] = []
         guard let iface = document.interfaceIndex else {
-            return [ConfigIssue(HarborL10n.text("The config has no Interface section."))]
+            return [ConfigIssue(FairleadL10n.text("The config has no Interface section."))]
         }
         let privateKey = document.value(section: iface, key: "PrivateKey")
         if !WGKeys.isKey(privateKey) {
-            issues.append(ConfigIssue(HarborL10n.text("The private key must be a WireGuard key.")))
+            issues.append(ConfigIssue(FairleadL10n.text("The private key must be a WireGuard key.")))
         }
         let addresses = document.interfaceAddresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         if addresses.isEmpty || addresses.contains(where: { CIDR.parse(String($0)) == nil }) {
-            issues.append(ConfigIssue(HarborL10n.text("Set an interface address, for example 10.8.0.2/32.")))
+            issues.append(ConfigIssue(FairleadL10n.text("Set an interface address, for example 10.8.0.2/32.")))
         }
         if let mtu = Int(document.interfaceMTU), !(1280...1500).contains(mtu), !document.interfaceMTU.isEmpty {
-            issues.append(ConfigIssue(HarborL10n.text("MTU is usually between 1280 and 1500.")))
+            issues.append(ConfigIssue(FairleadL10n.text("MTU is usually between 1280 and 1500.")))
         } else if !document.interfaceMTU.isEmpty && Int(document.interfaceMTU) == nil {
-            issues.append(ConfigIssue(HarborL10n.text("MTU must be a number.")))
+            issues.append(ConfigIssue(FairleadL10n.text("MTU must be a number.")))
         }
         let peers = document.peerIndexes
         if peers.isEmpty {
-            issues.append(ConfigIssue(HarborL10n.text("Add at least one Peer.")))
+            issues.append(ConfigIssue(FairleadL10n.text("Add at least one Peer.")))
         }
         for peer in peers {
             if !WGKeys.isKey(document.peerPublicKey(peer)) {
-                issues.append(ConfigIssue(HarborL10n.text("A peer has an invalid public key.")))
+                issues.append(ConfigIssue(FairleadL10n.text("A peer has an invalid public key.")))
             }
             let psk = document.peerPreshared(peer)
             if !psk.isEmpty && !WGKeys.isKey(psk) {
-                issues.append(ConfigIssue(HarborL10n.text("PresharedKey is set, but it is not a WireGuard key.")))
+                issues.append(ConfigIssue(FairleadL10n.text("PresharedKey is set, but it is not a WireGuard key.")))
             }
             if !validEndpoint(document.peerEndpoint(peer)) {
-                issues.append(ConfigIssue(HarborL10n.text("Endpoint must look like host:port.")))
+                issues.append(ConfigIssue(FairleadL10n.text("Endpoint must look like host:port.")))
             }
             let allowed = document.peerAllowedIPs(peer).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             if allowed.isEmpty || allowed.contains(where: { CIDR.parse(String($0)) == nil }) {
-                issues.append(ConfigIssue(HarborL10n.text("AllowedIPs must list networks, for example 0.0.0.0/0.")))
+                issues.append(ConfigIssue(FairleadL10n.text("AllowedIPs must list networks, for example 0.0.0.0/0.")))
             }
             let keep = document.peerKeepalive(peer)
             if !keep.isEmpty, let value = Int(keep), !(0...65535).contains(value) {
-                issues.append(ConfigIssue(HarborL10n.text("PersistentKeepalive is out of range.")))
+                issues.append(ConfigIssue(FairleadL10n.text("PersistentKeepalive is out of range.")))
             } else if !keep.isEmpty && Int(keep) == nil {
-                issues.append(ConfigIssue(HarborL10n.text("PersistentKeepalive must be a number.")))
+                issues.append(ConfigIssue(FairleadL10n.text("PersistentKeepalive must be a number.")))
             }
         }
         return issues

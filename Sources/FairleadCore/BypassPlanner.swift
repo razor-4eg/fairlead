@@ -23,16 +23,16 @@ public enum BypassPlanner {
 
         func take(_ raw: String, origin: String) {
             guard let cidr = CIDR.parse(raw) else {
-                warnings.append(HarborL10n.format("Skipped invalid address %@.", raw))
+                warnings.append(FairleadL10n.format("Skipped invalid address %@.", raw))
                 return
             }
             if cidr.prefix == 0 {
-                warnings.append(HarborL10n.format("Address %@ is too broad and would disable the whole tunnel.", raw))
+                warnings.append(FairleadL10n.format("Address %@ is too broad and would disable the whole tunnel.", raw))
                 return
             }
             let endpointIPs = input.endpoints.compactMap(IPAddress.parse)
             if endpointIPs.contains(where: { cidr.contains($0) }) {
-                warnings.append(HarborL10n.format("%@ overlaps the WireGuard server and stays in the tunnel.", origin))
+                warnings.append(FairleadL10n.format("%@ overlaps the WireGuard server and stays in the tunnel.", origin))
                 return
             }
             cidrs.append(cidr)
@@ -46,7 +46,7 @@ public enum BypassPlanner {
         }
         if input.excludeLAN {
             for lan in input.lan {
-                take(lan, origin: HarborL10n.format("Local network %@", lan))
+                take(lan, origin: FairleadL10n.format("Local network %@", lan))
             }
         }
 

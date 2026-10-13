@@ -1,5 +1,5 @@
 import Foundation
-import HarborCore
+import FairleadCore
 
 struct IPRule: Codable, Identifiable, Equatable {
     var id: UUID
@@ -128,7 +128,7 @@ struct Tunnel: Codable, Identifiable, Equatable {
 
     static func makeSlug() -> String {
         let hex = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        return "hbr" + hex.prefix(8)
+        return "fld" + hex.prefix(8)
     }
 
     static func blank(name: String) -> Tunnel {
@@ -141,14 +141,14 @@ struct Tunnel: Codable, Identifiable, Equatable {
 
     var endpointLabel: String {
         let peers = document.peerIndexes
-        guard let peer = peers.first else { return HarborL10n.text("no peer") }
+        guard let peer = peers.first else { return FairleadL10n.text("no peer") }
         let endpoint = document.peerEndpoint(peer)
-        return endpoint.isEmpty ? HarborL10n.text("endpoint not set") : endpoint
+        return endpoint.isEmpty ? FairleadL10n.text("endpoint not set") : endpoint
     }
 
     var addressLabel: String {
         let addresses = document.interfaceAddresses
-        return addresses.isEmpty ? HarborL10n.text("address not set") : addresses
+        return addresses.isEmpty ? FairleadL10n.text("address not set") : addresses
     }
 
     func directCIDRs() -> [String] {

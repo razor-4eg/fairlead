@@ -1,9 +1,9 @@
 import CryptoKit
 import Foundation
-import HarborCore
+import FairleadCore
 
 enum HelperInstaller {
-    static let stampPath = "/usr/local/libexec/harbor-helper.stamp"
+    static let stampPath = "/usr/local/libexec/fairlead-helper.stamp"
 
     /// The helper left running by launchd can be older than the app. Codesign changes the installed bytes, so the installer records a hash of the copy inside the app.
     static func needsUpdate() -> Bool {
@@ -21,32 +21,34 @@ enum HelperInstaller {
 
     static func binaryURL() -> URL? {
         let candidates = [
-            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("HarborHelper"),
+            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("FairleadHelper"),
             URL(fileURLWithPath: CommandLine.arguments[0])
                 .resolvingSymlinksInPath()
                 .deletingLastPathComponent()
-                .appendingPathComponent("HarborHelper"),
+                .appendingPathComponent("FairleadHelper"),
         ]
         return candidates.compactMap { $0 }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
     static func install() async -> String? {
         guard let binary = binaryURL() else {
-            return HarborL10n.text("HarborHelper is missing next to Harbor. Build the app with scripts/build-app.sh.")
+            return FairleadL10n.text("FairleadHelper is missing next to Fairlead. Build the app with scripts/build-app.sh.")
         }
         let script = """
         #!/bin/bash
         set -euo pipefail
         SRC=\(shellQuote(binary.path))
         USER_NAME=\(shellQuote(NSUserName()))
-        PLIST=/Library/LaunchDaemons/com.harbor.helper.plist
-        LABEL=com.harbor.helper
-        LOG=/var/log/harbor-helper.log
-        mkdir -p /usr/local/libexec /var/run/harbor
+        PLIST=/Library/LaunchDaemons/com.fairlead.helper.plist
+        LABEL=com.fairlead.helper
+        LOG=/var/log/fairlead-helper.log
+        mkdir -p /usr/local/libexec /var/run/fairlead
         # The password dialog's process is killed by taskgated if it execs this
         # ad-hoc binary (SIGKILL, "Code Signature Invalid"). launchd starts it
         # outside that session, which is allowed.
         launchctl bootout system/"$LABEL" >/dev/null 2>&1 || true
+        launchctl bootout system/com.harbor.helper >/dev/null 2>&1 || true
+        rm -f /Library/LaunchDaemons/com.harbor.helper.plist
         if [[ -f /var/run/harbor/helper.pid ]]; then
           old="$(cat /var/run/harbor/helper.pid || true)"
           if [[ -n "$old" ]]; then
@@ -54,20 +56,27 @@ enum HelperInstaller {
           fi
         fi
         killall harbor-helper 2>/dev/null || true
+        if [[ -f /var/run/fairlead/helper.pid ]]; then
+          old="$(cat /var/run/fairlead/helper.pid || true)"
+          if [[ -n "$old" ]]; then
+            kill "$old" 2>/dev/null || true
+          fi
+        fi
+        killall fairlead-helper 2>/dev/null || true
         sleep 0.3
-        killall -9 harbor-helper 2>/dev/null || true
-        cp "$SRC" /usr/local/libexec/harbor-helper
-        chmod 755 /usr/local/libexec/harbor-helper
-        codesign --force --sign - --identifier "$LABEL" /usr/local/libexec/harbor-helper
+        killall -9 fairlead-helper harbor-helper 2>/dev/null || true
+        cp "$SRC" /usr/local/libexec/fairlead-helper
+        chmod 755 /usr/local/libexec/fairlead-helper
+        codesign --force --sign - --identifier "$LABEL" /usr/local/libexec/fairlead-helper
         GO_SRC="$(dirname "$SRC")/wireguard-go"
         if [[ -x "$GO_SRC" ]]; then
-          cp "$GO_SRC" /usr/local/libexec/harbor-wireguard-go
-          chmod 755 /usr/local/libexec/harbor-wireguard-go
+          cp "$GO_SRC" /usr/local/libexec/fairlead-wireguard-go
+          chmod 755 /usr/local/libexec/fairlead-wireguard-go
         fi
-        shasum -a 256 "$SRC" | awk '{print $1}' > /usr/local/libexec/harbor-helper.stamp
-        chmod 644 /usr/local/libexec/harbor-helper.stamp
+        shasum -a 256 "$SRC" | awk '{print $1}' > /usr/local/libexec/fairlead-helper.stamp
+        chmod 644 /usr/local/libexec/fairlead-helper.stamp
         RES="$(cd "$(dirname "$SRC")/../Resources" && pwd)"
-        LOC=/usr/local/libexec/HarborLocalizations.bundle
+        LOC=/usr/local/libexec/FairleadLocalizations.bundle
         rm -rf "$LOC"
         mkdir -p "$LOC/Contents/Resources"
         for loc in "$RES"/*.lproj; do
@@ -78,14 +87,14 @@ enum HelperInstaller {
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0"><dict>
           <key>CFBundlePackageType</key><string>BNDL</string>
-          <key>CFBundleIdentifier</key><string>com.harbor.localizations</string>
+          <key>CFBundleIdentifier</key><string>com.fairlead.localizations</string>
           <key>CFBundleDevelopmentRegion</key><string>en</string>
-          <key>CFBundleName</key><string>HarborLocalizations</string>
+          <key>CFBundleName</key><string>FairleadLocalizations</string>
         </dict></plist>
         PLIST
         chown -R root:wheel "$LOC"
         chmod 755 "$LOC" "$LOC/Contents" "$LOC/Contents/Resources"
-        rm -f /var/run/harbor/harbor.sock
+        rm -f /var/run/fairlead/fairlead.sock
         ESCAPED="$USER_NAME"
         ESCAPED="${ESCAPED//&/&amp;}"
         ESCAPED="${ESCAPED//</&lt;}"
@@ -99,7 +108,7 @@ enum HelperInstaller {
           <string>$LABEL</string>
           <key>ProgramArguments</key>
           <array>
-            <string>/usr/local/libexec/harbor-helper</string>
+            <string>/usr/local/libexec/fairlead-helper</string>
             <string>--user</string>
             <string>$ESCAPED</string>
           </array>
@@ -117,26 +126,26 @@ enum HelperInstaller {
         echo "---- $(date) ----" >> "$LOG"
         launchctl enable system/"$LABEL" >/dev/null 2>&1 || true
         if ! launchctl bootstrap system "$PLIST" >>"$LOG" 2>&1; then
-          echo \(shellQuote(HarborL10n.text("launchd could not start the helper."))) >&2
+          echo \(shellQuote(FairleadL10n.text("launchd could not start the helper."))) >&2
           tail -n 20 "$LOG" >&2 || true
           exit 1
         fi
         for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
-          if [[ -S /var/run/harbor/harbor.sock ]]; then
+          if [[ -S /var/run/fairlead/fairlead.sock ]]; then
             exit 0
           fi
           sleep 0.15
         done
-        echo \(shellQuote(HarborL10n.text("The helper did not open a socket. Last log lines:"))) >&2
+        echo \(shellQuote(FairleadL10n.text("The helper did not open a socket. Last log lines:"))) >&2
         tail -n 20 "$LOG" >&2 || true
         exit 1
         """
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("harbor-install-\(UUID().uuidString).sh")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("fairlead-install-\(UUID().uuidString).sh")
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
         } catch {
-            return HarborL10n.text("Could not prepare the installation.")
+            return FairleadL10n.text("Could not prepare the installation.")
         }
         defer { try? FileManager.default.removeItem(at: file) }
 
@@ -163,7 +172,7 @@ enum HelperInstaller {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if text?.isEmpty != false {
-                return HarborL10n.text("The system did not confirm that the helper started.")
+                return FairleadL10n.text("The system did not confirm that the helper started.")
             }
             return text
         }.value
