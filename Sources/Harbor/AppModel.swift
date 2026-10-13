@@ -14,7 +14,6 @@ final class AppModel: ObservableObject {
     @Published var banner: String?
     @Published var now = Date()
     @Published var query = ""
-    @Published var installingTools = false
     @Published var toolLog = ""
     @Published var editing: Tunnel?
     @Published var showSettings = false
@@ -404,23 +403,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func installTools() async {
-        let report = tools.brew == nil ? ToolLocator.locate() : tools
-        guard let brew = report.brew else {
-            banner = HarborL10n.text("Homebrew was not found. Install it, then run brew install wireguard-tools.")
-            return
-        }
-        installingTools = true
-        toolLog = HarborL10n.text("Installing wireguard-tools…")
-        let output = await HelperInstaller.brewInstall(brew: brew)
-        toolLog = output
-        installingTools = false
-        tools = ToolLocator.locate()
-        if tools.ready {
-            banner = nil
-        }
-    }
-
     func openConfigFolder() {
         NSWorkspace.shared.open(store.folder)
     }
@@ -514,7 +496,7 @@ final class AppModel: ObservableObject {
         let response = await rpc(RPCRequest(op: "status"), timeout: 8)
         guard let response, response.ok else {
             helperOnline = false
-            if tools.wg == nil {
+            if tools.wireguardGo == nil {
                 tools = ToolLocator.locate()
             }
             return

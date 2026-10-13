@@ -169,3 +169,7 @@
 "Harbor selects this tunnel when it opens and connects it." = "Harbor 打开时会选中这条隧道并连接它。";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Harbor." = "macOS 还需要你的允许。请打开“系统设置”→“通用”→“登录项”，并允许 Harbor。";
 "The running helper is an older copy. Harbor will replace it." = "正在运行的助手是旧版本。Harbor 会替换它。";
+"wireguard-go is not included in this copy of Harbor." = "此 Harbor 副本未包含 wireguard-go。";
+"Could not resolve the endpoint." = "无法解析端点地址。";
+"wireguard-go did not create an interface." = "wireguard-go 没有创建接口。";
+"wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go 已包含在应用中。助手会询问一次管理员密码，然后自行建立隧道和直连路由。带密钥的配置只保存在这台 Mac 上。";

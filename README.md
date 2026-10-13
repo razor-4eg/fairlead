@@ -44,7 +44,7 @@ Open Settings from the gear, the menu bar, or Command-Comma.
 
 **Default tunnel.** Harbor selects this tunnel when it opens and connects it. Together with Open at login, that tunnel comes up after you sign in. Choose None to open Harbor without connecting.
 
-**Components.** `wg`, `wg-quick`, `wireguard-go`, and the helper are listed in the same window. Install the tools or start the helper from here. The helper asks for an administrator password once, then brings tunnels and routes up itself. If the installed copy is older than the app, Harbor asks once and replaces it. Configs and keys stay in `~/Library/Application Support/Harbor`, readable only by you. That folder opens from Settings.
+**Components.** `wireguard-go` is included in Harbor. The helper is listed in the same window and starts from here. It asks for an administrator password once, then brings tunnels and routes up itself. If the installed copy is older than the app, Harbor asks once and replaces it. Configs and keys stay in `~/Library/Application Support/Harbor`, readable only by you. That folder opens from Settings.
 
 ![Settings, including the components Harbor needs](docs/screenshots/settings.png)
 
@@ -54,12 +54,11 @@ Harbor follows the system language. English, Russian, German, Spanish, French, P
 
 ## Build
 
-You need Xcode Command Line Tools and the Homebrew formula `wireguard-tools` (`wg`, `wg-quick`, and `wireguard-go`):
+You need Xcode Command Line Tools. Harbor includes `wireguard-go`, so running it does not need Homebrew, `wg`, or `wg-quick`.
 
 ```bash
-brew install wireguard-tools
 scripts/build-app.sh
 open dist/Harbor.app
 ```
 
-The script builds `dist/Harbor.app`.
+The script builds `dist/Harbor.app`. `wireguard-go` is the MIT-licensed userspace implementation from WireGuard; its license is `Support/wireguard-go.LICENSE`.

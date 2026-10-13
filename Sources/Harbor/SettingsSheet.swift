@@ -93,11 +93,9 @@ struct SettingsSheet: View {
             Text("Components")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.text)
-            toolRow("wg", path: model.tools.wg)
-            toolRow("wg-quick", path: model.tools.wgQuick)
             toolRow("wireguard-go", path: model.tools.wireguardGo)
             toolRow("Helper", path: model.helperOnline ? HarborPaths.socket : nil)
-            Text("The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac.")
+            Text("wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -113,11 +111,6 @@ struct SettingsSheet: View {
             HStack {
                 HarborButton(title: "Config folder") { model.openConfigFolder() }
                 Spacer()
-                HarborButton(title: LocalizedStringKey(model.installingTools ? "Installing…" : "Install WireGuard")) {
-                    Task { await model.installTools() }
-                }
-                .disabled(model.installingTools || model.tools.ready)
-                .opacity(model.tools.ready ? 0.45 : 1)
                 HarborButton(title: "Start helper", prominent: true) {
                     Task { await model.installHelper() }
                 }
@@ -139,7 +132,7 @@ struct SettingsSheet: View {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.text)
-                .frame(width: 110, alignment: .leading)
+                .frame(width: 120, alignment: .leading)
             Text(path ?? HarborL10n.text("not found"))
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Theme.muted)

@@ -59,6 +59,11 @@ enum HelperInstaller {
         cp "$SRC" /usr/local/libexec/harbor-helper
         chmod 755 /usr/local/libexec/harbor-helper
         codesign --force --sign - --identifier "$LABEL" /usr/local/libexec/harbor-helper
+        GO_SRC="$(dirname "$SRC")/wireguard-go"
+        if [[ -x "$GO_SRC" ]]; then
+          cp "$GO_SRC" /usr/local/libexec/harbor-wireguard-go
+          chmod 755 /usr/local/libexec/harbor-wireguard-go
+        fi
         shasum -a 256 "$SRC" | awk '{print $1}' > /usr/local/libexec/harbor-helper.stamp
         chmod 644 /usr/local/libexec/harbor-helper.stamp
         RES="$(cd "$(dirname "$SRC")/../Resources" && pwd)"
@@ -138,29 +143,6 @@ enum HelperInstaller {
         let escaped = file.path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let source = "do shell script \"/bin/bash \\\"\(escaped)\\\"\" with administrator privileges"
         return await runOSA(source)
-    }
-
-    static func brewInstall(brew: String) async -> String {
-        await Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: brew)
-            process.arguments = ["install", "wireguard-tools"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            do {
-                try process.run()
-            } catch {
-                return error.localizedDescription
-            }
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
-            if process.terminationStatus == 0 {
-                return text.isEmpty ? HarborL10n.text("wireguard-tools installed.") : text
-            }
-            return text.isEmpty ? HarborL10n.format("brew exited with code %d.", Int(process.terminationStatus)) : text
-        }.value
     }
 
     private static func runOSA(_ source: String) async -> String? {

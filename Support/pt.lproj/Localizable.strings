@@ -169,3 +169,7 @@
 "Harbor selects this tunnel when it opens and connects it." = "O Harbor escolhe este túnel ao abrir e liga-o.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Harbor." = "O macOS ainda precisa de autorização. Abra Definições do Sistema → Geral → Itens de Início e permita o Harbor.";
 "The running helper is an older copy. Harbor will replace it." = "O assistente em execução é uma cópia antiga. O Harbor vai substituí-lo.";
+"wireguard-go is not included in this copy of Harbor." = "Esta cópia do Harbor não inclui o wireguard-go.";
+"Could not resolve the endpoint." = "Não foi possível resolver o endpoint.";
+"wireguard-go did not create an interface." = "O wireguard-go não criou uma interface.";
+"wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "O wireguard-go está incluído. O assistente pede uma vez a palavra-passe de administrador e depois levanta sozinho os túneis e as rotas diretas. As configurações com chaves ficam neste Mac.";

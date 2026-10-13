@@ -33,8 +33,6 @@ struct CommandResult {
     var blob: String { out + (err.isEmpty ? "" : "\n" + err) }
 }
 
-private let userspaceShimPath = "/usr/local/libexec/harbor-wg-go"
-private let userspaceEnvPath = "/usr/local/libexec/harbor-wg-env"
 private let stateLock = NSLock()
 private var state = HelperState(tunnels: [:])
 
@@ -68,18 +66,13 @@ private func username() -> String {
     fail(HarborL10n.text("--user is required."))
 }
 
-private func run(_ arguments: [String]) -> CommandResult {
+func run(_ arguments: [String]) -> CommandResult {
     autoreleasepool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: arguments[0])
         process.arguments = Array(arguments.dropFirst())
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        if arguments[0].contains("wg-quick") {
-            environment["WG_QUICK_USERSPACE_IMPLEMENTATION"] = userspaceShimPath
-            environment["HARBOR_MANAGED"] = "1"
-            environment["BASH_ENV"] = userspaceEnvPath
-        }
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
         let stdout = Pipe()
@@ -176,101 +169,20 @@ private func captureNetwork() -> (v4: (String, String)?, v6: (String, String)?, 
     return (v4, v6, lan)
 }
 
-private func interfaceExists(_ name: String) -> Bool {
+func interfaceExists(_ name: String) -> Bool {
     guard !name.isEmpty else { return false }
     let result = run(["/sbin/ifconfig", name])
     return result.code == 0 && result.out.contains("flags=")
 }
 
 private func endpointIPs(realInterface: String) -> [String] {
-    guard let wg = ToolLocator.locate().wg else { return [] }
-    let dump = WGDump.parse(run([wg, "show", "all", "dump"]).out)
-    guard let device = dump.first(where: { $0.interface == realInterface }) else { return [] }
+    guard let device = userspaceStatus(realInterface) else { return [] }
     var ips: [String] = []
     for peer in device.peers {
         guard let host = EndpointParse.host(from: peer.endpoint), let ip = IPAddress.parse(host) else { continue }
         ips.append(ip.string)
     }
     return RouteText.unique(ips)
-}
-
-private func ensureUserspaceShim() {
-    let script = """
-    #!/bin/bash
-    set -euo pipefail
-    GO=""
-    for candidate in /opt/homebrew/bin/wireguard-go /usr/local/bin/wireguard-go; do
-      if [[ -x "$candidate" ]]; then
-        GO="$candidate"
-        break
-      fi
-    done
-    if [[ -z "$GO" ]]; then
-      echo "wireguard-go not found" >&2
-      exit 1
-    fi
-    namefile="${WG_TUN_NAME_FILE:-}"
-    log=/var/log/harbor-wireguard-go.log
-    pidfile=/var/run/harbor/wireguard-go.pid
-    mkdir -p /var/run/harbor
-    export LOG_LEVEL=error
-    /usr/bin/python3 - "$GO" "${1:-utun}" "$log" "$pidfile" << 'PY'
-    import os, sys
-    go, iface, log, pidfile = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    first = os.fork()
-    if first > 0:
-        os.waitpid(first, 0)
-        os._exit(0)
-    os.setsid()
-    child = os.fork()
-    if child > 0:
-        with open(pidfile, "w") as handle:
-            handle.write(str(child))
-        os._exit(0)
-    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-    os.dup2(fd, 1)
-    os.dup2(fd, 2)
-    null = os.open("/dev/null", os.O_RDONLY)
-    os.dup2(null, 0)
-    os.execv(go, [go, "-f", iface])
-    PY
-    for _ in $(seq 1 100); do
-      if [[ -n "$namefile" && -f "$namefile" ]]; then
-        iface="$(tr -d '[:space:]' < "$namefile")"
-        sock="/var/run/wireguard/${iface}.sock"
-        if [[ -n "$iface" && -S "$sock" ]]; then
-          # wg-quick rejects the interface when these mtimes differ by 2s or more.
-          touch -r "$sock" "$namefile" 2>/dev/null || true
-          exit 0
-        fi
-      fi
-      sleep 0.05
-    done
-    if [[ -f "$pidfile" ]]; then
-      kill "$(cat "$pidfile")" 2>/dev/null || true
-    fi
-    echo "wireguard-go did not create a socket" >&2
-    tail -n 30 "$log" >&2 || true
-    exit 1
-    """
-    try? script.write(toFile: userspaceShimPath, atomically: true, encoding: .utf8)
-    chmod(userspaceShimPath, 0o755)
-    let env = """
-    # The helper is a launch daemon. wg-quick would then skip disown and wait
-    # forever on its route monitor, and a failed disown deletes the new
-    # interface while still exiting 0.
-    launchctl() {
-      if [[ "${1:-}" == "procinfo" ]]; then
-        return 1
-      fi
-      command launchctl "$@"
-    }
-    disown() {
-      builtin disown "$@" 2>/dev/null || true
-    }
-    """
-    try? env.write(toFile: userspaceEnvPath, atomically: true, encoding: .utf8)
-    chmod(userspaceEnvPath, 0o600)
 }
 
 private struct ListedProcess {
@@ -334,7 +246,7 @@ private func isTunnelBlocker(_ command: String) -> Bool {
 
 // The route monitor keeps running after wg-quick returns. On the next connect
 // its exit trap deletes the new interface, and wg-quick still exits 0.
-private func stopManagedProcesses() {
+func stopManagedProcesses() {
     let targets = harborProcessTree()
     guard !targets.isEmpty else { return }
     fputs("harbor-helper: stopping \(targets.count) leftover tunnel processes\n", stderr)
@@ -355,7 +267,7 @@ private func stopManagedProcesses() {
     }
 }
 
-private func removeInterfaceFiles(slug: String) {
+func removeInterfaceFiles(slug: String) {
     let nameFile = "\(HarborPaths.wireguardRun)/\(slug).name"
     var iface: String?
     if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
@@ -367,29 +279,6 @@ private func removeInterfaceFiles(slug: String) {
     }
     unlink(nameFile)
     unlink("/var/run/harbor/wireguard-go.pid")
-}
-
-private func isWireGuard(_ name: String) -> Bool {
-    guard !name.isEmpty, let wg = ToolLocator.locate().wg else { return false }
-    let result = run([wg, "show", name, "dump"])
-    return result.code == 0 && result.out.contains("\t")
-}
-
-private func waitForInterface(_ slug: String) -> String? {
-    for _ in 0..<20 {
-        if let name = realInterfaceName(slug: slug), interfaceExists(name) {
-            return name
-        }
-        usleep(50_000)
-    }
-    return realInterfaceName(slug: slug)
-}
-
-private func realInterfaceName(slug: String) -> String? {
-    let path = "\(HarborPaths.wireguardRun)/\(slug).name"
-    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-    let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return name.isEmpty ? nil : name
 }
 
 private func routeSnapshot(_ cidr: CIDR) -> RouteSnapshot {
@@ -502,53 +391,24 @@ private func writeConfig(slug: String, config: String) throws -> String {
 }
 
 private func bringDown(slug: String) -> String? {
-    let tools = ToolLocator.locate()
-    guard let quick = tools.wgQuick else {
-        return HarborL10n.text("wg-quick was not found. Install wireguard-tools.")
-    }
     let path = state.tunnels[slug]?.configPath ?? "\(HarborPaths.directory)/\(slug).conf"
     let realBefore = state.tunnels[slug]?.realInterface
-    // Stop the previous route monitor before it can race the next up.
     stopManagedProcesses()
-    var failure: String?
-    if FileManager.default.fileExists(atPath: path) || interfaceExists(realBefore ?? "") {
-        let result = run([quick, "down", path])
-        if result.code != 0 {
-            fputs("harbor-helper: wg-quick down \(result.code)\n\(tail(result.blob))\n", stderr)
-            if !result.blob.localizedCaseInsensitiveContains("is not a wireguard interface") {
-                failure = tail(result.blob)
-            }
-        } else {
-            fputs("harbor-helper: wg-quick down 0\n", stderr)
-        }
-    }
-    stopManagedProcesses()
-    removeInterfaceFiles(slug: slug)
-    if let failure, let realBefore, interfaceExists(realBefore), isWireGuard(realBefore) {
-        return failure
-    }
+    bringUserspaceDown(slug: slug, interfaceName: realBefore)
     if let owned = state.tunnels[slug]?.ownedRoutes {
         for route in owned { deleteOwnedRoute(route) }
     }
     state.tunnels[slug] = nil
     saveState()
     try? FileManager.default.removeItem(atPath: path)
+    fputs("harbor-helper: tunnel down \(slug)\n", stderr)
     return nil
-}
-
-private func startWireGuard(quick: String, path: String, slug: String) -> (result: CommandResult, interface: String?) {
-    let result = run([quick, "up", path])
-    fputs("harbor-helper: wg-quick up \(result.code)\n\(result.blob)\n", stderr)
-    guard result.code == 0, let real = waitForInterface(slug), interfaceExists(real) else {
-        return (result, nil)
-    }
-    return (result, real)
 }
 
 private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: Bool) -> RPCResponse {
     let tools = ToolLocator.locate()
-    guard tools.ready, let quick = tools.wgQuick else {
-        return RPCResponse(id: "", ok: false, error: HarborL10n.text("wg, wg-quick, and wireguard-go are required. Install the wireguard-tools formula."), tools: tools)
+    guard tools.ready else {
+        return RPCResponse(id: "", ok: false, error: HarborL10n.text("wireguard-go is not included in this copy of Harbor."), tools: tools)
     }
     if state.tunnels[slug] != nil {
         if let error = bringDown(slug: slug) {
@@ -562,29 +422,21 @@ private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: 
     } catch {
         return RPCResponse(id: "", ok: false, error: error.localizedDescription, tools: tools)
     }
-    ensureUserspaceShim()
+    let document = WGDocument.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? config)
     stopManagedProcesses()
     removeInterfaceFiles(slug: slug)
-    var started = startWireGuard(quick: quick, path: path, slug: slug)
-    if started.interface == nil {
-        stopManagedProcesses()
-        removeInterfaceFiles(slug: slug)
-        started = startWireGuard(quick: quick, path: path, slug: slug)
-    }
-    guard let real = started.interface else {
-        stopManagedProcesses()
-        removeInterfaceFiles(slug: slug)
-        _ = run([quick, "down", path])
+    let raised = bringUserspaceUp(
+        slug: slug,
+        document: document,
+        gatewayV4: network.v4?.1,
+        gatewayV6: network.v6?.1,
+        gatewayIface: network.v4?.0 ?? network.v6?.0
+    )
+    guard let real = raised.interface else {
+        bringUserspaceDown(slug: slug, interfaceName: nil)
         try? FileManager.default.removeItem(atPath: path)
-        let detail = tail(started.result.blob)
-        let message = HarborL10n.text("The tunnel came up, but the interface was not found.")
-        let error: String
-        if started.result.code == 0 {
-            error = detail.isEmpty ? message : message + "\n" + detail
-        } else {
-            error = detail
-        }
-        return RPCResponse(id: "", ok: false, error: error, tools: tools)
+        let message = raised.error ?? HarborL10n.text("wireguard-go did not create an interface.")
+        return RPCResponse(id: "", ok: false, error: message, tools: tools)
     }
     var runtime = TunnelRuntime(
         configPath: path,
@@ -636,25 +488,16 @@ private func managed(_ slug: String, _ runtime: TunnelRuntime) -> ManagedTunnel 
 }
 
 private func currentDevices() -> [WGDeviceStatus] {
-    guard let wg = ToolLocator.locate().wg else { return [] }
-    return WGDump.parse(run([wg, "show", "all", "dump"]).out)
-}
-
-private func tail(_ text: String) -> String {
-    let lines = text.split(whereSeparator: \.isNewline).map(String.init).filter { line in
-        !line.localizedCaseInsensitiveContains("privatekey")
-    }
-    let kept = lines.suffix(12)
-    let joined = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    return joined.isEmpty ? HarborL10n.text("wg-quick failed.") : joined
+    state.tunnels.values.compactMap { userspaceStatus($0.realInterface) }
 }
 
 private func reconcile() {
     loadState()
     let alive = state.tunnels.filter { interfaceExists($0.value.realInterface) }
     let dead = state.tunnels.filter { !interfaceExists($0.value.realInterface) }
-    for (_, runtime) in dead {
+    for (slug, runtime) in dead {
         for route in runtime.ownedRoutes { deleteOwnedRoute(route) }
+        bringUserspaceDown(slug: slug, interfaceName: runtime.realInterface)
     }
     state.tunnels = alive
     for slug in Array(state.tunnels.keys) {

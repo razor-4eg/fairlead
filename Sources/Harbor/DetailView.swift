@@ -114,13 +114,8 @@ struct DetailView: View {
     }
 
     private var statusMessage: String? {
-        if !model.tools.ready {
-            let missing = [
-                model.tools.wg == nil ? "wg" : nil,
-                model.tools.wgQuick == nil ? "wg-quick" : nil,
-                model.tools.wireguardGo == nil ? "wireguard-go" : nil,
-            ].compactMap { $0 }
-            return HarborL10n.format("Not found: %@. Install the wireguard-tools package.", missing.joined(separator: ", "))
+        if model.tools.wireguardGo == nil {
+            return HarborL10n.text("wireguard-go is not included in this copy of Harbor.")
         }
         if !model.helperOnline {
             return HarborL10n.text("The system helper is not running. A tunnel cannot start without it.")

@@ -131,6 +131,52 @@ expect(IPAddress.parse("224.0.0.1")?.isRoutableDestination == false, "multicast"
 expect(IPAddress.parse("1.1.1.1")?.isRoutableDestination == true, "public")
 expect(IPAddress.parse("fe80::1")?.isRoutableDestination == false, "link local v6")
 
+let uapiDoc = WGDocument.parse("""
+[Interface]
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Address = 10.8.0.2/32
+DNS = 1.1.1.1
+ListenPort = 51820
+
+[Peer]
+PublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 192.0.2.1:51820
+PersistentKeepalive = 25
+""")
+let peerIndex = uapiDoc.peerIndexes[0]
+let message = WireGuardUAPI.setMessage(document: uapiDoc, endpoints: [peerIndex: "192.0.2.1:51820"]) ?? ""
+expect(message.contains("private_key=" + String(repeating: "0", count: 64)), "uapi private")
+expect(!message.contains("AAAA"), "uapi hides base64")
+expect(message.contains("endpoint=192.0.2.1:51820"), "uapi endpoint")
+expect(message.contains("allowed_ip=0.0.0.0/0"), "uapi v4")
+expect(message.contains("allowed_ip=::/0"), "uapi v6")
+expect(message.contains("replace_peers=true"), "uapi replace")
+expectEqual(WireGuardUAPI.socketEndpoint(ip: "2001:db8::1", original: "vpn.example:51820"), "[2001:db8::1]:51820", "v6 socket")
+
+let got = WireGuardUAPI.parseGet("""
+listen_port=51820
+public_key=\(String(repeating: "0", count: 64))
+public_key=\(String(repeating: "1", count: 64))
+preshared_key=\(String(repeating: "0", count: 64))
+endpoint=192.0.2.1:51820
+last_handshake_time_sec=1700000000
+rx_bytes=20
+tx_bytes=10
+persistent_keepalive_interval=25
+allowed_ip=0.0.0.0/0
+allowed_ip=::/0
+errno=0
+""", interface: "utun8")
+expectEqual(got.listenPort, 51820, "uapi port")
+expectEqual(got.peers.count, 1, "uapi peers")
+expectEqual(got.peers[0].rx, UInt64(20), "uapi rx")
+expectEqual(got.peers[0].tx, UInt64(10), "uapi tx")
+expectEqual(got.peers[0].handshake, 1_700_000_000, "uapi handshake")
+expectEqual(got.peers[0].endpoint, "192.0.2.1:51820", "uapi peer endpoint")
+expect(got.peers[0].allowedIPs.contains("0.0.0.0/0"), "uapi allowed")
+expect(got.publicKey != got.peers[0].publicKey, "device key differs")
+
 if failures.isEmpty {
     print("ok")
 } else {

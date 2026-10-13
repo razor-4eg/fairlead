@@ -6,7 +6,7 @@ public struct ToolReport: Codable, Equatable, Sendable {
     public var wireguardGo: String?
     public var brew: String?
 
-    public var ready: Bool { wg != nil && wgQuick != nil && wireguardGo != nil }
+    public var ready: Bool { wireguardGo != nil }
 
     public init(wg: String? = nil, wgQuick: String? = nil, wireguardGo: String? = nil, brew: String? = nil) {
         self.wg = wg
@@ -114,12 +114,18 @@ public enum RPCFrame {
 
 public enum ToolLocator {
     public static func locate() -> ToolReport {
-        ToolReport(
-            wg: firstExecutable(["/opt/homebrew/bin/wg", "/usr/local/bin/wg"]),
-            wgQuick: firstExecutable(["/opt/homebrew/bin/wg-quick", "/usr/local/bin/wg-quick"]),
-            wireguardGo: firstExecutable(["/opt/homebrew/bin/wireguard-go", "/usr/local/bin/wireguard-go"]),
-            brew: firstExecutable(["/opt/homebrew/bin/brew", "/usr/local/bin/brew"])
-        )
+        var wireguard = [
+            "/usr/local/libexec/harbor-wireguard-go",
+            "/opt/homebrew/bin/wireguard-go",
+            "/usr/local/bin/wireguard-go",
+        ]
+        if let beside = Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("wireguard-go")
+            .path {
+            wireguard.insert(beside, at: 0)
+        }
+        return ToolReport(wireguardGo: firstExecutable(wireguard))
     }
 
     private static func firstExecutable(_ paths: [String]) -> String? {
