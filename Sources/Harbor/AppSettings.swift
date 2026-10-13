@@ -12,9 +12,7 @@ final class SettingsStore {
     private let url: URL
 
     init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let directory = base.appendingPathComponent("Harbor", isDirectory: true)
+        let directory = AppSupport.folder
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         url = directory.appendingPathComponent("settings.json")
     }

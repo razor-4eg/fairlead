@@ -1,12 +1,22 @@
 import Foundation
 
+enum AppSupport {
+    /// `HARBOR_SUPPORT`, when set, is the folder that holds tunnels and settings.
+    static var folder: URL {
+        if let override = ProcessInfo.processInfo.environment["HARBOR_SUPPORT"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return base.appendingPathComponent("Harbor", isDirectory: true)
+    }
+}
+
 final class TunnelStore {
     private let url: URL
 
     init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let directory = base.appendingPathComponent("Harbor", isDirectory: true)
+        let directory = AppSupport.folder
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         url = directory.appendingPathComponent("tunnels.json")

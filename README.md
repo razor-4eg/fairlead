@@ -8,11 +8,53 @@ Harbor is a native macOS client for WireGuard. It keeps your configs on this Mac
 
 WireGuard is a trademark of Jason A. Donenfeld. Harbor is an independent client.
 
+## Run
+
+Build the app, or start from a `Harbor.app` you were given. Put it in `/Applications`, then open it.
+
+```bash
+scripts/build-app.sh
+ditto dist/Harbor.app /Applications/Harbor.app
+open /Applications/Harbor.app
+```
+
+`wireguard-go` is inside the app. Harbor does not need Homebrew, `wg`, or `wg-quick`.
+
+A copy you built on this Mac is ad-hoc signed and has no quarantine attribute, so Gatekeeper lets it open. The first time you connect, Harbor asks for an administrator password once and installs a helper. After that the helper starts on its own. Configs and keys stay in `~/Library/Application Support/Harbor`, readable only by you.
+
+Closing the window hides the Dock icon and leaves Harbor in the menu bar. Open it again from there. Quit from the menu bar when you want the tunnel down. Quitting restores the routes and DNS Harbor changed.
+
+### Gatekeeper
+
+Harbor is not notarized. macOS blocks the first launch only when the app is quarantined. A browser, AirDrop, Messages, or Mail sets that on a copy that arrived from somewhere else. A local build does not.
+
+Move `Harbor.app` into `/Applications` before the first open. If you open a quarantined app from Downloads or from a disk image, macOS can run a translocated copy from a random read-only folder. The helper would then be installed from that copy.
+
+On macOS Sequoia and later, Control-click and Open does not bypass Gatekeeper.
+
+1. Double-click Harbor. If macOS says it cannot check the app for malicious software, click Done. Move to Trash deletes the app.
+2. Open System Settings, then Privacy & Security, and scroll to the bottom. macOS names the app it just blocked.
+3. Click Open Anyway, confirm, and authenticate when asked.
+
+That exception is for this copy of the app. Replacing the app can make Gatekeeper ask again.
+
+To clear quarantine in Terminal, before the first open:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Harbor.app
+```
+
+`xattr -d` removes the attribute, and `-r` does that for the bundle and everything inside it. Run this only on a copy whose source you trust. It skips Gatekeeper's first-launch check. If macOS says the attribute is missing, the app was not quarantined and you can open it as it is. A copy owned by root needs `sudo` in front of the same command.
+
+`spctl --assess` still says this build is rejected, because it is not notarized. Clearing quarantine is what lets the ad-hoc app launch. Leave the system-wide Gatekeeper setting as it is.
+
+The administrator password Harbor asks for later is the helper, not Gatekeeper. Approve it when you want tunnels to start.
+
 ## Tunnel
 
 Import a `.conf` file, drop it on the window, or create a tunnel and edit it in fields or as text. One tunnel is active at a time. Connecting another one brings the current one down.
 
-The window shows the endpoint, address, handshake, and live rates for traffic down and up. The same controls are in the menu bar. Closing the window leaves Harbor running there and hides the Dock icon. Quitting Harbor brings the tunnel down and restores the routes it added.
+Harbor starts the bundled `wireguard-go` and sets the address, routes, and DNS itself. The window shows the endpoint, address, handshake, and live rates for traffic down and up. The same controls are in the menu bar.
 
 ![Tunnel overview, with addresses that stay off the tunnel](docs/screenshots/overview.png)
 
@@ -25,7 +67,9 @@ Traffic to the tunnel follows the AllowedIPs in the config. Harbor can send some
 - The current Wi-Fi or Ethernet network. Harbor adds those routes when you connect.
 - An app. Harbor watches where that app connects and keeps those addresses out of the tunnel. New addresses are remembered. Already open connections move to the direct path after they reconnect.
 
-On macOS the route is for the whole system. An address marked direct for one app is direct for every app. That is how Harbor can do this without a network extension.
+On macOS the route is for the whole system. An address marked direct for one app or one domain is direct for every app. That is how Harbor can do this without a network extension.
+
+![A domain resolved on the regular network](docs/screenshots/domains.png)
 
 ![An app whose learned address stays off the tunnel](docs/screenshots/apps.png)
 
@@ -45,7 +89,7 @@ Open Settings from the gear, the menu bar, or Command-Comma.
 
 **Default tunnel.** Harbor selects this tunnel when it opens and connects it. Together with Open at login, that tunnel comes up after you sign in. Choose None to open Harbor without connecting.
 
-**Components.** `wireguard-go` is included in Harbor. The helper is listed in the same window and starts from here. It asks for an administrator password once, then brings tunnels and routes up itself. If the installed copy is older than the app, Harbor asks once and replaces it. Configs and keys stay in `~/Library/Application Support/Harbor`, readable only by you. That folder opens from Settings.
+**Components.** `wireguard-go` is included. The helper is listed in the same window. Start helper asks for an administrator password once, then brings tunnels and direct routes up itself. If the installed helper is older than the app, Harbor asks once and replaces it. The config folder opens from Settings.
 
 ![Settings, including the components Harbor needs](docs/screenshots/settings.png)
 
@@ -55,11 +99,9 @@ Harbor follows the system language. English, Russian, German, Spanish, French, P
 
 ## Build
 
-You need Xcode Command Line Tools. Harbor includes `wireguard-go`, so running it does not need Homebrew, `wg`, or `wg-quick`.
+You need Xcode Command Line Tools. The script builds `dist/Harbor.app` and ad-hoc signs it. It does not download `wireguard-go`. The binary already in `Support/wireguard-go` is the MIT-licensed userspace implementation from WireGuard. Its license is `Support/wireguard-go.LICENSE`.
 
 ```bash
 scripts/build-app.sh
 open dist/Harbor.app
 ```
-
-The script builds `dist/Harbor.app`. `wireguard-go` is the MIT-licensed userspace implementation from WireGuard; its license is `Support/wireguard-go.LICENSE`.
