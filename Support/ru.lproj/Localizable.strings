@@ -173,3 +173,11 @@
 "Could not resolve the endpoint." = "Не удалось определить адрес сервера.";
 "wireguard-go did not create an interface." = "wireguard-go не создал интерфейс.";
 "wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go уже в составе приложения. Хелпер один раз спрашивает пароль администратора, затем сам поднимает туннели и прямые маршруты. Конфиги с ключами остаются на этом Mac.";
+"Domains" = "Домены";
+"Nothing here yet. Add a domain that should bypass WireGuard." = "Пока пусто. Добавьте домен, который должен идти мимо WireGuard.";
+"Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Harbor узнаёт адрес имени через обычную сеть и пускает его напрямую. Общий адрес, например у CDN, станет прямым для всех приложений. Список обновляется, когда истекает DNS-запись.";
+"Enter a domain, for example example.com." = "Введите домен, например example.com.";
+"Wildcards such as *.example.com are not supported." = "Маски вроде *.example.com не поддерживаются.";
+"That domain is already listed." = "Этот домен уже в списке.";
+"Could not resolve %@." = "Не удалось узнать адрес %@.";
+"Resolving…" = "Узнаём адрес…";

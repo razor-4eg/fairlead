@@ -173,3 +173,11 @@
 "Could not resolve the endpoint." = "无法解析端点地址。";
 "wireguard-go did not create an interface." = "wireguard-go 没有创建接口。";
 "wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go 已包含在应用中。助手会询问一次管理员密码，然后自行建立隧道和直连路由。带密钥的配置只保存在这台 Mac 上。";
+"Domains" = "域名";
+"Nothing here yet. Add a domain that should bypass WireGuard." = "这里还是空的。添加应绕过 WireGuard 的域名。";
+"Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Harbor 通过普通网络解析该名称，并把得到的地址直接送出。CDN 这类共用地址会对所有应用生效。DNS 记录到期后，列表会重新解析。";
+"Enter a domain, for example example.com." = "输入域名，例如 example.com。";
+"Wildcards such as *.example.com are not supported." = "不支持 *.example.com 这类通配符。";
+"That domain is already listed." = "该域名已在列表中。";
+"Could not resolve %@." = "无法解析 %@。";
+"Resolving…" = "正在解析…";

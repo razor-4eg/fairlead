@@ -173,3 +173,11 @@
 "Could not resolve the endpoint." = "Não foi possível resolver o endpoint.";
 "wireguard-go did not create an interface." = "O wireguard-go não criou uma interface.";
 "wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "O wireguard-go está incluído. O assistente pede uma vez a palavra-passe de administrador e depois levanta sozinho os túneis e as rotas diretas. As configurações com chaves ficam neste Mac.";
+"Domains" = "Domínios";
+"Nothing here yet. Add a domain that should bypass WireGuard." = "Ainda não há nada. Adicione um domínio que deva contornar o WireGuard.";
+"Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "O Harbor resolve o nome na rede normal e envia esses endereços diretamente. Um endereço partilhado, como o de uma CDN, fica direto para todas as aplicações. A lista atualiza-se quando o registo DNS expira.";
+"Enter a domain, for example example.com." = "Introduza um domínio, por exemplo example.com.";
+"Wildcards such as *.example.com are not supported." = "Caracteres universais como *.example.com não são suportados.";
+"That domain is already listed." = "Esse domínio já está na lista.";
+"Could not resolve %@." = "Não foi possível resolver %@.";
+"Resolving…" = "A resolver…";

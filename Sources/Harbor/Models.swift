@@ -43,6 +43,31 @@ struct AppRule: Codable, Identifiable, Equatable {
     }
 }
 
+struct DomainRule: Codable, Identifiable, Equatable {
+    var id: UUID
+    var name: String
+    var note: String
+    var enabled: Bool
+    var addresses: [String]
+    var refreshAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        note: String = "",
+        enabled: Bool = true,
+        addresses: [String] = [],
+        refreshAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.note = note
+        self.enabled = enabled
+        self.addresses = addresses
+        self.refreshAt = refreshAt
+    }
+}
+
 struct Tunnel: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
@@ -50,6 +75,7 @@ struct Tunnel: Codable, Identifiable, Equatable {
     var configText: String
     var ipRules: [IPRule]
     var appRules: [AppRule]
+    var domainRules: [DomainRule]
     var excludeLAN: Bool
 
     init(
@@ -59,6 +85,7 @@ struct Tunnel: Codable, Identifiable, Equatable {
         configText: String,
         ipRules: [IPRule] = [],
         appRules: [AppRule] = [],
+        domainRules: [DomainRule] = [],
         excludeLAN: Bool = true
     ) {
         self.id = id
@@ -67,7 +94,36 @@ struct Tunnel: Codable, Identifiable, Equatable {
         self.configText = configText
         self.ipRules = ipRules
         self.appRules = appRules
+        self.domainRules = domainRules
         self.excludeLAN = excludeLAN
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, slug, configText, ipRules, appRules, domainRules, excludeLAN
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        slug = try container.decode(String.self, forKey: .slug)
+        configText = try container.decode(String.self, forKey: .configText)
+        ipRules = try container.decodeIfPresent([IPRule].self, forKey: .ipRules) ?? []
+        appRules = try container.decodeIfPresent([AppRule].self, forKey: .appRules) ?? []
+        domainRules = try container.decodeIfPresent([DomainRule].self, forKey: .domainRules) ?? []
+        excludeLAN = try container.decodeIfPresent(Bool.self, forKey: .excludeLAN) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(slug, forKey: .slug)
+        try container.encode(configText, forKey: .configText)
+        try container.encode(ipRules, forKey: .ipRules)
+        try container.encode(appRules, forKey: .appRules)
+        try container.encode(domainRules, forKey: .domainRules)
+        try container.encode(excludeLAN, forKey: .excludeLAN)
     }
 
     static func makeSlug() -> String {
@@ -103,6 +159,9 @@ struct Tunnel: Codable, Identifiable, Equatable {
         for app in appRules where app.enabled {
             values.append(contentsOf: app.learned)
         }
+        for domain in domainRules where domain.enabled {
+            values.append(contentsOf: domain.addresses)
+        }
         return values
     }
 }
@@ -118,6 +177,9 @@ struct LiveTunnel: Equatable {
     var phase: Phase = .idle
     var realInterface: String?
     var gateway: String?
+    var gatewayIface: String?
+    var resolvers: [String] = []
+    var resolverIface: String?
     var lanCIDRs: [String] = []
     var endpointIPs: [String] = []
     var appliedRoutes: [String] = []

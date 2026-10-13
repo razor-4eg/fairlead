@@ -28,6 +28,7 @@ final class AppModel: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var pushedRoutes: [String: [String]] = [:]
     private var helperUpdateTask: Task<Void, Never>?
+    private var resolverCache: (at: Date, snap: ScutilDNS.Snapshot)?
     @Published var helperStale = false
 
     var selectedTunnel: Tunnel? {
@@ -60,6 +61,7 @@ final class AppModel: ObservableObject {
         learnTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.learnDestinations()
+                await self?.refreshDomains()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -249,6 +251,7 @@ final class AppModel: ObservableObject {
             showSettings = true
             return
         }
+        await rememberResolvers()
         mutate(tunnel.id) { $0.phase = .connecting }
         banner = nil
         let response = await rpc(
@@ -383,6 +386,37 @@ final class AppModel: ObservableObject {
         replace(tunnel)
     }
 
+    func addDomain(to id: UUID, raw: String, note: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("*") {
+            return HarborL10n.text("Wildcards such as *.example.com are not supported.")
+        }
+        guard let name = DomainName.normalize(trimmed) else {
+            return HarborL10n.text("Enter a domain, for example example.com.")
+        }
+        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return nil }
+        if tunnel.domainRules.contains(where: { $0.name == name }) {
+            return HarborL10n.text("That domain is already listed.")
+        }
+        tunnel.domainRules.append(DomainRule(name: name, note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
+        replace(tunnel)
+        Task { await refreshDomains() }
+        return nil
+    }
+
+    func removeDomain(_ ruleID: UUID, tunnel id: UUID) {
+        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
+        tunnel.domainRules.removeAll { $0.id == ruleID }
+        replace(tunnel)
+    }
+
+    func setDomain(_ ruleID: UUID, tunnel id: UUID, enabled: Bool) {
+        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
+        guard let index = tunnel.domainRules.firstIndex(where: { $0.id == ruleID }) else { return }
+        tunnel.domainRules[index].enabled = enabled
+        replace(tunnel)
+    }
+
     func setExcludeLAN(_ id: UUID, _ enabled: Bool) {
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
         tunnel.excludeLAN = enabled
@@ -491,6 +525,127 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private struct DomainJob: Sendable {
+        var id: UUID
+        var name: String
+        var servers: [String]
+        var interface: String?
+    }
+
+    private func refreshDomains() async {
+        let now = Date()
+        let due = tunnels.contains { tunnel in
+            tunnel.domainRules.contains { rule in
+                rule.enabled && (rule.refreshAt == nil || (rule.refreshAt ?? now) <= now)
+            }
+        }
+        guard due else { return }
+        await rememberResolvers()
+        var jobs: [DomainJob] = []
+        for tunnel in tunnels {
+            let state = live(tunnel.id)
+            var servers = state.resolvers
+            var iface: String?
+            if state.phase == .connected || state.phase == .connecting {
+                if servers.isEmpty, let gateway = state.gateway, let ip = IPAddress.parse(gateway) {
+                    servers = [ip.string]
+                }
+                iface = state.gatewayIface ?? state.resolverIface
+                if let name = iface, name.hasPrefix("utun") { iface = state.resolverIface }
+                if let name = iface, name.hasPrefix("utun") { iface = nil }
+            }
+            guard !servers.isEmpty else { continue }
+            for rule in tunnel.domainRules where rule.enabled {
+                let ready = rule.refreshAt == nil || (rule.refreshAt ?? now) <= now
+                guard ready else { continue }
+                jobs.append(DomainJob(id: rule.id, name: rule.name, servers: servers, interface: iface))
+            }
+        }
+        guard !jobs.isEmpty else { return }
+        let answers = await Task.detached(priority: .utility) {
+            var map: [UUID: DomainLookup.Answer] = [:]
+            for job in jobs {
+                if let answer = DomainLookup.resolve(name: job.name, servers: job.servers, interface: job.interface) {
+                    map[job.id] = answer
+                }
+            }
+            return map
+        }.value
+
+        var changed = false
+        var push: [Tunnel] = []
+        let asked = Set(jobs.map(\.id))
+        for index in tunnels.indices {
+            var tunnel = tunnels[index]
+            var tunnelChanged = false
+            var addressesChanged = false
+            let skip = Set(live(tunnel.id).endpointIPs)
+            for ruleIndex in tunnel.domainRules.indices {
+                let ruleID = tunnel.domainRules[ruleIndex].id
+                guard asked.contains(ruleID) else { continue }
+                if let answer = answers[ruleID] {
+                    let next = mergedDomainAddresses(
+                        existing: tunnel.domainRules[ruleIndex].addresses,
+                        answer: answer,
+                        skip: skip
+                    )
+                    if next != tunnel.domainRules[ruleIndex].addresses {
+                        tunnel.domainRules[ruleIndex].addresses = next
+                        addressesChanged = true
+                    }
+                    tunnel.domainRules[ruleIndex].refreshAt = now.addingTimeInterval(TimeInterval(answer.ttl))
+                } else {
+                    tunnel.domainRules[ruleIndex].refreshAt = now.addingTimeInterval(30)
+                }
+                tunnelChanged = true
+            }
+            if tunnelChanged {
+                tunnels[index] = tunnel
+                changed = true
+            }
+            if addressesChanged {
+                push.append(tunnel)
+            }
+        }
+        if changed { persist(immediate: false) }
+        for tunnel in push where isUp(tunnel.id) {
+            await pushRoutes(for: tunnel)
+        }
+    }
+
+    private func mergedDomainAddresses(existing: [String], answer: DomainLookup.Answer, skip: Set<String>) -> [String] {
+        var v4 = existing.filter { IPAddress.parse($0)?.family == .v4 }
+        var v6 = existing.filter { IPAddress.parse($0)?.family == .v6 }
+        if let fresh = answer.v4 { v4 = fresh }
+        if let fresh = answer.v6 { v6 = fresh }
+        var seen = Set<String>()
+        return (v4 + v6).filter { address in
+            guard !skip.contains(address), seen.insert(address).inserted else { return false }
+            return true
+        }.sorted()
+    }
+
+    private func rememberResolvers() async {
+        if tunnels.contains(where: { isUp($0.id) }) { return }
+        let now = Date()
+        let snap: ScutilDNS.Snapshot
+        if let resolverCache, now.timeIntervalSince(resolverCache.at) < 5 {
+            snap = resolverCache.snap
+        } else {
+            snap = await Task.detached(priority: .utility) {
+                SystemDNS.current()
+            }.value
+            resolverCache = (now, snap)
+        }
+        guard !snap.servers.isEmpty else { return }
+        for tunnel in tunnels where live(tunnel.id).phase == .idle {
+            mutate(tunnel.id) { live in
+                live.resolvers = snap.servers
+                live.resolverIface = snap.interface
+            }
+        }
+    }
+
     private func refresh() async {
         now = Date()
         let response = await rpc(RPCRequest(op: "status"), timeout: 8)
@@ -563,6 +718,7 @@ final class AppModel: ObservableObject {
             live.phase = phase
             live.realInterface = item.realInterface
             live.gateway = item.gatewayV4
+            live.gatewayIface = item.gatewayIface
             live.lanCIDRs = item.lanCIDRs
             live.endpointIPs = item.endpointIPs
             live.appliedRoutes = item.bypass

@@ -177,6 +177,76 @@ expectEqual(got.peers[0].endpoint, "192.0.2.1:51820", "uapi peer endpoint")
 expect(got.peers[0].allowedIPs.contains("0.0.0.0/0"), "uapi allowed")
 expect(got.publicKey != got.peers[0].publicKey, "device key differs")
 
+expectEqual(DomainName.normalize("Example.COM."), "example.com", "domain")
+expect(DomainName.normalize("*.example.com") == nil, "wildcard")
+expect(DomainName.normalize("https://example.com") == nil, "url")
+expect(DomainName.normalize("192.0.2.1") == nil, "domain rejects ip")
+expect(DomainName.normalize("com") == nil, "single label")
+expectEqual(DomainName.normalize("пример.рф"), "xn--e1afmkfd.xn--p1ai", "idn")
+
+var packet = Data()
+func u16(_ value: UInt16) -> [UInt8] { [UInt8(value >> 8), UInt8(value & 0xff)] }
+func u32(_ value: UInt32) -> [UInt8] {
+    [UInt8((value >> 24) & 0xff), UInt8((value >> 16) & 0xff), UInt8((value >> 8) & 0xff), UInt8(value & 0xff)]
+}
+packet.append(contentsOf: u16(0x1234))
+packet.append(contentsOf: u16(0x8180))
+packet.append(contentsOf: u16(1))
+packet.append(contentsOf: u16(2))
+packet.append(contentsOf: u16(0))
+packet.append(contentsOf: u16(0))
+packet.append(7)
+packet.append(contentsOf: Array("example".utf8))
+packet.append(3)
+packet.append(contentsOf: Array("com".utf8))
+packet.append(0)
+packet.append(contentsOf: u16(1))
+packet.append(contentsOf: u16(1))
+packet.append(0xC0)
+packet.append(12)
+packet.append(contentsOf: u16(5))
+packet.append(contentsOf: u16(1))
+packet.append(contentsOf: u32(30))
+packet.append(contentsOf: u16(0))
+packet.append(0xC0)
+packet.append(12)
+packet.append(contentsOf: u16(1))
+packet.append(contentsOf: u16(1))
+packet.append(contentsOf: u32(60))
+packet.append(contentsOf: u16(4))
+packet.append(contentsOf: [192, 0, 2, 1])
+let reply = DNSCodec.parse(packet, id: 0x1234)
+expectEqual(reply?.rcode, 0, "dns rcode")
+expectEqual(reply?.sawCNAME, true, "dns cname")
+expectEqual(reply?.answers.first?.address, "192.0.2.1", "dns address")
+expectEqual(reply?.answers.first?.ttl, UInt32(60), "dns ttl")
+expect(DNSCodec.parse(packet, id: 1) == nil, "dns id")
+expect(DNSCodec.query(id: 1, name: "*.example.com", type: DNSCodec.typeA) == nil, "dns query wildcard")
+let query = DNSCodec.query(id: 7, name: "Example.com", type: DNSCodec.typeA)
+expect(query?.contains(41) == true, "dns edns")
+
+let dnsText = """
+resolver #1
+  nameserver[0] : 192.0.2.53
+  nameserver[1] : 2001:db8::53
+  if_index : 14 (en0)
+resolver #2
+  domain   : local
+  options  : mdns
+  nameserver[0] : 192.0.2.1
+"""
+let snap = ScutilDNS.parse(dnsText)
+expectEqual(snap.servers, ["192.0.2.53", "2001:db8::53"], "scutil servers")
+expectEqual(snap.interface, "en0", "scutil iface")
+expect(ScutilDNS.parse("resolver #1\n  nameserver[0] : 1.1.1.1\n  if_index : 20 (utun7)\n").interface == nil, "skip utun")
+
+if let live = DomainLookup.resolve(name: "example.com", servers: ["1.1.1.1"], interface: nil) {
+    let addresses = (live.v4 ?? []) + (live.v6 ?? [])
+    expect(!addresses.isEmpty, "live example.com")
+    expect(addresses.allSatisfy { IPAddress.parse($0) != nil }, "live addresses")
+    expect(live.ttl >= 30 && live.ttl <= 3600, "live ttl")
+}
+
 if failures.isEmpty {
     print("ok")
 } else {

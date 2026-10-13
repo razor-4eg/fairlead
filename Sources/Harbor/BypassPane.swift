@@ -9,7 +9,11 @@ struct BypassPane: View {
     @State private var draft = ""
     @State private var note = ""
     @State private var fieldError: String?
+    @State private var domainDraft = ""
+    @State private var domainNote = ""
+    @State private var domainError: String?
     @State private var openApps: Set<UUID> = []
+    @State private var openDomains: Set<UUID> = []
 
     private var live: LiveTunnel { model.live(tunnel.id) }
 
@@ -27,10 +31,11 @@ struct BypassPane: View {
                 Spacer()
                 Picker("", selection: $tab) {
                     Text("IP").tag(0)
-                    Text("Apps").tag(1)
+                    Text("Domains").tag(1)
+                    Text("Apps").tag(2)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
+                .frame(width: 320)
             }
 
             lanRow
@@ -49,6 +54,21 @@ struct BypassPane: View {
                             if rule.id != tunnel.ipRules.last?.id {
                                 Rectangle().fill(Theme.line).frame(height: 1)
                             }
+                        }
+                    }
+                }
+            } else if tab == 1 {
+                domainIntro
+                domainEditor
+                if tunnel.domainRules.isEmpty {
+                    Text("Nothing here yet. Add a domain that should bypass WireGuard.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.muted)
+                        .padding(.vertical, 8)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(tunnel.domainRules) { rule in
+                            domainRow(rule)
                         }
                     }
                 }
@@ -176,6 +196,115 @@ struct BypassPane: View {
         .padding(.vertical, 10)
     }
 
+    private var domainIntro: some View {
+        Text("Harbor resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires.")
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var domainEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("example.com", text: $domainDraft)
+                    .quietField()
+                    .onSubmit { commitDomain() }
+                TextField("Note", text: $domainNote)
+                    .quietField()
+                    .frame(width: 160)
+                Button(action: commitDomain) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 32, height: 32)
+                        .background(Theme.accent, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            if let domainError {
+                Text(domainError)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.danger)
+            }
+        }
+    }
+
+    private func domainRow(_ rule: DomainRule) -> some View {
+        let expanded = openDomains.contains(rule.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rule.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
+                    if !rule.note.isEmpty {
+                        Text(rule.note)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    if !domainStatus(rule).isEmpty {
+                        Text(domainStatus(rule))
+                            .font(.system(size: 11))
+                            .foregroundStyle(domainFailed(rule) ? Theme.danger : Theme.muted)
+                    }
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { rule.enabled },
+                    set: { model.setDomain(rule.id, tunnel: tunnel.id, enabled: $0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .tint(Theme.accent)
+                Button {
+                    model.removeDomain(rule.id, tunnel: tunnel.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .buttonStyle(.plain)
+            }
+            if !rule.addresses.isEmpty {
+                Button(HarborL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
+                    if expanded { openDomains.remove(rule.id) } else { openDomains.insert(rule.id) }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                if expanded {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(rule.addresses, id: \.self) { address in
+                            Text(address)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.text)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func domainStatus(_ rule: DomainRule) -> String {
+        if !rule.addresses.isEmpty {
+            return HarborL10n.addressCount(rule.addresses.count)
+        }
+        if rule.enabled, rule.refreshAt == nil {
+            return HarborL10n.text("Resolving…")
+        }
+        if rule.enabled {
+            return HarborL10n.format("Could not resolve %@.", rule.name)
+        }
+        return ""
+    }
+
+    private func domainFailed(_ rule: DomainRule) -> Bool {
+        rule.enabled && rule.addresses.isEmpty && rule.refreshAt != nil
+    }
+
     private var appIntro: some View {
         Text("New addresses of the app are remembered and sent directly. On macOS the route is system-wide, so the same address becomes direct for every app. An open connection switches after it reconnects.")
             .font(.system(size: 12))
@@ -240,6 +369,15 @@ struct BypassPane: View {
         }
         .padding(10)
         .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func commitDomain() {
+        let error = model.addDomain(to: tunnel.id, raw: domainDraft, note: domainNote)
+        domainError = error
+        if error == nil {
+            domainDraft = ""
+            domainNote = ""
+        }
     }
 
     private func commitIP() {

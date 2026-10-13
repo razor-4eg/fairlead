@@ -21,6 +21,7 @@ The window shows the endpoint, address, handshake, and live rates for traffic do
 Traffic to the tunnel follows the AllowedIPs in the config. Harbor can send some of that traffic out through the normal gateway instead.
 
 - An IP or network, with an optional note. Each rule can be switched off without deleting it.
+- A domain, such as `example.com`. Harbor looks the name up on the regular network and keeps the resulting addresses out of the tunnel. The list refreshes when the DNS record expires. A shared address, such as a CDN, is direct for every app. Wildcards are not included.
 - The current Wi-Fi or Ethernet network. Harbor adds those routes when you connect.
 - An app. Harbor watches where that app connects and keeps those addresses out of the tunnel. New addresses are remembered. Already open connections move to the direct path after they reconnect.
 
