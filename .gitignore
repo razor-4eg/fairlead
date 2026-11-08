@@ -1,0 +1,12 @@
+.build/
+dist/
+.swiftpm/
+.DS_Store
+*.xcuserstate
+.env
+.env.*
+scripts/make-icon.py
+scripts/__pycache__/
+platform/mac/Support/icon-mask/
+platform/win/ui/bin/
+platform/win/ui/obj/
