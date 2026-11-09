@@ -40,6 +40,31 @@ public enum FairleadL10n {
         return format("%d addresses.\(form)", count)
     }
 
+    public static func domainCount(_ count: Int) -> String {
+        let form: String
+        switch resolvedLanguage() {
+        case "ru":
+            let mod100 = count % 100
+            let mod10 = count % 10
+            if (11...14).contains(mod100) {
+                form = "many"
+            } else if mod10 == 1 {
+                form = "one"
+            } else if (2...4).contains(mod10) {
+                form = "few"
+            } else {
+                form = "many"
+            }
+        case "fr":
+            form = count <= 1 ? "one" : "other"
+        case "zh-Hans":
+            form = "other"
+        default:
+            form = count == 1 ? "one" : "other"
+        }
+        return format("%d domains.\(form)", count)
+    }
+
     /// Shows a helper message in the app language. The helper may still be speaking the other one.
     public static func display(_ message: String) -> String {
         let catalogs = loadCatalogs()

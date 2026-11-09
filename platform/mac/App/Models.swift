@@ -9,23 +9,83 @@
 import Foundation
 import FairleadCore
 
-struct IPRule: Codable, Identifiable, Equatable {
+enum RouteKind: String, Codable, Equatable {
+    case ip
+    case domain
+}
+
+struct RouteEntry: Codable, Identifiable, Equatable {
     var id: UUID
-    var cidr: String
-    var note: String
-    var enabled: Bool
+    var kind: RouteKind
+    var value: String
+    var addresses: [String]
+    var refreshAt: Date?
 
 /*
 ===============
 init
 ===============
 */
-    init(id: UUID = UUID(), cidr: String, note: String = "", enabled: Bool = true) {
+    init(
+        id: UUID = UUID(),
+        kind: RouteKind,
+        value: String,
+        addresses: [String] = [],
+        refreshAt: Date? = nil
+    ) {
         self.id = id
-        self.cidr = cidr
-        self.note = note
-        self.enabled = enabled
+        self.kind = kind
+        self.value = value
+        self.addresses = addresses
+        self.refreshAt = refreshAt
     }
+}
+
+struct RouteList: Codable, Identifiable, Equatable {
+    var id: UUID
+    var name: String
+    var enabled: Bool
+    var entries: [RouteEntry]
+
+/*
+===============
+init
+===============
+*/
+    init(id: UUID = UUID(), name: String, enabled: Bool = true, entries: [RouteEntry] = []) {
+        self.id = id
+        self.name = name
+        self.enabled = enabled
+        self.entries = entries
+    }
+}
+
+/*
+===============
+LegacyIPRule
+An address rule from a tunnel saved before lists.
+===============
+*/
+private struct LegacyIPRule: Codable {
+    var id: UUID
+    var cidr: String
+    var note: String?
+    var enabled: Bool?
+}
+
+/*
+===============
+LegacyDomainRule
+A domain rule from a tunnel saved before lists.
+===============
+*/
+private struct LegacyDomainRule: Codable {
+    var id: UUID
+    var name: String
+    var note: String?
+    var enabled: Bool?
+    var addresses: [String]?
+    var refreshAt: Date?
 }
 
 struct AppRule: Codable, Identifiable, Equatable {
@@ -61,44 +121,13 @@ init
     }
 }
 
-struct DomainRule: Codable, Identifiable, Equatable {
-    var id: UUID
-    var name: String
-    var note: String
-    var enabled: Bool
-    var addresses: [String]
-    var refreshAt: Date?
-
-/*
-===============
-init
-===============
-*/
-    init(
-        id: UUID = UUID(),
-        name: String,
-        note: String = "",
-        enabled: Bool = true,
-        addresses: [String] = [],
-        refreshAt: Date? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.note = note
-        self.enabled = enabled
-        self.addresses = addresses
-        self.refreshAt = refreshAt
-    }
-}
-
 struct Tunnel: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var slug: String
     var configText: String
-    var ipRules: [IPRule]
+    var routeLists: [RouteList]
     var appRules: [AppRule]
-    var domainRules: [DomainRule]
     var excludeLAN: Bool
     var routePolicy: RoutePolicy
 
@@ -112,9 +141,8 @@ init
         name: String,
         slug: String = Tunnel.makeSlug(),
         configText: String,
-        ipRules: [IPRule] = [],
+        routeLists: [RouteList] = [],
         appRules: [AppRule] = [],
-        domainRules: [DomainRule] = [],
         excludeLAN: Bool = true,
         routePolicy: RoutePolicy = .exceptions
     ) {
@@ -122,15 +150,14 @@ init
         self.name = name
         self.slug = slug
         self.configText = configText
-        self.ipRules = ipRules
+        self.routeLists = routeLists
         self.appRules = appRules
-        self.domainRules = domainRules
         self.excludeLAN = excludeLAN
         self.routePolicy = routePolicy
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, configText, ipRules, appRules, domainRules, excludeLAN, routePolicy
+        case id, name, slug, configText, ipRules, appRules, domainRules, routeLists, excludeLAN, routePolicy
     }
 
 /*
@@ -144,11 +171,16 @@ init
         name = try container.decode(String.self, forKey: .name)
         slug = try container.decode(String.self, forKey: .slug)
         configText = try container.decode(String.self, forKey: .configText)
-        ipRules = try container.decodeIfPresent([IPRule].self, forKey: .ipRules) ?? []
         appRules = try container.decodeIfPresent([AppRule].self, forKey: .appRules) ?? []
-        domainRules = try container.decodeIfPresent([DomainRule].self, forKey: .domainRules) ?? []
         excludeLAN = try container.decodeIfPresent(Bool.self, forKey: .excludeLAN) ?? true
         routePolicy = try container.decodeIfPresent(RoutePolicy.self, forKey: .routePolicy) ?? .exceptions
+        if container.contains(.routeLists) {
+            routeLists = try container.decodeIfPresent([RouteList].self, forKey: .routeLists) ?? []
+        } else {
+            let ips = try container.decodeIfPresent([LegacyIPRule].self, forKey: .ipRules) ?? []
+            let domains = try container.decodeIfPresent([LegacyDomainRule].self, forKey: .domainRules) ?? []
+            routeLists = Tunnel.lists(from: ips, domains: domains)
+        }
     }
 
 /*
@@ -162,11 +194,41 @@ encode
         try container.encode(name, forKey: .name)
         try container.encode(slug, forKey: .slug)
         try container.encode(configText, forKey: .configText)
-        try container.encode(ipRules, forKey: .ipRules)
+        try container.encode(routeLists, forKey: .routeLists)
         try container.encode(appRules, forKey: .appRules)
-        try container.encode(domainRules, forKey: .domainRules)
         try container.encode(excludeLAN, forKey: .excludeLAN)
         try container.encode(routePolicy, forKey: .routePolicy)
+    }
+
+/*
+===============
+lists
+One old rule becomes one list. The note, when it had one, is the list name.
+===============
+*/
+    private static func lists(from ips: [LegacyIPRule], domains: [LegacyDomainRule]) -> [RouteList] {
+        var lists: [RouteList] = []
+        for rule in ips {
+            let note = (rule.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            lists.append(RouteList(
+                id: rule.id,
+                name: note.isEmpty ? rule.cidr : note,
+                enabled: rule.enabled ?? true,
+                entries: [RouteEntry(kind: .ip, value: rule.cidr)]
+            ))
+        }
+
+        for rule in domains {
+            let note = (rule.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            lists.append(RouteList(
+                id: rule.id,
+                name: note.isEmpty ? rule.name : note,
+                enabled: rule.enabled ?? true,
+                entries: [RouteEntry(kind: .domain, value: rule.name, addresses: rule.addresses ?? [], refreshAt: rule.refreshAt)]
+            ))
+        }
+
+        return lists
     }
 
 /*
@@ -211,16 +273,18 @@ directCIDRs
 */
     func directCIDRs() -> [String] {
         var values: [String] = []
-        for rule in ipRules where rule.enabled {
-            values.append(rule.cidr)
+        for list in routeLists where list.enabled {
+            for entry in list.entries {
+                if entry.kind == .ip {
+                    values.append(entry.value)
+                } else {
+                    values.append(contentsOf: entry.addresses)
+                }
+            }
         }
 
         for app in appRules where app.enabled {
             values.append(contentsOf: app.learned)
-        }
-
-        for domain in domainRules where domain.enabled {
-            values.append(contentsOf: domain.addresses)
         }
 
         return values

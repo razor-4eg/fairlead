@@ -13,9 +13,22 @@ import SwiftUI
 struct BypassPane: View {
     @EnvironmentObject private var model: AppModel
     var tunnel: Tunnel
-    @State private var addingRoutes = false
+    @State private var sheet: Sheet?
     @State private var openApps: Set<UUID> = []
-    @State private var openDomains: Set<UUID> = []
+
+    private enum Sheet: Identifiable {
+        case add
+        case list(UUID)
+
+        var id: String {
+            switch self {
+            case .add:
+                return "add"
+            case .list(let id):
+                return "list-" + id.uuidString
+            }
+        }
+    }
 
     private var live: LiveTunnel { model.live(tunnel.id) }
 
@@ -55,12 +68,8 @@ struct BypassPane: View {
                     .padding(.vertical, 8)
             } else {
                 VStack(spacing: 8) {
-                    ForEach(tunnel.ipRules) { rule in
-                        ipRow(rule)
-                    }
-
-                    ForEach(tunnel.domainRules) { rule in
-                        domainRow(rule)
+                    ForEach(tunnel.routeLists) { list in
+                        listRow(list)
                     }
 
                     ForEach(tunnel.appRules) { rule in
@@ -77,7 +86,7 @@ struct BypassPane: View {
 
             HStack(spacing: 8) {
                 FairleadButton(title: "Add route", systemImage: "plus") {
-                    addingRoutes = true
+                    sheet = .add
                 }
 
                 FairleadButton(title: "Add app", systemImage: "plus") {
@@ -87,9 +96,15 @@ struct BypassPane: View {
                 Spacer()
             }
         }
-        .sheet(isPresented: $addingRoutes) {
-            AddRouteSheet(tunnelID: tunnel.id)
-                .environmentObject(model)
+        .sheet(item: $sheet) { item in
+            switch item {
+            case .add:
+                AddRouteSheet(tunnelID: tunnel.id)
+                    .environmentObject(model)
+            case .list(let id):
+                RouteListSheet(tunnelID: tunnel.id, listID: id)
+                    .environmentObject(model)
+            }
         }
         .padding(18)
         .background(Theme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -129,7 +144,7 @@ struct BypassPane: View {
     }
 
     private var listIsEmpty: Bool {
-        tunnel.ipRules.isEmpty && tunnel.domainRules.isEmpty && tunnel.appRules.isEmpty
+        tunnel.routeLists.isEmpty && tunnel.appRules.isEmpty
     }
 
     private var listNote: some View {
@@ -141,30 +156,37 @@ struct BypassPane: View {
 
 /*
 ===============
-ipRow
+listRow
+One named list. View sits to the left of the switch.
 ===============
 */
-    private func ipRow(_ rule: IPRule) -> some View {
+    private func listRow(_ list: RouteList) -> some View {
         HStack(spacing: 12) {
-            kindMark("IP")
+            kindMark("List")
             VStack(alignment: .leading, spacing: 2) {
-                Text(rule.cidr)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
-                if !rule.note.isEmpty {
-                    Text(rule.note)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.muted)
-                }
+                Text(list.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(list.enabled ? Theme.text : Theme.faint)
+                Text(listCaption(list))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.muted)
             }
 
             Spacer()
+            Button {
+                sheet = .list(list.id)
+            } label: {
+                Text(FairleadL10n.text("View"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain)
             FairleadSwitch(isOn: Binding(
-                get: { rule.enabled },
-                set: { model.setIP(rule.id, tunnel: tunnel.id, enabled: $0) }
+                get: { list.enabled },
+                set: { model.setRouteList(list.id, tunnel: tunnel.id, enabled: $0) }
             ))
             Button {
-                model.removeIP(rule.id, tunnel: tunnel.id)
+                model.removeRouteList(list.id, tunnel: tunnel.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
@@ -178,97 +200,19 @@ ipRow
 
 /*
 ===============
-domainRow
+listCaption
 ===============
 */
-    private func domainRow(_ rule: DomainRule) -> some View {
-        let expanded = openDomains.contains(rule.id)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                kindMark("Domain")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(rule.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
-                    if !rule.note.isEmpty {
-                        Text(rule.note)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.muted)
-                    }
-
-                    if !domainStatus(rule).isEmpty {
-                        Text(domainStatus(rule))
-                            .font(.system(size: 11))
-                            .foregroundStyle(domainFailed(rule) ? Theme.danger : Theme.muted)
-                    }
-                }
-
-                Spacer()
-                FairleadSwitch(isOn: Binding(
-                    get: { rule.enabled },
-                    set: { model.setDomain(rule.id, tunnel: tunnel.id, enabled: $0) }
-                ))
-                Button {
-                    model.removeDomain(rule.id, tunnel: tunnel.id)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.faint)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if !rule.addresses.isEmpty {
-                Button(FairleadL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
-                    if expanded { openDomains.remove(rule.id) } else { openDomains.insert(rule.id) }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                if expanded {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(rule.addresses, id: \.self) { address in
-                            Text(address)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.text)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
+    private func listCaption(_ list: RouteList) -> String {
+        let domains = list.entries.filter { $0.kind == .domain }.count
+        let addresses = list.entries.filter { $0.kind == .ip }.count
+        if domains > 0, addresses > 0 {
+            return FairleadL10n.domainCount(domains) + ", " + FairleadL10n.addressCount(addresses)
         }
-        .padding(10)
-        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-/*
-===============
-domainStatus
-===============
-*/
-    private func domainStatus(_ rule: DomainRule) -> String {
-        if !rule.addresses.isEmpty {
-            return FairleadL10n.addressCount(rule.addresses.count)
+        if domains > 0 {
+            return FairleadL10n.domainCount(domains)
         }
-
-        if rule.enabled, rule.refreshAt == nil {
-            return FairleadL10n.text("Resolving…")
-        }
-
-        if rule.enabled {
-            return FairleadL10n.format("Could not resolve %@.", rule.name)
-        }
-
-        return ""
-    }
-
-/*
-===============
-domainFailed
-===============
-*/
-    private func domainFailed(_ rule: DomainRule) -> Bool {
-        rule.enabled && rule.addresses.isEmpty && rule.refreshAt != nil
+        return FairleadL10n.addressCount(addresses)
     }
 
 /*
@@ -353,8 +297,12 @@ struct AddRouteSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     var tunnelID: UUID
+    @State private var name = ""
     @State private var text = ""
     @State private var failures: [String] = []
+    @State private var progress = ""
+    @State private var busy = false
+    @State private var addTask: Task<Void, Never>?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -362,10 +310,18 @@ struct AddRouteSheet: View {
             Text("Add route")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Theme.text)
-            Text("One address per line. Write a note after the address on the same line.")
+            Text("One address or domain per line.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            TextField("Name", text: $name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.text)
+                .padding(10)
+                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                .disabled(busy)
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
                     .font(.system(size: 13, design: .monospaced))
@@ -373,8 +329,9 @@ struct AddRouteSheet: View {
                     .scrollContentBackground(.hidden)
                     .focused($focused)
                     .padding(10)
+                    .disabled(busy)
                 if text.isEmpty {
-                    Text("example.com office\n203.0.113.10\n10.1.0.0/16 lab")
+                    Text("example.com\n203.0.113.10\n10.1.0.0/16")
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(Theme.faint)
                         .padding(.horizontal, 15)
@@ -396,8 +353,15 @@ struct AddRouteSheet: View {
             }
 
             HStack {
+                Text(progress)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
                 Spacer()
-                FairleadButton(title: "Cancel") { dismiss() }
+                FairleadButton(title: "Cancel") {
+                    addTask?.cancel()
+                    dismiss()
+                }
                 FairleadButton(title: "Add", prominent: canAdd) { commit() }
                     .disabled(!canAdd)
                     .opacity(canAdd ? 1 : 0.45)
@@ -407,10 +371,13 @@ struct AddRouteSheet: View {
         .frame(width: 480)
         .background(Theme.bg)
         .onAppear { focused = true }
+        .onDisappear { addTask?.cancel() }
     }
 
     private var canAdd: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !busy
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
 /*
@@ -419,14 +386,94 @@ commit
 ===============
 */
     private func commit() {
-        let problems = model.addRoutes(to: tunnelID, text: text)
-        if problems.isEmpty {
-            dismiss()
-            return
-        }
+        let listName = name
+        let body = text
+        busy = true
+        failures = []
+        progress = ""
+        addTask?.cancel()
+        addTask = Task {
+            let problems = await model.addRouteList(to: tunnelID, name: listName, text: body) { message in
+                progress = message
+            }
+            guard !Task.isCancelled else { return }
+            busy = false
+            progress = ""
+            let kept = problems.filter { !$0.message.isEmpty }
+            if kept.isEmpty {
+                dismiss()
+                return
+            }
 
-        text = problems.map(\.line).joined(separator: "\n")
-        failures = problems.map { "\($0.line): \($0.message)" }
+            text = problems.map(\.line).joined(separator: "\n")
+            failures = kept.map { problem in
+                problem.line.isEmpty ? problem.message : "\(problem.line): \(problem.message)"
+            }
+        }
+    }
+}
+
+struct RouteListSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    var tunnelID: UUID
+    var listID: UUID
+
+    private var list: RouteList? {
+        model.tunnels.first { $0.id == tunnelID }?.routeLists.first { $0.id == listID }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(list?.name ?? "")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Theme.text)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let list {
+                        ForEach(list.entries) { entry in
+                            entryRow(entry)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+            HStack {
+                Spacer()
+                FairleadButton(title: "Close") { dismiss() }
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .background(Theme.bg)
+    }
+
+/*
+===============
+entryRow
+===============
+*/
+    private func entryRow(_ entry: RouteEntry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(Theme.text)
+            if entry.kind == .domain {
+                if entry.addresses.isEmpty {
+                    Text(entry.refreshAt == nil
+                         ? FairleadL10n.text("Resolving…")
+                         : FairleadL10n.format("Could not resolve %@.", entry.value))
+                        .font(.system(size: 11))
+                        .foregroundStyle(entry.refreshAt == nil ? Theme.muted : Theme.danger)
+                } else {
+                    ForEach(entry.addresses, id: \.self) { address in
+                        Text(address)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
     }
 }
 

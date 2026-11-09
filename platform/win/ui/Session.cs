@@ -51,20 +51,24 @@ public class Bindable : INotifyPropertyChanged {
     public void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-public sealed class IpRule {
+public sealed class RouteEntry {
     public string Id { get; set; } = "";
-    public string Cidr { get; set; } = "";
-    public string Note { get; set; } = "";
-    public bool Enabled { get; set; } = true;
-}
-
-public sealed class DomainRule {
-    public string Id { get; set; } = "";
-    public string Name { get; set; } = "";
-    public string Note { get; set; } = "";
-    public bool Enabled { get; set; } = true;
+    public string Kind { get; set; } = "";
+    public string Value { get; set; } = "";
     public List<string> Addresses { get; set; } = new();
     public string Status { get; set; } = "";
+}
+
+public sealed class RouteList {
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public List<RouteEntry> Entries { get; } = new();
+}
+
+public sealed class RouteProblem {
+    public string Line { get; set; } = "";
+    public string Message { get; set; } = "";
 }
 
 public sealed class AppRule {
@@ -86,8 +90,7 @@ public sealed class Tunnel : Bindable {
     public bool ExcludeLan { get => _excludeLan; set => Set(ref _excludeLan, value); }
     bool _selected;
     public bool SelectedPolicy { get => _selected; set => Set(ref _selected, value); }
-    public List<IpRule> Ips { get; } = new();
-    public List<DomainRule> Domains { get; } = new();
+    public List<RouteList> Lists { get; } = new();
     public List<AppRule> Apps { get; } = new();
     public string Endpoint { get; set; } = "no endpoint";
     public string Address { get; set; } = "";
@@ -156,7 +159,7 @@ public sealed class Session : Bindable {
     public bool Amnezia => Selected?.Amnezia ?? false;
     public bool Connected => Selected?.Connected ?? false;
     public bool DirectOn => Selected?.SelectedPolicy != true;
-    public bool RulesEmpty => Selected != null && Selected.Ips.Count == 0 && Selected.Domains.Count == 0 && Selected.Apps.Count == 0;
+    public bool RulesEmpty => Selected != null && Selected.Lists.Count == 0 && Selected.Apps.Count == 0;
 
 	readonly string _dir;
 	readonly string _token;
@@ -577,42 +580,82 @@ public sealed class Session : Bindable {
 
     /*
     ===============
-    AddRoutes
-    Parse the route box. Returns the error text, or empty.
+    AddRouteList
+    Read one named list. A line is an address or a domain. Resolves domains before the list is stored.
+    The box stores a return as \r. Pasted text may use \n or \r\n.
     ===============
     */
-    public async Task<string> AddRoutes(string text) {
-        if (Selected == null) {
-            return "";
+    public async Task<List<RouteProblem>> AddRouteList(string name, string text, Action<string> progress, CancellationToken cancel) {
+        var problems = new List<RouteProblem>();
+        if (Selected == null || name.Trim().Length == 0) {
+            return problems;
         }
 
-        string error = "";
-        int added = 0;
-        foreach (var raw in text.Replace("\r", "").Split('\n')) {
-            var (kind, value, note, err) = Core.Classify(raw);
-            if (kind == "error") {
-                if (error.Length == 0) {
-                    error = err;
-                }
+        var list = new RouteList { Id = Id(), Name = name.Trim(), Enabled = true };
+        var seen = new HashSet<string>();
+        foreach (var existing in Selected.Lists) {
+            foreach (var entry in existing.Entries) {
+                seen.Add(entry.Kind + " " + entry.Value);
+            }
+        }
 
+        bool reportedCap = false;
+        foreach (var raw in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')) {
+            cancel.ThrowIfCancellationRequested();
+            string line = raw.Trim();
+            if (line.Length == 0) {
                 continue;
             }
-            if (kind == "ip" && Selected.Ips.Count < 32 && Selected.Ips.All(r => r.Cidr != value)) {
-                Selected.Ips.Add(new IpRule { Id = Id(), Cidr = value, Note = note, Enabled = true });
-                added++;
-            } else if (kind == "domain" && Selected.Domains.Count < 16) {
-                Selected.Domains.Add(new DomainRule { Id = Id(), Name = value, Note = note, Enabled = true });
-                added++;
+
+            if (list.Entries.Count >= 4096) {
+                problems.Add(new RouteProblem { Line = line, Message = reportedCap ? "" : "A list can hold 4096 entries." });
+                reportedCap = true;
+                continue;
+            }
+
+            var (kind, value, note, err) = Core.Classify(line);
+            if (note.Length > 0 || kind == "error" || kind.Length == 0) {
+                problems.Add(new RouteProblem { Line = line, Message = err.Length > 0 ? err : "Enter an IP, a network, or a domain." });
+                continue;
+            }
+
+            if (!seen.Add(kind + " " + value)) {
+                string message = kind == "domain" ? "That domain is already listed." : "That address is already listed.";
+                problems.Add(new RouteProblem { Line = line, Message = message });
+                continue;
+            }
+
+            list.Entries.Add(new RouteEntry { Id = Id(), Kind = kind, Value = value });
+        }
+
+        if (list.Entries.Count == 0) {
+            if (problems.Count == 0) {
+                problems.Add(new RouteProblem { Message = "Enter an IP, a network, or a domain." });
+            }
+
+            return problems;
+        }
+
+        var domains = list.Entries.Where(entry => entry.Kind == "domain").ToList();
+        if (domains.Count == 0) {
+            progress("Adding the list");
+            await Task.Yield();
+        } else {
+            for (int i = 0; i < domains.Count; i++) {
+                cancel.ThrowIfCancellationRequested();
+                progress("Resolving " + (i + 1) + " of " + domains.Count);
+                await Task.Yield();
+                cancel.ThrowIfCancellationRequested();
+                await ResolveEntry(domains[i]);
             }
         }
 
-        if (added > 0 && Selected != null) {
-            await ResolveDomains(Selected);
-        }
-
+        cancel.ThrowIfCancellationRequested();
+        progress("Adding the list");
+        Selected.Lists.Add(list);
         await ChangedRules();
         RulesChanged?.Invoke();
-        return error;
+        return problems;
     }
 
     /*
@@ -803,23 +846,30 @@ public sealed class Session : Bindable {
     ===============
     */
     public async Task ResolveDomains(Tunnel t) {
-        var pending = t.Domains.Where(d => d.Enabled && d.Addresses.Count == 0 && _resolving.Add(d.Id)).ToList();
+        var pending = new List<RouteEntry>();
+        foreach (var list in t.Lists) {
+            if (!list.Enabled) {
+                continue;
+            }
+
+            foreach (var entry in list.Entries) {
+                if (entry.Kind == "domain" && entry.Addresses.Count == 0 && entry.Status.Length == 0 && _resolving.Add(entry.Id)) {
+                    pending.Add(entry);
+                }
+            }
+        }
+
         if (pending.Count == 0) {
             return;
         }
 
         bool changed = false;
-        foreach (var d in pending) {
+        foreach (var entry in pending) {
             try {
-                var ips = await Task.Run(() => Dns.GetHostAddresses(d.Name));
-                d.Addresses = ips.Where(a => a.AddressFamily == AddressFamily.InterNetwork).Select(a => a.ToString()).Distinct().Take(8).ToList();
-                d.Status = d.Addresses.Count == 0 ? "Could not resolve" : "";
-                changed = true;
-            } catch {
-                d.Status = "Could not resolve";
+                await ResolveEntry(entry);
                 changed = true;
             } finally {
-                _resolving.Remove(d.Id);
+                _resolving.Remove(entry.Id);
             }
         }
 
@@ -874,6 +924,107 @@ public sealed class Session : Bindable {
 
     /*
     ===============
+    ResolveEntry
+    Fill one domain from the regular network. At most eight IPv4 addresses.
+    ===============
+    */
+    async Task ResolveEntry(RouteEntry entry) {
+        try {
+            var ips = await Task.Run(() => Dns.GetHostAddresses(entry.Value));
+            entry.Addresses = ips.Where(a => a.AddressFamily == AddressFamily.InterNetwork).Select(a => a.ToString()).Distinct().Take(8).ToList();
+            entry.Status = entry.Addresses.Count == 0 ? "Could not resolve" : "";
+        } catch {
+            entry.Status = "Could not resolve";
+        }
+    }
+
+    /*
+    ===============
+    ReadLists
+    routeLists, or one list per rule from a tunnel saved before lists.
+    ===============
+    */
+    void ReadLists(JsonElement item, Tunnel t) {
+        if (item.TryGetProperty("routeLists", out var lists)) {
+            foreach (var one in lists.EnumerateArray()) {
+                var list = new RouteList {
+                    Id = Str(one, "id"),
+                    Name = Str(one, "name"),
+                    Enabled = !one.TryGetProperty("enabled", out var en) || en.GetBoolean()
+                };
+                if (list.Id.Length == 0) {
+                    list.Id = Id();
+                }
+
+                if (one.TryGetProperty("entries", out var entries)) {
+                    foreach (var entry in entries.EnumerateArray()) {
+                        var row = new RouteEntry { Id = Str(entry, "id"), Kind = Str(entry, "kind"), Value = Str(entry, "value") };
+                        if (row.Id.Length == 0) {
+                            row.Id = Id();
+                        }
+
+                        if (entry.TryGetProperty("addresses", out var addrs)) {
+                            foreach (var a in addrs.EnumerateArray()) {
+                                row.Addresses.Add(a.GetString() ?? "");
+                            }
+                        }
+
+                        list.Entries.Add(row);
+                    }
+                }
+
+                t.Lists.Add(list);
+            }
+
+            return;
+        }
+
+        if (item.TryGetProperty("ipRules", out var ips)) {
+            foreach (var one in ips.EnumerateArray()) {
+                string cidr = Str(one, "cidr");
+                string note = Str(one, "note").Trim();
+                var list = new RouteList {
+                    Id = Str(one, "id"),
+                    Name = note.Length > 0 ? note : cidr,
+                    Enabled = !one.TryGetProperty("enabled", out var en) || en.GetBoolean()
+                };
+                if (list.Id.Length == 0) {
+                    list.Id = Id();
+                }
+
+                list.Entries.Add(new RouteEntry { Id = Id(), Kind = "ip", Value = cidr });
+                t.Lists.Add(list);
+            }
+        }
+
+        if (item.TryGetProperty("domainRules", out var doms)) {
+            foreach (var one in doms.EnumerateArray()) {
+                string domain = Str(one, "name");
+                string note = Str(one, "note").Trim();
+                var list = new RouteList {
+                    Id = Str(one, "id"),
+                    Name = note.Length > 0 ? note : domain,
+                    Enabled = !one.TryGetProperty("enabled", out var en) || en.GetBoolean()
+                };
+                if (list.Id.Length == 0) {
+                    list.Id = Id();
+                }
+
+                var row = new RouteEntry { Id = Id(), Kind = "domain", Value = domain };
+                if (one.TryGetProperty("addresses", out var addrs)) {
+                    foreach (var a in addrs.EnumerateArray()) {
+                        row.Addresses.Add(a.GetString() ?? "");
+                    }
+                }
+
+                list.Entries.Add(row);
+                t.Lists.Add(list);
+            }
+        }
+    }
+
+    /*
+    ===============
     Load
     Read tunnels and settings from disk.
     ===============
@@ -920,16 +1071,7 @@ public sealed class Session : Bindable {
                     t.Slug = Slug();
                 }
 
-                if (item.TryGetProperty("ipRules", out var ips))
-                    foreach (var one in ips.EnumerateArray())
-                        t.Ips.Add(new IpRule { Id = Str(one, "id"), Cidr = Str(one, "cidr"), Note = Str(one, "note"), Enabled = !one.TryGetProperty("enabled", out var en) || en.GetBoolean() });
-                if (item.TryGetProperty("domainRules", out var doms))
-                    foreach (var one in doms.EnumerateArray()) {
-                        var d = new DomainRule { Id = Str(one, "id"), Name = Str(one, "name"), Note = Str(one, "note"), Enabled = !one.TryGetProperty("enabled", out var en) || en.GetBoolean() };
-                        if (one.TryGetProperty("addresses", out var addrs))
-                            foreach (var a in addrs.EnumerateArray()) d.Addresses.Add(a.GetString() ?? "");
-                        t.Domains.Add(d);
-                    }
+                ReadLists(item, t);
 
                 if (item.TryGetProperty("appRules", out var apps))
                     foreach (var one in apps.EnumerateArray()) {
@@ -964,32 +1106,34 @@ public sealed class Session : Bindable {
             sb.Append(",\"configText\":").Append(JsonQuote(t.ConfigText));
             sb.Append(t.ExcludeLan ? ",\"excludeLAN\":true" : ",\"excludeLAN\":false");
             sb.Append(t.SelectedPolicy ? ",\"routePolicy\":\"selected\"" : ",\"routePolicy\":\"exceptions\"");
-            sb.Append(",\"ipRules\":[");
-            for (int k = 0; k < t.Ips.Count; k++) {
+            sb.Append(",\"routeLists\":[");
+            for (int k = 0; k < t.Lists.Count; k++) {
                 if (k > 0) {
                     sb.Append(',');
                 }
 
-                var r = t.Ips[k];
-                sb.Append("{\"id\":").Append(JsonQuote(r.Id)).Append(",\"cidr\":").Append(JsonQuote(r.Cidr)).Append(",\"note\":").Append(JsonQuote(r.Note)).Append(r.Enabled ? ",\"enabled\":true}" : ",\"enabled\":false}");
-            }
-
-            sb.Append("],\"domainRules\":[");
-            for (int k = 0; k < t.Domains.Count; k++) {
-                if (k > 0) {
-                    sb.Append(',');
-                }
-
-                var r = t.Domains[k];
-                sb.Append("{\"id\":").Append(JsonQuote(r.Id)).Append(",\"name\":").Append(JsonQuote(r.Name)).Append(",\"note\":").Append(JsonQuote(r.Note));
-                sb.Append(r.Enabled ? ",\"enabled\":true" : ",\"enabled\":false").Append(",\"addresses\":[");
-                for (int a = 0; a < r.Addresses.Count; a++) {
-                    if (a > 0) {
+                var list = t.Lists[k];
+                sb.Append("{\"id\":").Append(JsonQuote(list.Id)).Append(",\"name\":").Append(JsonQuote(list.Name));
+                sb.Append(list.Enabled ? ",\"enabled\":true" : ",\"enabled\":false").Append(",\"entries\":[");
+                for (int n = 0; n < list.Entries.Count; n++) {
+                    if (n > 0) {
                         sb.Append(',');
                     }
 
-                    sb.Append(JsonQuote(r.Addresses[a]));
+                    var entry = list.Entries[n];
+                    sb.Append("{\"id\":").Append(JsonQuote(entry.Id)).Append(",\"kind\":").Append(JsonQuote(entry.Kind));
+                    sb.Append(",\"value\":").Append(JsonQuote(entry.Value)).Append(",\"addresses\":[");
+                    for (int a = 0; a < entry.Addresses.Count; a++) {
+                        if (a > 0) {
+                            sb.Append(',');
+                        }
+
+                        sb.Append(JsonQuote(entry.Addresses[a]));
+                    }
+
+                    sb.Append("]}");
                 }
+
                 sb.Append("]}");
             }
 
@@ -1040,23 +1184,26 @@ public sealed class Session : Bindable {
             sb.Append(t.ExcludeLan ? ",\"excludeLAN\":true" : ",\"excludeLAN\":false");
             sb.Append(",\"cidrs\":[");
             bool first = true;
-            foreach (var r in t.Ips.Where(x => x.Enabled)) {
-                if (!first) {
-                    sb.Append(',');
-                }
+            foreach (var list in t.Lists.Where(x => x.Enabled)) {
+                foreach (var entry in list.Entries) {
+                    if (entry.Kind == "ip") {
+                        if (!first) {
+                            sb.Append(',');
+                        }
 
-                first = false;
-                sb.Append(JsonQuote(r.Cidr));
-            }
-
-            foreach (var d in t.Domains.Where(x => x.Enabled)) {
-                foreach (var ip in d.Addresses) {
-                    if (!first) {
-                        sb.Append(',');
+                        first = false;
+                        sb.Append(JsonQuote(entry.Value));
+                        continue;
                     }
 
-                    first = false;
-                    sb.Append(JsonQuote(ip));
+                    foreach (var ip in entry.Addresses) {
+                        if (!first) {
+                            sb.Append(',');
+                        }
+
+                        first = false;
+                        sb.Append(JsonQuote(ip));
+                    }
                 }
             }
 

@@ -216,5 +216,14 @@
 "A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "Домен узнаётся через обычную сеть. Адреса приложения запоминаются, когда оно подключается. На macOS маршрут действует для всех приложений.";
 "203.0.113.10 or example.com" = "203.0.113.10 или example.com";
 "Add route" = "Добавить маршрут";
-"One address per line. Write a note after the address on the same line." = "Один адрес на строку. Заметку пишите в той же строке после адреса.";
-"example.com office\n203.0.113.10\n10.1.0.0/16 lab" = "example.com офис\n203.0.113.10\n10.1.0.0/16 лаборатория";
+"One address or domain per line." = "Один адрес или домен на строку.";
+"example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
+"View" = "Смотреть";
+"List" = "Список";
+"Resolving %d of %d" = "Узнаём адреса: %d из %d";
+"Adding the list" = "Добавляем список";
+"A list can hold 4096 entries." = "В списке может быть не больше 4096 записей.";
+"%d domains.one" = "%d домен";
+"%d domains.few" = "%d домена";
+"%d domains.many" = "%d доменов";
+"%d domains.other" = "%d домена";

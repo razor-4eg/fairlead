@@ -216,5 +216,14 @@
 "A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "域名通过普通网络解析。应用的地址会在它连接时被记住。在 macOS 上，这条路由对所有应用生效。";
 "203.0.113.10 or example.com" = "203.0.113.10 或 example.com";
 "Add route" = "添加路由";
-"One address per line. Write a note after the address on the same line." = "每行一个地址。备注写在同一行地址后面。";
-"example.com office\n203.0.113.10\n10.1.0.0/16 lab" = "example.com 办公室\n203.0.113.10\n10.1.0.0/16 实验室";
+"One address or domain per line." = "每行一个地址或域名。";
+"example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
+"View" = "查看";
+"List" = "列表";
+"Resolving %d of %d" = "正在解析 %d / %d";
+"Adding the list" = "正在添加列表";
+"A list can hold 4096 entries." = "一个列表最多 4096 条。";
+"%d domains.one" = "%d 个域名";
+"%d domains.few" = "%d 个域名";
+"%d domains.many" = "%d 个域名";
+"%d domains.other" = "%d 个域名";

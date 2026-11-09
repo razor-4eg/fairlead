@@ -339,15 +339,25 @@
                     </Grid>
                     <StackPanel x:Name="RoutePane" Visibility="Collapsed" Width="480" Spacing="12">
                         <TextBlock Text="Add route" FontSize="26" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
-                        <TextBlock Text="One address per line. Write a note after the address on the same line." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="One address or domain per line." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBox x:Name="RouteName" PlaceholderText="Name" Style="{StaticResource QuietBox}" TextChanged="RouteChanged"/>
                         <Grid>
                             <TextBox x:Name="RouteBox" AcceptsReturn="True" Height="180" TextWrapping="Wrap" FontFamily="Consolas" Style="{StaticResource QuietBox}" TextChanged="RouteChanged"/>
-                            <TextBlock x:Name="RouteHint" IsHitTestVisible="False" FontFamily="Consolas" FontSize="13" Foreground="{StaticResource FaintBrush}" Margin="12,10,12,0" Text="example.com office&#x0a;203.0.113.10&#x0a;10.1.0.0/16 lab"/>
+                            <TextBlock x:Name="RouteHint" IsHitTestVisible="False" FontFamily="Consolas" FontSize="13" Foreground="{StaticResource FaintBrush}" Margin="12,10,12,0" Text="example.com&#x0a;203.0.113.10&#x0a;10.1.0.0/16"/>
                         </Grid>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                            <Button Content="Cancel" Style="{StaticResource PillButton}" Click="CloseSheet"/>
-                            <Button Content="Add" Style="{StaticResource ProminentButton}" Click="SaveRoutes"/>
-                        </StackPanel>
+                        <TextBlock x:Name="RouteError" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"/>
+                        <Grid>
+                            <TextBlock x:Name="RouteProgress" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource MutedBrush}" Visibility="Collapsed"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                                <Button Content="Cancel" Style="{StaticResource PillButton}" Click="CloseSheet"/>
+                                <Button x:Name="RouteAdd" Content="Add" Style="{StaticResource ProminentButton}" Click="SaveRoutes" IsEnabled="False"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                    <StackPanel x:Name="ListPane" Visibility="Collapsed" Width="480" Spacing="12">
+                        <TextBlock x:Name="ListTitle" FontSize="26" FontWeight="Medium" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                        <TextBox x:Name="ListBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" Height="360" Style="{StaticResource QuietBox}" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                        <Button Content="Close" Style="{StaticResource PillButton}" HorizontalAlignment="Right" Click="CloseSheet"/>
                     </StackPanel>
                     <StackPanel x:Name="ConfirmPane" Visibility="Collapsed" Width="380" Spacing="16">
                         <TextBlock x:Name="ConfirmText" FontSize="16" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>

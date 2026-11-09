@@ -216,5 +216,14 @@
 "A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "Un domaine est résolu sur le réseau habituel. Les adresses d'une app sont retenues quand elle se connecte. Sur macOS, la route vaut pour chaque app.";
 "203.0.113.10 or example.com" = "203.0.113.10 ou example.com";
 "Add route" = "Ajouter une route";
-"One address per line. Write a note after the address on the same line." = "Une adresse par ligne. La note suit l'adresse sur la même ligne.";
-"example.com office\n203.0.113.10\n10.1.0.0/16 lab" = "example.com bureau\n203.0.113.10\n10.1.0.0/16 labo";
+"One address or domain per line." = "Une adresse ou un domaine par ligne.";
+"example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
+"View" = "Voir";
+"List" = "Liste";
+"Resolving %d of %d" = "Résolution %d sur %d";
+"Adding the list" = "Ajout de la liste";
+"A list can hold 4096 entries." = "Une liste peut contenir 4096 entrées.";
+"%d domains.one" = "%d domaine";
+"%d domains.few" = "%d domaines";
+"%d domains.many" = "%d domaines";
+"%d domains.other" = "%d domaines";

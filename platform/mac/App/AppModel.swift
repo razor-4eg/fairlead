@@ -472,90 +472,121 @@ disconnect
 
 /*
 ===============
-addRoutes
-Adds every non-empty line. The first word is an IP, network, or domain; the rest of the line is the note.
+addRouteList
+Read one named list. A line is an address or a domain. Resolves domains before the list is stored.
 ===============
 */
-    func addRoutes(to id: UUID, text: String) -> [(line: String, message: String)] {
-        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return [] }
+    func addRouteList(to id: UUID, name: String, text: String, progress: @escaping (String) -> Void) async -> [(line: String, message: String)] {
+        let listName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let tunnel = tunnels.first(where: { $0.id == id }), !listName.isEmpty else { return [] }
         var failures: [(line: String, message: String)] = []
-        var addedDomain = false
+        var entries: [RouteEntry] = []
+        var seen = Set(tunnel.routeLists.flatMap { list in list.entries.map { "\($0.kind.rawValue) \($0.value)" } })
+        var reportedCap = false
+        let cap = 4096
         for rawLine in text.split(whereSeparator: \.isNewline) {
+            if Task.isCancelled { return [] }
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
-            let parts = line.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
-            let target = String(parts[0])
-            let note = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
-            if let cidr = CIDR.parse(target) {
+            if entries.count >= cap {
+                if !reportedCap {
+                    failures.append((line, FairleadL10n.text("A list can hold 4096 entries.")))
+                    reportedCap = true
+                } else {
+                    failures.append((line, ""))
+                }
+                continue
+            }
+            if line.contains(where: { $0.isWhitespace }) {
+                failures.append((line, FairleadL10n.text("Enter an IP, a network, or a domain.")))
+                continue
+            }
+            if let cidr = CIDR.parse(line) {
                 if cidr.prefix == 0 {
                     failures.append((line, FairleadL10n.text("That network is too broad and would disable the whole tunnel.")))
-                } else if tunnel.ipRules.contains(where: { $0.cidr == cidr.string }) {
+                } else if !seen.insert("ip \(cidr.string)").inserted {
                     failures.append((line, FairleadL10n.text("That address is already listed.")))
                 } else {
-                    tunnel.ipRules.append(IPRule(cidr: cidr.string, note: note))
+                    entries.append(RouteEntry(kind: .ip, value: cidr.string))
                 }
-            } else if target.contains("*") {
+            } else if line.contains("*") {
                 failures.append((line, FairleadL10n.text("Wildcards such as *.example.com are not supported.")))
-            } else if let name = DomainName.normalize(target) {
-                if tunnel.domainRules.contains(where: { $0.name == name }) {
+            } else if let domain = DomainName.normalize(line) {
+                if !seen.insert("domain \(domain)").inserted {
                     failures.append((line, FairleadL10n.text("That domain is already listed.")))
                 } else {
-                    tunnel.domainRules.append(DomainRule(name: name, note: note))
-                    addedDomain = true
+                    entries.append(RouteEntry(kind: .domain, value: domain))
                 }
             } else {
                 failures.append((line, FairleadL10n.text("Enter an IP, a network, or a domain.")))
             }
         }
 
-        let added = tunnel.ipRules.count + tunnel.domainRules.count
-        let previous = tunnels.first { $0.id == id }
-        let previousCount = (previous?.ipRules.count ?? 0) + (previous?.domainRules.count ?? 0)
-        if added != previousCount {
-            replace(tunnel)
-            if addedDomain {
-                Task { await refreshDomains() }
+        if entries.isEmpty {
+            if failures.isEmpty {
+                failures.append(("", FairleadL10n.text("Enter an IP, a network, or a domain.")))
+            }
+            return failures
+        }
+
+        let domainIndexes = entries.indices.filter { entries[$0].kind == .domain }
+        if domainIndexes.isEmpty {
+            progress(FairleadL10n.text("Adding the list"))
+            await Task.yield()
+        } else {
+            progress(FairleadL10n.format("Resolving %d of %d", 1, domainIndexes.count))
+            await Task.yield()
+            if Task.isCancelled { return [] }
+            await rememberResolvers()
+            let target = domainLookupTarget(id)
+            let skip = Set(live(id).endpointIPs)
+            if !target.servers.isEmpty {
+                for (offset, index) in domainIndexes.enumerated() {
+                    if Task.isCancelled { return [] }
+                    progress(FairleadL10n.format("Resolving %d of %d", offset + 1, domainIndexes.count))
+                    let host = entries[index].value
+                    let answer = await Task.detached(priority: .utility) {
+                        DomainLookup.resolve(name: host, servers: target.servers, interface: target.interface)
+                    }.value
+                    if Task.isCancelled { return [] }
+                    if let answer {
+                        entries[index].addresses = mergedDomainAddresses(existing: [], answer: answer, skip: skip)
+                        entries[index].refreshAt = Date().addingTimeInterval(TimeInterval(answer.ttl))
+                    } else {
+                        entries[index].refreshAt = Date().addingTimeInterval(30)
+                    }
+                }
             }
         }
 
+        if Task.isCancelled { return [] }
+        progress(FairleadL10n.text("Adding the list"))
+        guard var current = tunnels.first(where: { $0.id == id }) else { return failures }
+        current.routeLists.append(RouteList(name: listName, entries: entries))
+        replace(current)
         return failures
     }
 
 /*
 ===============
-addIP
+removeRouteList
 ===============
 */
-    func addIP(to id: UUID, raw: String, note: String) -> String? {
-        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return nil }
-        guard let cidr = CIDR.parse(raw) else { return FairleadL10n.text("Enter an IP or network, for example 203.0.113.10 or 10.1.0.0/16.") }
-        if cidr.prefix == 0 { return FairleadL10n.text("That network is too broad and would disable the whole tunnel.") }
-        if tunnel.ipRules.contains(where: { $0.cidr == cidr.string }) { return FairleadL10n.text("That address is already listed.") }
-        tunnel.ipRules.append(IPRule(cidr: cidr.string, note: note))
-        replace(tunnel)
-        return nil
-    }
-
-/*
-===============
-removeIP
-===============
-*/
-    func removeIP(_ ruleID: UUID, tunnel id: UUID) {
+    func removeRouteList(_ listID: UUID, tunnel id: UUID) {
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
-        tunnel.ipRules.removeAll { $0.id == ruleID }
+        tunnel.routeLists.removeAll { $0.id == listID }
         replace(tunnel)
     }
 
 /*
 ===============
-setIP
+setRouteList
 ===============
 */
-    func setIP(_ ruleID: UUID, tunnel id: UUID, enabled: Bool) {
+    func setRouteList(_ listID: UUID, tunnel id: UUID, enabled: Bool) {
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
-        guard let index = tunnel.ipRules.firstIndex(where: { $0.id == ruleID }) else { return }
-        tunnel.ipRules[index].enabled = enabled
+        guard let index = tunnel.routeLists.firstIndex(where: { $0.id == listID }) else { return }
+        tunnel.routeLists[index].enabled = enabled
         replace(tunnel)
     }
 
@@ -620,55 +651,6 @@ forget
         guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
         guard let index = tunnel.appRules.firstIndex(where: { $0.id == ruleID }) else { return }
         tunnel.appRules[index].learned.removeAll { $0 == address }
-        replace(tunnel)
-    }
-
-/*
-===============
-addDomain
-===============
-*/
-    func addDomain(to id: UUID, raw: String, note: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("*") {
-            return FairleadL10n.text("Wildcards such as *.example.com are not supported.")
-        }
-
-        guard let name = DomainName.normalize(trimmed) else {
-            return FairleadL10n.text("Enter a domain, for example example.com.")
-        }
-
-        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return nil }
-        if tunnel.domainRules.contains(where: { $0.name == name }) {
-            return FairleadL10n.text("That domain is already listed.")
-        }
-
-        tunnel.domainRules.append(DomainRule(name: name, note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
-        replace(tunnel)
-        Task { await refreshDomains() }
-        return nil
-    }
-
-/*
-===============
-removeDomain
-===============
-*/
-    func removeDomain(_ ruleID: UUID, tunnel id: UUID) {
-        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
-        tunnel.domainRules.removeAll { $0.id == ruleID }
-        replace(tunnel)
-    }
-
-/*
-===============
-setDomain
-===============
-*/
-    func setDomain(_ ruleID: UUID, tunnel id: UUID, enabled: Bool) {
-        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
-        guard let index = tunnel.domainRules.firstIndex(where: { $0.id == ruleID }) else { return }
-        tunnel.domainRules[index].enabled = enabled
         replace(tunnel)
     }
 
@@ -853,14 +835,39 @@ learnDestinations
 
 /*
 ===============
+domainLookupTarget
+DNS servers for one tunnel. A connected tunnel stays off its own utun.
+===============
+*/
+    private func domainLookupTarget(_ id: UUID) -> (servers: [String], interface: String?) {
+        let state = live(id)
+        var servers = state.resolvers
+        var iface: String?
+        if state.phase == .connected || state.phase == .connecting {
+            if servers.isEmpty, let gateway = state.gateway, let ip = IPAddress.parse(gateway) {
+                servers = [ip.string]
+            }
+
+            iface = state.gatewayIface ?? state.resolverIface
+            if let name = iface, name.hasPrefix("utun") { iface = state.resolverIface }
+            if let name = iface, name.hasPrefix("utun") { iface = nil }
+        }
+
+        return (servers, iface)
+    }
+
+/*
+===============
 refreshDomains
 ===============
 */
     private func refreshDomains() async {
         let now = Date()
         let due = tunnels.contains { tunnel in
-            tunnel.domainRules.contains { rule in
-                rule.enabled && (rule.refreshAt == nil || (rule.refreshAt ?? now) <= now)
+            tunnel.routeLists.contains { list in
+                list.enabled && list.entries.contains { entry in
+                    entry.kind == .domain && (entry.refreshAt == nil || (entry.refreshAt ?? now) <= now)
+                }
             }
         }
 
@@ -868,24 +875,14 @@ refreshDomains
         await rememberResolvers()
         var jobs: [DomainJob] = []
         for tunnel in tunnels {
-            let state = live(tunnel.id)
-            var servers = state.resolvers
-            var iface: String?
-            if state.phase == .connected || state.phase == .connecting {
-                if servers.isEmpty, let gateway = state.gateway, let ip = IPAddress.parse(gateway) {
-                    servers = [ip.string]
+            let target = domainLookupTarget(tunnel.id)
+            guard !target.servers.isEmpty else { continue }
+            for list in tunnel.routeLists where list.enabled {
+                for entry in list.entries where entry.kind == .domain {
+                    let ready = entry.refreshAt == nil || (entry.refreshAt ?? now) <= now
+                    guard ready else { continue }
+                    jobs.append(DomainJob(id: entry.id, name: entry.value, servers: target.servers, interface: target.interface))
                 }
-
-                iface = state.gatewayIface ?? state.resolverIface
-                if let name = iface, name.hasPrefix("utun") { iface = state.resolverIface }
-                if let name = iface, name.hasPrefix("utun") { iface = nil }
-            }
-
-            guard !servers.isEmpty else { continue }
-            for rule in tunnel.domainRules where rule.enabled {
-                let ready = rule.refreshAt == nil || (rule.refreshAt ?? now) <= now
-                guard ready else { continue }
-                jobs.append(DomainJob(id: rule.id, name: rule.name, servers: servers, interface: iface))
             }
         }
 
@@ -909,26 +906,28 @@ refreshDomains
             var tunnelChanged = false
             var addressesChanged = false
             let skip = Set(live(tunnel.id).endpointIPs)
-            for ruleIndex in tunnel.domainRules.indices {
-                let ruleID = tunnel.domainRules[ruleIndex].id
-                guard asked.contains(ruleID) else { continue }
-                if let answer = answers[ruleID] {
-                    let next = mergedDomainAddresses(
-                        existing: tunnel.domainRules[ruleIndex].addresses,
-                        answer: answer,
-                        skip: skip
-                    )
-                    if next != tunnel.domainRules[ruleIndex].addresses {
-                        tunnel.domainRules[ruleIndex].addresses = next
-                        addressesChanged = true
+            for listIndex in tunnel.routeLists.indices where tunnel.routeLists[listIndex].enabled {
+                for entryIndex in tunnel.routeLists[listIndex].entries.indices {
+                    let entryID = tunnel.routeLists[listIndex].entries[entryIndex].id
+                    guard asked.contains(entryID) else { continue }
+                    if let answer = answers[entryID] {
+                        let next = mergedDomainAddresses(
+                            existing: tunnel.routeLists[listIndex].entries[entryIndex].addresses,
+                            answer: answer,
+                            skip: skip
+                        )
+                        if next != tunnel.routeLists[listIndex].entries[entryIndex].addresses {
+                            tunnel.routeLists[listIndex].entries[entryIndex].addresses = next
+                            addressesChanged = true
+                        }
+
+                        tunnel.routeLists[listIndex].entries[entryIndex].refreshAt = now.addingTimeInterval(TimeInterval(answer.ttl))
+                    } else {
+                        tunnel.routeLists[listIndex].entries[entryIndex].refreshAt = now.addingTimeInterval(30)
                     }
 
-                    tunnel.domainRules[ruleIndex].refreshAt = now.addingTimeInterval(TimeInterval(answer.ttl))
-                } else {
-                    tunnel.domainRules[ruleIndex].refreshAt = now.addingTimeInterval(30)
+                    tunnelChanged = true
                 }
-
-                tunnelChanged = true
             }
 
             if tunnelChanged {

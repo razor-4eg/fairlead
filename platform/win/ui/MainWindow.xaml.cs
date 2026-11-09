@@ -6,6 +6,7 @@
 //
 //===============================================================
 
+using System.Text;
 using System.Windows.Input;
 using System.Runtime.InteropServices;
 using H.NotifyIcon;
@@ -43,6 +44,7 @@ public sealed partial class MainWindow : Window {
     bool _sized;
     int _sheetEpoch;
     Storyboard? _sheetBoard;
+    CancellationTokenSource? _routeCts;
 
     /*
     ===============
@@ -536,8 +538,16 @@ CallWindowProc
     ===============
     */
     void OpenRoutes(object sender, RoutedEventArgs e) {
+        RouteName.Text = "";
         RouteBox.Text = "";
         RouteHint.Visibility = Visibility.Visible;
+        RouteError.Visibility = Visibility.Collapsed;
+        RouteError.Text = "";
+        RouteProgress.Visibility = Visibility.Collapsed;
+        RouteProgress.Text = "";
+        RouteName.IsEnabled = true;
+        RouteBox.IsEnabled = true;
+        RouteAdd.IsEnabled = false;
         ShowSheet(RoutePane);
     }
 
@@ -685,13 +695,49 @@ CallWindowProc
     ===============
     */
     async void SaveRoutes(object sender, RoutedEventArgs e) {
-        string error = await Session.AddRoutes(RouteBox.Text);
-        if (error.Length > 0) {
-            Banner.Visibility = Visibility.Visible;
-            BannerText.Text = error;
+        if (_routeCts != null) {
+            return;
         }
-        PaintRules();
-        CloseSheet(this, e);
+
+        var cts = new CancellationTokenSource();
+        _routeCts = cts;
+        RouteAdd.IsEnabled = false;
+        RouteName.IsEnabled = false;
+        RouteBox.IsEnabled = false;
+        RouteError.Visibility = Visibility.Collapsed;
+        RouteProgress.Text = "";
+        RouteProgress.Visibility = Visibility.Visible;
+        try {
+            var problems = await Session.AddRouteList(RouteName.Text, RouteBox.Text, text => RouteProgress.Text = text, cts.Token);
+            if (cts.IsCancellationRequested) {
+                return;
+            }
+
+            PaintRules();
+            var kept = problems.Where(problem => problem.Message.Length > 0).ToList();
+            if (kept.Count == 0) {
+                var done = _routeCts;
+                _routeCts = null;
+                done?.Dispose();
+                CloseSheet(this, e);
+                return;
+            }
+
+            RouteBox.Text = string.Join("\n", problems.Select(problem => problem.Line));
+            RouteError.Text = string.Join("\n", kept.Select(problem => problem.Line.Length == 0 ? problem.Message : problem.Line + ": " + problem.Message));
+            RouteError.Visibility = Visibility.Visible;
+        } catch (OperationCanceledException) {
+        } finally {
+            if (ReferenceEquals(_routeCts, cts)) {
+                _routeCts = null;
+                cts.Dispose();
+            }
+
+            RouteProgress.Visibility = Visibility.Collapsed;
+            RouteName.IsEnabled = true;
+            RouteBox.IsEnabled = true;
+            ApplyRouteAdd();
+        }
     }
 
     /*
@@ -829,6 +875,7 @@ CallWindowProc
     void CloseSheet(object sender, RoutedEventArgs e) {
         _creating = false;
         _editing = null;
+        _routeCts?.Cancel();
         if (Overlay.Visibility != Visibility.Visible) {
             return;
         }
@@ -883,6 +930,22 @@ CallWindowProc
     */
     void RouteChanged(object sender, TextChangedEventArgs e) {
         RouteHint.Visibility = RouteBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRouteAdd();
+    }
+
+    /*
+    ===============
+    ApplyRouteAdd
+    The add button waits for a name and at least one line, and stays off while a list is being added.
+    ===============
+    */
+    void ApplyRouteAdd() {
+        if (_routeCts != null) {
+            RouteAdd.IsEnabled = false;
+            return;
+        }
+
+        RouteAdd.IsEnabled = RouteName.Text.Trim().Length > 0 && RouteBox.Text.Trim().Length > 0;
     }
 
     /*
@@ -903,6 +966,7 @@ CallWindowProc
         SettingsPane.Visibility = pane == SettingsPane ? Visibility.Visible : Visibility.Collapsed;
         EditorPane.Visibility = pane == EditorPane ? Visibility.Visible : Visibility.Collapsed;
         RoutePane.Visibility = pane == RoutePane ? Visibility.Visible : Visibility.Collapsed;
+        ListPane.Visibility = pane == ListPane ? Visibility.Visible : Visibility.Collapsed;
         ConfirmPane.Visibility = pane == ConfirmPane ? Visibility.Visible : Visibility.Collapsed;
         Overlay.Visibility = Visibility.Visible;
         _sheetBoard = SheetMotion(0, 0.96, 1, 1, 200);
@@ -1070,6 +1134,75 @@ CallWindowProc
 
     /*
     ===============
+    OpenList
+    The addresses and domains in one list.
+    ===============
+    */
+    void OpenList(RouteList list) {
+        ListTitle.Text = list.Name;
+        ListBox.Text = ListBody(list);
+        ShowSheet(ListPane);
+    }
+
+    /*
+    ===============
+    ListSummary
+    ===============
+    */
+    static string ListSummary(RouteList list) {
+        int domains = 0;
+        int addresses = 0;
+        foreach (var entry in list.Entries) {
+            if (entry.Kind == "domain") {
+                domains++;
+            } else {
+                addresses++;
+            }
+        }
+
+        if (domains > 0 && addresses > 0) {
+            return domains + (domains == 1 ? " domain, " : " domains, ") + addresses + (addresses == 1 ? " address" : " addresses");
+        }
+
+        if (domains > 0) {
+            return domains + (domains == 1 ? " domain" : " domains");
+        }
+
+        return addresses + (addresses == 1 ? " address" : " addresses");
+    }
+
+    /*
+    ===============
+    ListBody
+    ===============
+    */
+    static string ListBody(RouteList list) {
+        var sb = new StringBuilder();
+        foreach (var entry in list.Entries) {
+            if (sb.Length > 0) {
+                sb.Append('\n');
+            }
+
+            sb.Append(entry.Value);
+            if (entry.Kind != "domain") {
+                continue;
+            }
+
+            if (entry.Addresses.Count == 0) {
+                sb.Append("\n  ").Append(entry.Status.Length > 0 ? entry.Status : "Looking up the address");
+                continue;
+            }
+
+            foreach (var ip in entry.Addresses) {
+                sb.Append("\n  ").Append(ip);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /*
+    ===============
     PaintRules
     The route list.
     ===============
@@ -1083,13 +1216,11 @@ CallWindowProc
                 return;
             }
 
-            foreach (var ip in t.Ips) Rules.Children.Add(Rule("IP", ip.Cidr, ip.Note, ip.Enabled, null, v => ip.Enabled = v, () => t.Ips.Remove(ip)));
-            foreach (var d in t.Domains) {
-                string sub = d.Addresses.Count > 0 ? d.Addresses.Count + " addresses" : (d.Status.Length > 0 ? d.Status : "Looking up the address");
-                Rules.Children.Add(Rule("Domain", d.Name, sub, d.Enabled, null, v => d.Enabled = v, () => t.Domains.Remove(d)));
+            foreach (var list in t.Lists) {
+                Rules.Children.Add(Rule("List", list.Name, ListSummary(list), list.Enabled, null, v => list.Enabled = v, () => t.Lists.Remove(list), look: () => OpenList(list)));
             }
 
-            if (t.Domains.Any(d => d.Enabled && d.Addresses.Count == 0 && d.Status.Length == 0)) {
+            if (t.Lists.Any(list => list.Enabled && list.Entries.Any(entry => entry.Kind == "domain" && entry.Addresses.Count == 0 && entry.Status.Length == 0))) {
                 _ = Session.ResolveDomains(t);
             }
             foreach (var a in t.Apps) {
@@ -1107,7 +1238,7 @@ CallWindowProc
 Rule
 ===============
 */
-    UIElement Rule(string kind, string title, string sub, bool on, string? iconPath, Action<bool> set, Action remove, bool missing = false) {
+    UIElement Rule(string kind, string title, string sub, bool on, string? iconPath, Action<bool> set, Action remove, bool missing = false, Action? look = null) {
         var grid = new Grid { Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 0, 8), ColumnSpacing = 12 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1155,6 +1286,17 @@ Rule
             await Session.ChangedRules();
             PaintRules();
         };
+        if (look != null) {
+            var view = new Button {
+                Content = "View",
+                Style = (Style)Application.Current.Resources["PillButton"],
+                Padding = new Thickness(12, 6, 12, 6),
+                FontSize = 12
+            };
+            view.Click += (_, _) => look();
+            actions.Children.Add(view);
+        }
+
         actions.Children.Add(toggle);
         actions.Children.Add(x);
         Grid.SetColumn(body, 1);
