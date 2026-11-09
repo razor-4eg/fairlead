@@ -29,10 +29,15 @@ if exist "%STAGE%\publish" rmdir /s /q "%STAGE%\publish"
 dotnet publish platform\win\ui\Fairlead.csproj -c Release -r win-x64 --self-contained true -o "%STAGE%\publish" >> "%STAGE%\build.log" 2>&1
 if errorlevel 1 goto done
 
-if exist "%OUT%" rmdir /s /q "%OUT%"
-mkdir "%OUT%\bin"
-xcopy "%STAGE%\publish" "%OUT%\bin" /E /I /Q /Y >nul
-if errorlevel 1 goto done
+if not exist "%OUT%\bin" mkdir "%OUT%\bin"
+rem Some Windows runtime files in dist cannot be deleted. Copy over them.
+robocopy "%STAGE%\publish" "%OUT%\bin" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /nc /ns /np >> "%STAGE%\build.log" 2>&1
+set RC=!ERRORLEVEL!
+if !RC! GEQ 8 (
+  fc /b "%STAGE%\publish\Fairlead.dll" "%OUT%\bin\Fairlead.dll" >nul 2>&1
+  if errorlevel 1 goto done
+)
+ver >nul
 copy /y "%STAGE%\fairlead-core.dll" "%OUT%\bin\" >nul
 copy /y "%STAGE%\fairlead-helper.exe" "%OUT%\" >nul
 if exist "%STAGE%\amneziawg-go.exe" copy /y "%STAGE%\amneziawg-go.exe" "%OUT%\" >nul

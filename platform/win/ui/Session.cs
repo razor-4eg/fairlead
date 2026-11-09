@@ -161,6 +161,7 @@ public sealed class Session : Bindable {
 	readonly string _dir;
 	readonly string _token;
 	readonly string _exeDir;
+	readonly HashSet<string> _resolving = new();
 
     /*
     ===============
@@ -580,7 +581,7 @@ public sealed class Session : Bindable {
     Parse the route box. Returns the error text, or empty.
     ===============
     */
-    public string AddRoutes(string text) {
+    public async Task<string> AddRoutes(string text) {
         if (Selected == null) {
             return "";
         }
@@ -605,15 +606,12 @@ public sealed class Session : Bindable {
             }
         }
 
-        if (added > 0) {
-            _ = ResolveDomains(Selected);
+        if (added > 0 && Selected != null) {
+            await ResolveDomains(Selected);
         }
 
-        _ = ChangedRules();
-        if (added > 0) {
-            RulesChanged?.Invoke();
-        }
-
+        await ChangedRules();
+        RulesChanged?.Invoke();
         return error;
     }
 
@@ -804,22 +802,35 @@ public sealed class Session : Bindable {
     Resolve enabled domains on the regular network.
     ===============
     */
-    async Task ResolveDomains(Tunnel t) {
+    public async Task ResolveDomains(Tunnel t) {
+        var pending = t.Domains.Where(d => d.Enabled && d.Addresses.Count == 0 && _resolving.Add(d.Id)).ToList();
+        if (pending.Count == 0) {
+            return;
+        }
+
         bool changed = false;
-        foreach (var d in t.Domains.Where(x => x.Enabled && x.Addresses.Count == 0)) {
+        foreach (var d in pending) {
             try {
-                var ips = await Dns.GetHostAddressesAsync(d.Name);
+                var ips = await Task.Run(() => Dns.GetHostAddresses(d.Name));
                 d.Addresses = ips.Where(a => a.AddressFamily == AddressFamily.InterNetwork).Select(a => a.ToString()).Distinct().Take(8).ToList();
-                d.Status = d.Addresses.Count + " addresses";
+                d.Status = d.Addresses.Count == 0 ? "Could not resolve" : "";
                 changed = true;
             } catch {
                 d.Status = "Could not resolve";
                 changed = true;
+            } finally {
+                _resolving.Remove(d.Id);
             }
         }
 
-        if (changed) {
-            RulesChanged?.Invoke();
+        if (!changed) {
+            return;
+        }
+
+        Save();
+        RulesChanged?.Invoke();
+        if (t.Connected) {
+            await Task.Run(() => Call(Rpc("bypass", t, true)));
         }
     }
 

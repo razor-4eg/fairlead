@@ -684,8 +684,8 @@ CallWindowProc
     Commit the route box.
     ===============
     */
-    void SaveRoutes(object sender, RoutedEventArgs e) {
-        string error = Session.AddRoutes(RouteBox.Text);
+    async void SaveRoutes(object sender, RoutedEventArgs e) {
+        string error = await Session.AddRoutes(RouteBox.Text);
         if (error.Length > 0) {
             Banner.Visibility = Visibility.Visible;
             BannerText.Text = error;
@@ -1084,7 +1084,14 @@ CallWindowProc
             }
 
             foreach (var ip in t.Ips) Rules.Children.Add(Rule("IP", ip.Cidr, ip.Note, ip.Enabled, null, v => ip.Enabled = v, () => t.Ips.Remove(ip)));
-            foreach (var d in t.Domains) Rules.Children.Add(Rule("Domain", d.Name, d.Addresses.Count + " addresses", d.Enabled, null, v => d.Enabled = v, () => t.Domains.Remove(d)));
+            foreach (var d in t.Domains) {
+                string sub = d.Addresses.Count > 0 ? d.Addresses.Count + " addresses" : (d.Status.Length > 0 ? d.Status : "Looking up the address");
+                Rules.Children.Add(Rule("Domain", d.Name, sub, d.Enabled, null, v => d.Enabled = v, () => t.Domains.Remove(d)));
+            }
+
+            if (t.Domains.Any(d => d.Enabled && d.Addresses.Count == 0 && d.Status.Length == 0)) {
+                _ = Session.ResolveDomains(t);
+            }
             foreach (var a in t.Apps) {
                 bool missing = !File.Exists(a.Path);
                 string sub = missing ? "App not found" : a.Learned.Count + " addresses";
