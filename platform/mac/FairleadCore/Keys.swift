@@ -1,6 +1,7 @@
-import CryptoKit
+import FairleadC
 import Foundation
 
+/// WireGuard keys. The shared C kernel does the Base64 and Curve25519 work.
 public enum WGKeys {
     public struct Pair: Equatable {
         public var privateKey: String
@@ -8,26 +9,23 @@ public enum WGKeys {
     }
 
     public static func generate() -> Pair {
-        let key = Curve25519.KeyAgreement.PrivateKey()
+        var priv = [CChar](repeating: 0, count: 128)
+        var pub = [CChar](repeating: 0, count: 128)
+        _ = fl_key_generate(&priv, 128, &pub, 128)
         return Pair(
-            privateKey: key.rawRepresentation.base64EncodedString(),
-            publicKey: key.publicKey.rawRepresentation.base64EncodedString()
+            privateKey: priv.withUnsafeBufferPointer { String(cString: $0.baseAddress!) },
+            publicKey: pub.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
         )
     }
 
     public static func publicKey(forPrivateKey privateKey: String) -> String? {
-        guard let data = Data(base64Encoded: privateKey.trimmingCharacters(in: .whitespacesAndNewlines)),
-              data.count == 32,
-              let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) else {
-            return nil
+        let trimmed = privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return CBridge.optionalString(capacity: 128) { buffer, cap in
+            fl_key_public(trimmed, buffer, cap)
         }
-        return key.publicKey.rawRepresentation.base64EncodedString()
     }
 
     public static func isKey(_ text: String) -> Bool {
-        guard let data = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return false
-        }
-        return data.count == 32
+        fl_key_is(text.trimmingCharacters(in: .whitespacesAndNewlines)) != 0
     }
 }

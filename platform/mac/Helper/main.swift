@@ -42,7 +42,10 @@ struct CommandResult {
 }
 
 private let stateLock = NSLock()
+/// Serializes up / down / bypass / quit so route I/O can drop `stateLock` and still answer status.
+private let controlLock = NSLock()
 private var state = HelperState(tunnels: [:])
+private var shouldQuit = false
 
 /*
 ===============
@@ -94,55 +97,115 @@ private func username() -> String {
 
 /*
 ===============
+readPipe
+===============
+*/
+private func readPipe(_ fd: Int32) -> Data {
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 16_384)
+    while true {
+        let count = buffer.withUnsafeMutableBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.read(fd, base, raw.count)
+        }
+        if count == 0 { break }
+        if count < 0 {
+            if errno == EINTR { continue }
+            break
+        }
+        data.append(buffer, count: count)
+    }
+    return data
+}
+
+/*
+===============
 run
+posix_spawn instead of Foundation.Process — connect/disconnect spawn dozens of
+route/ifconfig/networksetup children, and Process adds ~100ms each.
 ===============
 */
 func run(_ arguments: [String]) -> CommandResult {
-    autoreleasepool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: arguments[0])
-        process.arguments = Array(arguments.dropFirst())
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        process.environment = environment
-        process.standardInput = FileHandle.nullDevice
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-        } catch {
-            return CommandResult(code: 127, out: "", err: error.localizedDescription)
-        }
-
-        // Read both pipes while the child runs. Waiting first deadlocks when
-        // the output is larger than the pipe buffer.
-        let outHandle = stdout.fileHandleForReading
-        let errHandle = stderr.fileHandleForReading
-        let group = DispatchGroup()
-        var outData = Data()
-        var errData = Data()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            outData = outHandle.readDataToEndOfFile()
-            group.leave()
-        }
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errData = errHandle.readDataToEndOfFile()
-            group.leave()
-        }
-
-        process.waitUntilExit()
-        group.wait()
-        try? outHandle.close()
-        try? errHandle.close()
-        let out = String(data: outData, encoding: .utf8) ?? ""
-        let err = String(data: errData, encoding: .utf8) ?? ""
-        return CommandResult(code: process.terminationStatus, out: out, err: err)
+    guard let executable = arguments.first, !executable.isEmpty else {
+        return CommandResult(code: 127, out: "", err: "missing executable")
     }
+
+    var outPipe: [Int32] = [0, 0]
+    var errPipe: [Int32] = [0, 0]
+    guard pipe(&outPipe) == 0 else {
+        return CommandResult(code: 127, out: "", err: String(cString: strerror(errno)))
+    }
+    guard pipe(&errPipe) == 0 else {
+        close(outPipe[0]); close(outPipe[1])
+        return CommandResult(code: 127, out: "", err: String(cString: strerror(errno)))
+    }
+    _ = fcntl(outPipe[0], F_SETFD, FD_CLOEXEC)
+    _ = fcntl(outPipe[1], F_SETFD, FD_CLOEXEC)
+    _ = fcntl(errPipe[0], F_SETFD, FD_CLOEXEC)
+    _ = fcntl(errPipe[1], F_SETFD, FD_CLOEXEC)
+
+    var actions: posix_spawn_file_actions_t?
+    posix_spawn_file_actions_init(&actions)
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
+    posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO)
+    posix_spawn_file_actions_adddup2(&actions, errPipe[1], STDERR_FILENO)
+    posix_spawn_file_actions_addclose(&actions, outPipe[0])
+    posix_spawn_file_actions_addclose(&actions, outPipe[1])
+    posix_spawn_file_actions_addclose(&actions, errPipe[0])
+    posix_spawn_file_actions_addclose(&actions, errPipe[1])
+
+    let argvStorage: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
+    defer { argvStorage.forEach { free($0) } }
+    var argv = argvStorage
+    var pid: pid_t = 0
+    let spawned = argv.withUnsafeMutableBufferPointer { pointer in
+        posix_spawn(&pid, executable, &actions, nil, pointer.baseAddress, environ)
+    }
+    close(outPipe[1])
+    close(errPipe[1])
+    guard spawned == 0 else {
+        close(outPipe[0])
+        close(errPipe[0])
+        return CommandResult(code: 127, out: "", err: String(cString: strerror(spawned)))
+    }
+
+    let group = DispatchGroup()
+    var outData = Data()
+    var errData = Data()
+    group.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+        outData = readPipe(outPipe[0])
+        close(outPipe[0])
+        group.leave()
+    }
+    group.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+        errData = readPipe(errPipe[0])
+        close(errPipe[0])
+        group.leave()
+    }
+
+    var status: Int32 = 0
+    while true {
+        let waited = waitpid(pid, &status, 0)
+        if waited == -1 && errno == EINTR { continue }
+        break
+    }
+    group.wait()
+
+    // wait(2) status macros are not imported into Swift.
+    let code: Int32
+    if (status & 0o177) == 0 {
+        code = (status >> 8) & 0xff
+    } else if (status & 0o177) != 0o177 {
+        code = 128 + (status & 0o177)
+    } else {
+        code = status
+    }
+    let out = String(data: outData, encoding: .utf8) ?? ""
+    let err = String(data: errData, encoding: .utf8) ?? ""
+    return CommandResult(code: code, out: out, err: err)
 }
 
 /*
@@ -198,15 +261,26 @@ private func hardwareInterfaces() -> [String] {
 
 /*
 ===============
-scopedGateway
+defaultGateway
+Prefer the unscoped default route. Fall back to per-interface probes only when
+needed — probing every hardware iface on connect cost a second or more.
 ===============
 */
-private func scopedGateway(family: String) -> (iface: String, gateway: String)? {
+private func defaultGateway(family: String) -> (iface: String, gateway: String)? {
+    let parsed = RouteText.parseRouteGet(run(["/sbin/route", "-n", "get", "-\(family)", "default"]).out)
+    if let gateway = parsed.gateway,
+       let iface = parsed.interface,
+       !iface.isEmpty,
+       IPAddress.parse(gateway) != nil,
+       !iface.hasPrefix("utun") {
+        return (iface, gateway)
+    }
+
     var best: (iface: String, gateway: String, score: Int)?
     for iface in hardwareInterfaces() {
         let result = run(["/sbin/route", "-n", "get", "-\(family)", "default", "-ifscope", iface])
-        let parsed = RouteText.parseRouteGet(result.out)
-        guard let gateway = parsed.gateway, parsed.interface == iface else { continue }
+        let scoped = RouteText.parseRouteGet(result.out)
+        guard let gateway = scoped.gateway, scoped.interface == iface else { continue }
         guard IPAddress.parse(gateway) != nil else { continue }
         let info = run(["/sbin/ifconfig", iface]).out
         var score = 0
@@ -228,8 +302,8 @@ captureNetwork
 ===============
 */
 private func captureNetwork() -> (v4: (String, String)?, v6: (String, String)?, lan: [String]) {
-    let v4 = scopedGateway(family: "inet")
-    let v6 = scopedGateway(family: "inet6")
+    let v4 = defaultGateway(family: "inet")
+    let v6 = defaultGateway(family: "inet6")
     let iface = v4?.0 ?? v6?.0
     let lan = iface.map { RouteText.networks(fromIfconfig: run(["/sbin/ifconfig", $0]).out) } ?? []
     return (v4, v6, lan)
@@ -242,8 +316,7 @@ interfaceExists
 */
 func interfaceExists(_ name: String) -> Bool {
     guard !name.isEmpty else { return false }
-    let result = run(["/sbin/ifconfig", name])
-    return result.code == 0 && result.out.contains("flags=")
+    return if_nametoindex(name) != 0
 }
 
 /*
@@ -363,6 +436,15 @@ private func isTunnelBlocker(_ command: String) -> Bool {
 
 /*
 ===============
+pidAlive
+===============
+*/
+private func pidAlive(_ pid: Int32) -> Bool {
+    pid > 1 && kill(pid, 0) == 0
+}
+
+/*
+===============
 stopManagedProcesses
 ===============
 */
@@ -374,18 +456,19 @@ func stopManagedProcesses() {
         kill(proc.pid, SIGKILL)
     }
 
-    for proc in targets where !isTunnelBlocker(proc.command) {
+    let workers = targets.filter { !isTunnelBlocker($0.command) }
+    for proc in workers {
         kill(proc.pid, SIGTERM)
     }
 
-    let deadline = Date().addingTimeInterval(8)
+    // amneziawg-go usually exits immediately; don't burn seconds re-parsing `ps`.
+    let deadline = Date().addingTimeInterval(0.6)
     while Date() < deadline {
-        let live = fairleadProcessTree().filter { !isTunnelBlocker($0.command) }
-        if live.isEmpty { break }
-        usleep(100_000)
+        if workers.allSatisfy({ !pidAlive($0.pid) }) { break }
+        usleep(20_000)
     }
 
-    for proc in fairleadProcessTree() where !isTunnelBlocker(proc.command) {
+    for proc in workers where pidAlive(proc.pid) {
         kill(proc.pid, SIGKILL)
     }
 }
@@ -458,37 +541,46 @@ deleteOwnedRoute
 */
 private func deleteOwnedRoute(_ cidrString: String) {
     guard let cidr = CIDR.parse(cidrString) else { return }
-    guard RouteText.isExact(cidr, snapshot: routeSnapshot(cidr)) else { return }
     let family = cidr.family == .v4 ? "inet" : "inet6"
+    // Skip `route get` — these are routes we installed; a missing one is fine.
     _ = run(["/sbin/route", "-q", "-n", "delete", "-\(family)", cidr.string])
 }
 
 /*
 ===============
 applyBypass
+Caller holds `stateLock`. Route process work drops it so status/ping still answer
+while a long list is applied; `controlLock` keeps a second up/down/bypass out.
 ===============
 */
 private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool, policy: RoutePolicy) -> (warnings: [String], error: String?) {
-    guard var runtime = state.tunnels[slug] else {
+    guard let runtime = state.tunnels[slug] else {
         return ([], FairleadL10n.text("The tunnel is not running."))
     }
 
-    syncInternetCapture(slug: slug, configPath: runtime.configPath, capture: policy != .selected)
+    let configPath = runtime.configPath
+    let lanCIDRs = runtime.lanCIDRs
+    let endpointIPs = runtime.endpointIPs
+    let previousOwned = runtime.ownedRoutes
+    let working = runtime
+
+    stateLock.unlock()
+    syncInternetCapture(slug: slug, configPath: configPath, capture: policy != .selected)
     let planned = BypassPlanner.routes(
         BypassInput(
             rules: cidrs,
             learned: [],
-            lan: runtime.lanCIDRs,
+            lan: lanCIDRs,
             excludeLAN: excludeLAN,
-            endpoints: runtime.endpointIPs,
+            endpoints: endpointIPs,
             policy: policy
         )
     )
     let tunnelSet = policy == .selected ? Set(planned.routes) : Set<String>()
     let directSet = policy == .selected ? Set(planned.direct) : Set(planned.routes)
     let desired = tunnelSet.union(directSet)
-    let automatic = Set(runtime.lanCIDRs.compactMap { CIDR.parse($0)?.string })
-    for existing in runtime.ownedRoutes where !desired.contains(existing) {
+    let automatic = Set(lanCIDRs.compactMap { CIDR.parse($0)?.string })
+    for existing in previousOwned where !desired.contains(existing) {
         deleteOwnedRoute(existing)
     }
 
@@ -499,18 +591,26 @@ private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool, policy
         let wantTunnel = tunnelSet.contains(route)
         let snapshot = routeSnapshot(cidr)
         let exact = RouteText.isExact(cidr, snapshot: snapshot)
-        let onTunnel = snapshot.interface == runtime.realInterface
-        let weOwned = runtime.ownedRoutes.contains(route)
+        let onTunnel = snapshot.interface == working.realInterface
+        let weOwned = previousOwned.contains(route)
         if exact && onTunnel == wantTunnel && (weOwned || !wantTunnel) {
             if weOwned { owned.append(route) }
             continue
         }
 
         if exact { deleteOwnedRoute(route) }
-        if let error = addOwnedRoute(cidr, viaTunnel: wantTunnel, runtime: runtime) {
+        // No IPv6 (or IPv4) gateway on this network — skip that family instead of
+        // failing the whole connect with "direct routes were not applied".
+        if !wantTunnel {
+            let hasGateway = (cidr.family == .v4 && working.gatewayV4 != nil)
+                || (cidr.family == .v6 && working.gatewayV6 != nil)
+            if !hasGateway { continue }
+        }
+
+        if let error = addOwnedRoute(cidr, viaTunnel: wantTunnel, runtime: working) {
             let now = routeSnapshot(cidr)
             let nowExact = RouteText.isExact(cidr, snapshot: now)
-            let nowOnTunnel = now.interface == runtime.realInterface
+            let nowOnTunnel = now.interface == working.realInterface
             if nowExact && nowOnTunnel == wantTunnel {
                 owned.append(route)
             } else if automatic.contains(route) && !wantTunnel {
@@ -523,8 +623,12 @@ private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool, policy
         }
     }
 
-    runtime.ownedRoutes = owned
-    state.tunnels[slug] = runtime
+    stateLock.lock()
+    guard state.tunnels[slug] != nil else {
+        return (planned.warnings, FairleadL10n.text("The tunnel is not running."))
+    }
+
+    state.tunnels[slug]?.ownedRoutes = owned
     saveState()
     if failures.isEmpty {
         return (planned.warnings, nil)
@@ -575,12 +679,10 @@ bringDown
 private func bringDown(slug: String) -> String? {
     let path = state.tunnels[slug]?.configPath ?? "\(FairleadPaths.directory)/\(slug).conf"
     let realBefore = state.tunnels[slug]?.realInterface
-    stopManagedProcesses()
+    let owned = state.tunnels[slug]?.ownedRoutes ?? []
+    // Drop owned routes before tearing the interface so we don't wait on gets.
+    for route in owned { deleteOwnedRoute(route) }
     bringUserspaceDown(slug: slug, interfaceName: realBefore)
-    if let owned = state.tunnels[slug]?.ownedRoutes {
-        for route in owned { deleteOwnedRoute(route) }
-    }
-
     state.tunnels[slug] = nil
     saveState()
     try? FileManager.default.removeItem(atPath: path)
@@ -594,14 +696,9 @@ bringUp
 ===============
 */
 private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: Bool, policy: RoutePolicy) -> RPCResponse {
-    let peeked = WGDocument.parse(config)
     let tools = ToolLocator.locate()
-    if Amnezia.isAmnezia(peeked) {
-        guard tools.amneziaWG != nil else {
-            return RPCResponse(id: "", ok: false, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."), tools: tools)
-        }
-    } else if !tools.ready {
-        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("wireguard-go is not included in this copy of Fairlead."), tools: tools)
+    guard tools.ready else {
+        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."), tools: tools)
     }
 
     if state.tunnels[slug] != nil {
@@ -632,7 +729,7 @@ private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: 
     guard let real = raised.interface else {
         bringUserspaceDown(slug: slug, interfaceName: nil)
         try? FileManager.default.removeItem(atPath: path)
-        let message = raised.error ?? FairleadL10n.text("wireguard-go did not create an interface.")
+        let message = raised.error ?? FairleadL10n.text("amneziawg-go did not create an interface.")
         return RPCResponse(id: "", ok: false, error: message, tools: tools)
     }
 
@@ -806,9 +903,56 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         }
 
         return response
+    case "quit":
+        for slug in Array(state.tunnels.keys) {
+            _ = bringDown(slug: slug)
+        }
+        shouldQuit = true
+        return RPCResponse(id: request.id, ok: true, tools: ToolLocator.locate())
     default:
         return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Unknown command."))
     }
+}
+
+/*
+===============
+isHarborHelper
+===============
+*/
+private func isHarborHelper(_ command: String) -> Bool {
+    command.contains("/harbor-helper")
+        || (command as NSString).lastPathComponent.hasPrefix("harbor-helper")
+}
+
+/*
+===============
+reapHarborHelpers
+Clear leftover Harbor helpers. Fairlead itself is a single launchd job — do not
+SIGKILL peer fairlead-helper processes or KeepAlive restarts fight each other.
+===============
+*/
+private func reapHarborHelpers() {
+    let selfPid = getpid()
+    let peers = processList().filter { $0.pid != selfPid && isHarborHelper($0.command) }
+    guard !peers.isEmpty else { return }
+    fputs("fairlead-helper: stopping \(peers.count) harbor-helper process(es)\n", stderr)
+    for proc in peers {
+        kill(proc.pid, SIGTERM)
+    }
+    usleep(200_000)
+    for proc in processList() where proc.pid != selfPid && isHarborHelper(proc.command) {
+        kill(proc.pid, SIGKILL)
+    }
+}
+
+/*
+===============
+isControlOp
+up / down / bypass / quit must not interleave; status stays responsive during bypass.
+===============
+*/
+private func isControlOp(_ op: String) -> Bool {
+    op == "up" || op == "down" || op == "bypass" || op == "quit"
 }
 
 /*
@@ -817,33 +961,70 @@ serve
 ===============
 */
 private func serve(fd: Int32) {
-    while true {
+    while !shouldQuit {
+        var pollFD = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        let ready = poll(&pollFD, 1, 250)
+        if ready < 0 {
+            if errno == EINTR { continue }
+            // A transient poll error must not take the daemon down — KeepAlive
+            // would restart us and tear the tunnel for a moment.
+            let code = errno
+            fputs("fairlead-helper: poll failed: \(String(cString: strerror(code))) (\(code))\n", stderr)
+            if code == EBADF { break }
+            usleep(50_000)
+            continue
+        }
+        if ready == 0 { continue }
         let client = accept(fd, nil, nil)
         if client < 0 { continue }
+        SocketFrame.setNoSigPipe(client)
+        SocketFrame.setCloseOnExec(client)
         autoreleasepool {
             SocketFrame.setTimeout(client, seconds: 5)
             defer { close(client) }
-            var locked = false
+            var stateLocked = false
+            var controlLocked = false
             do {
                 let data = try SocketFrame.read(client)
                 let request = try RPCFrame.decode(RPCRequest.self, from: data)
-                SocketFrame.setTimeout(client, seconds: 90)
+                SocketFrame.setTimeout(client, seconds: 120)
+                if isControlOp(request.op) {
+                    controlLock.lock()
+                    controlLocked = true
+                }
                 stateLock.lock()
-                locked = true
+                stateLocked = true
                 let response = handle(request)
                 stateLock.unlock()
-                locked = false
+                stateLocked = false
+                if controlLocked {
+                    controlLock.unlock()
+                    controlLocked = false
+                }
                 let payload = try RPCFrame.encode(response)
                 try SocketFrame.write(client, payload)
+            } catch let error as SocketFrameError {
+                if stateLocked { stateLock.unlock() }
+                if controlLocked { controlLock.unlock() }
+                // Timed-out UI clients are normal while up/down holds the lock.
+                if case .disconnected = error { return }
+                fputs("fairlead-helper: \(error)\n", stderr)
             } catch {
-                if locked { stateLock.unlock() }
+                if stateLocked { stateLock.unlock() }
+                if controlLocked { controlLock.unlock() }
                 fputs("fairlead-helper: \(error)\n", stderr)
             }
         }
     }
+    close(fd)
+    unlink(FairleadPaths.socket)
+    try? FileManager.default.removeItem(atPath: "/var/run/fairlead/helper.pid")
+    fputs("fairlead-helper: quit\n", stderr)
 }
 
 signal(SIGHUP, SIG_IGN)
+// A client that times out closes the socket. Writing the reply must not kill the helper.
+signal(SIGPIPE, SIG_IGN)
 setbuf(stdout, nil)
 setbuf(stderr, nil)
 let user = username()
@@ -855,6 +1036,7 @@ let gid = account.pointee.pw_gid
 
 try? FileManager.default.createDirectory(atPath: FairleadPaths.directory, withIntermediateDirectories: true)
 chmod(FairleadPaths.directory, 0o755)
+reapHarborHelpers()
 reconcile()
 
 let fd: Int32

@@ -3,7 +3,7 @@
 // copyright (c) 2026 razor-4eg.
 //
 // qcompress.h -- Qt qCompress framing: a big-endian uncompressed length, then zlib.
-// Amnezia vpn:// payloads use this. The Mac package links the same file.
+// Amnezia vpn:// payloads use this. Windows and the Mac package link the same file.
 //
 //===============================================================
 

@@ -3,7 +3,7 @@
 // copyright (c) 2026 razor-4eg.
 //
 // fl.h -- Bump arena and the small string helpers the rest of the kernel calls.
-// Windows links this directory. The Mac app still runs its Swift copy.
+// Windows and the Mac app both link this directory. fl_abi.c is Windows only.
 //
 //===============================================================
 

@@ -1,10 +1,10 @@
-//===============================================================
+//================================================================
 //
 // copyright (c) 2026 razor-4eg.
 //
 // FairleadApp.swift -- Application entry, the main window, and the menu bar.
 //
-//===============================================================
+//================================================================
 
 import AppKit
 import SwiftUI
@@ -13,7 +13,33 @@ import SwiftUI
 final class FairleadDelegate: NSObject, NSApplicationDelegate {
     static var terminating = false
     let model = AppModel()
-    private var stoppedTunnels = false
+    private var didShutdown = false
+
+/*
+===============
+applicationWillFinishLaunching
+Accessory policy must land before any window or Dock icon is created.
+===============
+*/
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        model.prepareStartHidden()
+    }
+
+/*
+===============
+applicationDidFinishLaunching
+===============
+*/
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        model.finishStartHidden()
+        // Restoration can create the window a moment after didFinish.
+        DispatchQueue.main.async { [weak self] in
+            self?.model.finishStartHidden()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.model.finishStartHidden()
+        }
+    }
 
 /*
 ===============
@@ -30,9 +56,17 @@ applicationShouldHandleReopen
 ===============
 */
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        NSApp.setActivationPolicy(.regular)
+        // Returning true lets AppKit bring a window forward — refuse that while Start hidden.
+        if model.shouldIgnoreReopen() {
+            model.finishStartHidden()
+            return false
+        }
+
         if !flag {
-            sender.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+            model.requestOpenMainWindow()
+        } else {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         return true
@@ -45,7 +79,7 @@ applicationShouldTerminate
 */
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Self.terminating = true
-        stopTunnels()
+        stopHelper()
         return .terminateNow
     }
 
@@ -56,18 +90,19 @@ applicationWillTerminate
 */
     func applicationWillTerminate(_ notification: Notification) {
         Self.terminating = true
-        stopTunnels()
+        stopHelper()
     }
 
 /*
 ===============
-stopTunnels
+stopHelper
+Down tunnels and quit the helper before the app exits.
 ===============
 */
-    private func stopTunnels() {
-        guard !stoppedTunnels else { return }
-        stoppedTunnels = true
-        model.shutdownTunnels()
+    private func stopHelper() {
+        guard !didShutdown else { return }
+        didShutdown = true
+        model.shutdown()
     }
 }
 
@@ -76,19 +111,30 @@ struct FairleadApp: App {
     @NSApplicationDelegateAdaptor(FairleadDelegate.self) private var delegate
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        // First scene is what SwiftUI presents at launch — keep the menu bar first so
+        // Start hidden never flashes the main window (or Dock icon) on cold start.
+        MenuBarExtra {
+            MenuBarContent()
+                .environmentObject(delegate.model)
+        } label: {
+            MenuBarLabel(model: delegate.model)
+        }
+        .menuBarExtraStyle(.menu)
+
+        Window("Fairlead", id: "main") {
             RootView()
                 .environmentObject(delegate.model)
                 .preferredColorScheme(.dark)
+                .background(WindowRestorableFix())
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1120, height: 760)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
-                    NSApp.setActivationPolicy(.regular)
-                    NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
+                    delegate.model.requestOpenMainWindow()
                     delegate.model.showSettings = true
                 }
                 .keyboardShortcut(",", modifiers: .command)
@@ -113,63 +159,62 @@ struct FairleadApp: App {
                 .disabled(delegate.model.selectedTunnel == nil)
             }
         }
+    }
+}
 
-        MenuBarExtra {
-            MenuBarContent()
-                .environmentObject(delegate.model)
-        } label: {
-            MenuBarLabel(model: delegate.model)
+struct WindowRestorableFix: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.isRestorable = false
+            view.window?.isReleasedWhenClosed = true
         }
-        .menuBarExtraStyle(.menu)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.window?.isRestorable = false
     }
 }
 
 struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image(nsImage: MenuBarMark.image(connected: model.anyConnected))
+            .onAppear {
+                model.finishStartHidden()
+                model.revealMainWindowAtLaunchIfNeeded(open: openWindow)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: AppModel.openMainNotification)) { _ in
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
     }
 }
 
 struct MenuBarContent: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if model.tunnels.isEmpty {
-            Button("Open Fairlead") { showWindow() }
+            Button("Open Fairlead") { model.requestOpenMainWindow() }
         } else {
             ForEach(model.tunnels) { tunnel in
                 Button(model.menuTitle(tunnel)) { model.toggle(tunnel.id) }
             }
 
             Divider()
-            Button("Open Fairlead") { showWindow() }
+            Button("Open Fairlead") { model.requestOpenMainWindow() }
         }
 
         Divider()
         Button("Settings…") {
-            showWindow()
+            model.requestOpenMainWindow()
             model.showSettings = true
         }
 
         Button("Quit Fairlead") { NSApp.terminate(nil) }
-    }
-
-/*
-===============
-showWindow
-===============
-*/
-    private func showWindow() {
-        NSApp.setActivationPolicy(.regular)
-        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            openWindow(id: "main")
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
     }
 }

@@ -72,7 +72,16 @@ public enum FairleadL10n {
         guard let head = parts.first, !head.isEmpty else { return message }
         if let key = match(head, catalogs: catalogs) ?? match(message, catalogs: catalogs) {
             let localized = text(key)
-            if parts.count == 1 || key == match(message, catalogs: catalogs) {
+            // Keys such as "…\n%@" already carry a placeholder for the detail lines.
+            if localized.contains("%@") {
+                let detail = parts.dropFirst().joined(separator: "\n")
+                if detail.isEmpty {
+                    // Matched a format key against an already-substituted message.
+                    return message
+                }
+                return String(format: localized, locale: activeLocale, detail)
+            }
+            if parts.count == 1 {
                 return localized
             }
             return ([localized] + parts.dropFirst()).joined(separator: "\n")

@@ -271,6 +271,17 @@
                                     </StackPanel>
                                     <ToggleButton x:Name="LoginSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LoginToggled"/>
                                 </Grid>
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Start hidden" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock Text="Open in the tray only. Click the Fairlead icon to show the window." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="HiddenSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="HiddenToggled"/>
+                                </Grid>
                                 <Border Height="1" Background="{StaticResource LineBrush}"/>
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="Default tunnel" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>

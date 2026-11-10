@@ -7,7 +7,8 @@ public struct ToolReport: Codable, Equatable, Sendable {
     public var amneziaWG: String?
     public var brew: String?
 
-    public var ready: Bool { wireguardGo != nil }
+    /// amneziawg-go carries plain WireGuard and AmneziaWG.
+    public var ready: Bool { amneziaWG != nil }
 
     public init(
         wg: String? = nil,
@@ -125,21 +126,15 @@ public enum RPCFrame {
 
 public enum ToolLocator {
     public static func locate() -> ToolReport {
-        var wireguard = [
-            "/usr/local/libexec/fairlead-wireguard-go",
-            "/opt/homebrew/bin/wireguard-go",
-            "/usr/local/bin/wireguard-go",
-        ]
         var amnezia = [
             "/usr/local/libexec/fairlead-amneziawg-go",
             "/opt/homebrew/bin/amneziawg-go",
             "/usr/local/bin/amneziawg-go",
         ]
         if let directory = Bundle.main.executableURL?.deletingLastPathComponent() {
-            wireguard.insert(directory.appendingPathComponent("wireguard-go").path, at: 0)
             amnezia.insert(directory.appendingPathComponent("amneziawg-go").path, at: 0)
         }
-        return ToolReport(wireguardGo: firstExecutable(wireguard), amneziaWG: firstExecutable(amnezia))
+        return ToolReport(amneziaWG: firstExecutable(amnezia))
     }
 
     private static func firstExecutable(_ paths: [String]) -> String? {

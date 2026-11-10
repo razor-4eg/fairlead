@@ -7,6 +7,7 @@
 //===============================================================
 
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 
 namespace Fairlead;
@@ -63,9 +64,22 @@ public partial class App : Application {
 
         if (pending) {
             window.ShowMain();
+        } else if (window.Session.StartHidden) {
+            window.ApplyStartHidden();
         }
 
-        _ = window.Session.EnsureHelper();
+        _ = BootSession(window);
+    }
+
+    /*
+    ===============
+    BootSession
+    Helper first, then the default / last-active tunnel.
+    ===============
+    */
+    static async Task BootSession(MainWindow window) {
+        await window.Session.EnsureHelper();
+        await window.Session.ConnectDefaultIfNeeded();
     }
 
     /*

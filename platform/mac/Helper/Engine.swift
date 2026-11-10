@@ -80,23 +80,11 @@ func bringUserspaceUp(
     captureInternet: Bool = true
 ) -> UserspaceUp {
     let tools = ToolLocator.locate()
-    let binary: String
-    let failure: String
-    if Amnezia.isAmnezia(document) {
-        guard let found = tools.amneziaWG else {
-            return UserspaceUp(interface: nil, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."))
-        }
-
-        binary = found
-        failure = FairleadL10n.text("amneziawg-go did not create an interface.")
-    } else {
-        guard let found = tools.wireguardGo else {
-            return UserspaceUp(interface: nil, error: FairleadL10n.text("wireguard-go is not included in this copy of Fairlead."))
-        }
-
-        binary = found
-        failure = FairleadL10n.text("wireguard-go did not create an interface.")
+    // Same as Windows: amneziawg-go carries plain WireGuard and AmneziaWG.
+    guard let binary = tools.amneziaWG else {
+        return UserspaceUp(interface: nil, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."))
     }
+    let failure = FairleadL10n.text("amneziawg-go did not create an interface.")
 
     guard let ifaceIndex = document.interfaceIndex else {
         return UserspaceUp(interface: nil, error: FairleadL10n.text("The config has no Interface section."))
@@ -312,8 +300,16 @@ stopUserspaceProcess
 private func stopUserspaceProcess() {
     let tracked = userspaceProcess?.processIdentifier
     if let process = userspaceProcess, process.isRunning {
+        let pid = process.processIdentifier
         process.terminate()
-        process.waitUntilExit()
+        let deadline = Date().addingTimeInterval(0.4)
+        while process.isRunning, Date() < deadline {
+            usleep(20_000)
+        }
+        if process.isRunning {
+            kill(pid, SIGKILL)
+            process.waitUntilExit()
+        }
     }
 
     userspaceProcess = nil
@@ -322,10 +318,12 @@ private func stopUserspaceProcess() {
     guard let text = try? String(contentsOfFile: "/var/run/fairlead/wireguard-go.pid", encoding: .utf8),
           let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
           pid > 1, pid != tracked else { return }
-    let listed = run(["/bin/ps", "-p", "\(pid)", "-o", "command="])
-    if listed.out.contains("wireguard-go") || listed.out.contains("amneziawg-go") {
+    if kill(pid, 0) == 0 {
         kill(pid, SIGTERM)
+        usleep(100_000)
+        if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
     }
+    unlink("/var/run/fairlead/wireguard-go.pid")
 }
 
 /*
@@ -335,7 +333,7 @@ waitForUserspace
 */
 private func waitForUserspace(slug: String) -> String? {
     let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
-    for _ in 0..<100 {
+    for _ in 0..<80 {
         if let process = userspaceProcess, !process.isRunning { return nil }
         if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
             let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -348,7 +346,7 @@ private func waitForUserspace(slug: String) -> String? {
             }
         }
 
-        usleep(50_000)
+        usleep(25_000)
     }
 
     return nil
@@ -374,6 +372,7 @@ private func uapiExchange(iface: String, message: String) -> String? {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
+    SocketFrame.setNoSigPipe(fd)
     var timeout = timeval(tv_sec: 3, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -605,11 +604,23 @@ private func splitDNS(_ document: WGDocument) -> (servers: [String], search: [St
 /*
 ===============
 networkServices
+Prefer hardware-looking services. Skipping other VPN profiles keeps DNS apply
+off the disconnect hot path.
 ===============
 */
 private func networkServices() -> [String] {
     let out = run(["/usr/sbin/networksetup", "-listallnetworkservices"]).out
-    return out.split(separator: "\n").dropFirst().map(String.init).filter { !$0.isEmpty && !$0.hasPrefix("*") }
+    let all = out.split(separator: "\n").dropFirst().map(String.init).filter { !$0.isEmpty && !$0.hasPrefix("*") }
+    let preferred = all.filter {
+        let lower = $0.lowercased()
+        return lower.contains("wi-fi")
+            || lower.contains("wifi")
+            || lower.contains("ethernet")
+            || lower.contains("usb")
+            || lower.contains("thunderbolt")
+            || lower.contains("lan")
+    }
+    return preferred.isEmpty ? all : preferred
 }
 
 /*
@@ -760,9 +771,10 @@ private func stopMonitor() {
     monitorState.stop = true
     let thread = monitorThread
     monitorState.lock.unlock()
-    let deadline = Date().addingTimeInterval(5)
+    // Don't block disconnect on a mid-flight networksetup; the thread exits on stop.
+    let deadline = Date().addingTimeInterval(0.35)
     while let thread, thread.isExecuting, Date() < deadline {
-        Thread.sleep(forTimeInterval: 0.05)
+        Thread.sleep(forTimeInterval: 0.02)
     }
 
     monitorThread = nil

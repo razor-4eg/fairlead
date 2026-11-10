@@ -143,12 +143,8 @@ tunnelBody
     }
 
     private var statusMessage: String? {
-        if let tunnel = model.selectedTunnel, Amnezia.isAmnezia(tunnel.document) {
-            if model.tools.amneziaWG == nil {
-                return FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead.")
-            }
-        } else if model.tools.wireguardGo == nil {
-            return FairleadL10n.text("wireguard-go is not included in this copy of Fairlead.")
+        if model.tools.amneziaWG == nil {
+            return FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead.")
         }
 
         if !model.helperOnline {
@@ -182,6 +178,9 @@ statusDetail
         case .connected:
             return FairleadL10n.format("Handshake %@", Format.ago(live.handshake, now: model.now))
         case .connecting:
+            if live.realInterface != nil {
+                return FairleadL10n.text("Waiting for the handshake")
+            }
             return FairleadL10n.text("Bringing up the interface and routes")
         case .disconnecting:
             return FairleadL10n.text("Restoring the previous routes")

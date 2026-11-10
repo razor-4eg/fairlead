@@ -27,6 +27,7 @@
 "Disconnecting" = "Отключение";
 "Handshake %@" = "Рукопожатие %@";
 "Bringing up the interface and routes" = "Поднимаю интерфейс и маршруты";
+"Waiting for the handshake" = "Жду handshake";
 "Restoring the previous routes" = "Возвращаю прежние маршруты";
 "Traffic is bypassing WireGuard" = "Трафик идёт мимо WireGuard";
 "%@  ·  gateway %@" = "%@  ·  шлюз %@";
@@ -163,16 +164,18 @@
 "Settings" = "Настройки";
 "Settings…" = "Настройки…";
 "Open at login" = "Запускать при входе";
+"Start hidden" = "Запускать скрытым";
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "Fairlead открывается при входе в систему. Туннель по умолчанию подключается сам.";
+"Open in the menu bar only. Click the Fairlead icon to show the window." = "Только в строке меню. Окно откроется по щелчку на значке Fairlead.";
 "Default tunnel" = "Туннель по умолчанию";
 "None" = "Нет";
+"Last active" = "Последний активный";
 "Fairlead selects this tunnel when it opens and connects it." = "Fairlead выбирает этот туннель при запуске и подключает его.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS ждёт разрешения. Откройте Системные настройки → Основные → Объекты входа и разрешите Fairlead.";
 "The running helper is an older copy. Fairlead will replace it." = "Запущен старый помощник. Fairlead заменит его.";
 "wireguard-go is not included in this copy of Fairlead." = "В этой копии Fairlead нет wireguard-go.";
 "Could not resolve the endpoint." = "Не удалось определить адрес сервера.";
 "wireguard-go did not create an interface." = "wireguard-go не создал интерфейс.";
-"wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go уже в составе приложения. Хелпер один раз спрашивает пароль администратора, затем сам поднимает туннели и прямые маршруты. Конфиги с ключами остаются на этом Mac.";
 "Domains" = "Домены";
 "Nothing here yet. Add a domain that should bypass WireGuard." = "Пока пусто. Добавьте домен, который должен идти мимо WireGuard.";
 "Fairlead resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Fairlead узнаёт адрес имени через обычную сеть и пускает его напрямую. Общий адрес, например у CDN, станет прямым для всех приложений. Список обновляется, когда истекает DNS-запись.";
@@ -195,7 +198,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers и DisableCookies должны быть true или false.";
 "Signature packets must stay on one line." = "Пакеты подписи должны быть в одной строке.";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive должен быть числом или диапазоном, например 20-30.";
-"AmneziaWG configs use the included amneziawg-go. Ordinary WireGuard configs stay on wireguard-go." = "Конфиги AmneziaWG запускаются через amneziawg-go из состава приложения. Обычный WireGuard остаётся на wireguard-go.";
 "Except the list" = "Кроме списка";
 "Only the list" = "Только список";
 "Only these addresses use the tunnel. Everything else stays on the regular network." = "Через туннель идут только эти адреса. Остальное остаётся в обычной сети.";
@@ -213,7 +215,6 @@
 "App" = "Приложение";
 "Nothing here yet. Add an IP, a domain, or an app." = "Пока пусто. Добавьте IP, домен или приложение.";
 "Enter an IP, a network, or a domain." = "Введите IP, сеть или домен.";
-"A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "Домен узнаётся через обычную сеть. Адреса приложения запоминаются, когда оно подключается. На macOS маршрут действует для всех приложений.";
 "203.0.113.10 or example.com" = "203.0.113.10 или example.com";
 "Add route" = "Добавить маршрут";
 "One address or domain per line." = "Один адрес или домен на строку.";
@@ -227,3 +228,10 @@
 "%d domains.few" = "%d домена";
 "%d domains.many" = "%d доменов";
 "%d domains.other" = "%d домена";
+"amneziawg-go is included and carries both WireGuard and AmneziaWG. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "amneziawg-go уже в составе приложения и обслуживает и обычный WireGuard, и AmneziaWG. Хелпер один раз спрашивает пароль администратора, затем launchd держит его после перезагрузки. Конфиги с ключами остаются на этом Mac.";
+
+"A domain is resolved on the regular network. An app's addresses are learned as it connects." = "Домен узнаётся через обычную сеть. Адреса приложения запоминаются, когда оно подключается.";
+"Nothing learned yet." = "Пока ничего не запомнено.";
+"Edit list" = "Изменить список";
+"Saving the list" = "Сохранение списка";
+"Resolved" = "Разрешено";

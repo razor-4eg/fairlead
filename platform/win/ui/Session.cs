@@ -137,7 +137,11 @@ public sealed class Session : Bindable {
     public string AwgText { get; private set; } = "amneziawg-go  not found";
     public bool AwgOk { get; private set; }
     public bool LaunchAtLogin { get; set; }
+    public bool StartHidden { get; set; }
+    /// Empty = none; "last" = last active; otherwise a tunnel id.
     public string DefaultId { get; set; } = "";
+    public const string LastActiveKey = "last";
+    public string LastActiveId { get; set; } = "";
     public bool HasTunnel => Selected != null;
     public bool HasNotice => Notice.Length > 0;
     public string Title => Selected?.Name ?? "";
@@ -182,9 +186,27 @@ public sealed class Session : Bindable {
         Load();
         RefreshTools();
         Refilter();
-        if (Tunnels.Count > 0) {
-            Selected = Tunnels[0];
+        Selected = ResolveDefaultTunnel() ?? (Tunnels.Count > 0 ? Tunnels[0] : null);
+    }
+
+    /*
+    ===============
+    ResolveDefaultTunnel
+    None, last active, or a fixed tunnel from settings.
+    ===============
+    */
+    public Tunnel? ResolveDefaultTunnel() {
+        string key = (DefaultId ?? "").Trim();
+        if (key.Length == 0) {
+            return null;
         }
+
+        string id = key == LastActiveKey ? LastActiveId : key;
+        if (id.Length == 0) {
+            return null;
+        }
+
+        return Tunnels.FirstOrDefault(t => t.Id == id);
     }
 
     public event Action? RulesChanged;
@@ -337,9 +359,16 @@ public sealed class Session : Bindable {
                     live.Endpoint = ep;
                 }
 
-                live.Connected = true;
-                live.Phase = "Connected";
-                live.Detail = "Handshake " + Ago(live.Handshake);
+                // Interface can be up before WireGuard has shaken hands.
+                if (live.Handshake > 0) {
+                    live.Connected = true;
+                    live.Phase = "Connected";
+                    live.Detail = "Handshake " + Ago(live.Handshake);
+                } else if (live.Phase == "Connecting" || live.Connected) {
+                    live.Connected = false;
+                    live.Phase = "Connecting";
+                    live.Detail = "Waiting for the handshake";
+                }
             }
 
             if (root.TryGetProperty("managed", out var managed) && managed.GetArrayLength() > 0) {
@@ -437,6 +466,14 @@ public sealed class Session : Bindable {
             Selected = Tunnels.FirstOrDefault();
         }
 
+        if (DefaultId == t.Id) {
+            DefaultId = "";
+        }
+
+        if (LastActiveId == t.Id) {
+            LastActiveId = "";
+        }
+
         Refilter();
         Save();
     }
@@ -486,14 +523,47 @@ public sealed class Session : Bindable {
             Banner = ErrorOf(reply) ?? "The tunnel did not start.";
             Raise(nameof(Banner));
         } else {
-            t.Connected = true;
-            t.Phase = "Connected";
+            // Stay Connecting until ApplyStatus sees a real handshake.
+            t.Connected = false;
+            t.Phase = "Connecting";
+            t.Detail = "Waiting for the handshake";
             ApplyStatus(reply);
+            RememberLastActive(t.Id);
         }
 
         if (Selected == t) {
             Touch();
         }
+    }
+
+    /*
+    ===============
+    RememberLastActive
+    ===============
+    */
+    void RememberLastActive(string id) {
+        if (LastActiveId == id) {
+            return;
+        }
+
+        LastActiveId = id;
+        Save();
+    }
+
+    /*
+    ===============
+    ConnectDefaultIfNeeded
+    After launch, bring up None / Last active / a fixed tunnel.
+    ===============
+    */
+    public async Task ConnectDefaultIfNeeded() {
+        var t = ResolveDefaultTunnel();
+        if (t == null || t.Connected || t.Phase == "Connecting") {
+            return;
+        }
+
+        Selected = t;
+        await Connect(t);
     }
 
     /*
@@ -841,12 +911,33 @@ public sealed class Session : Bindable {
 
     /*
     ===============
+    SetStartHidden
+    First launch opens in the tray only.
+    ===============
+    */
+    public void SetStartHidden(bool on) {
+        StartHidden = on;
+        Save();
+    }
+
+    /*
+    ===============
     SetDefault
-    The tunnel selected when the window opens.
+    None, last active, or a fixed tunnel when the app opens.
     ===============
     */
     public void SetDefault(string id) {
-        DefaultId = id;
+        string key = (id ?? "").Trim();
+        if (key.Length == 0) {
+            DefaultId = "";
+        } else if (key == LastActiveKey) {
+            DefaultId = LastActiveKey;
+        } else if (Tunnels.Any(t => t.Id == key)) {
+            DefaultId = key;
+        } else {
+            DefaultId = "";
+        }
+
         Save();
     }
 
@@ -1274,8 +1365,16 @@ public sealed class Session : Bindable {
                 LaunchAtLogin = launch.GetBoolean();
             }
 
+            if (root.TryGetProperty("startHidden", out var hidden)) {
+                StartHidden = hidden.GetBoolean();
+            }
+
             if (root.TryGetProperty("defaultTunnel", out var def)) {
                 DefaultId = def.GetString() ?? "";
+            }
+
+            if (root.TryGetProperty("lastActiveTunnel", out var last)) {
+                LastActiveId = last.GetString() ?? "";
             }
 
             if (!root.TryGetProperty("tunnels", out var list)) {
@@ -1328,7 +1427,9 @@ public sealed class Session : Bindable {
     public void Save() {
         var sb = new StringBuilder();
         sb.Append("{\n  \"launchAtLogin\": ").Append(LaunchAtLogin ? "true" : "false");
+        sb.Append(",\n  \"startHidden\": ").Append(StartHidden ? "true" : "false");
         sb.Append(",\n  \"defaultTunnel\": ").Append(JsonQuote(DefaultId));
+        sb.Append(",\n  \"lastActiveTunnel\": ").Append(JsonQuote(LastActiveId));
         sb.Append(",\n  \"tunnels\": [\n");
         for (int i = 0; i < Tunnels.Count; i++) {
             var t = Tunnels[i];

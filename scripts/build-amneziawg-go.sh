@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the userspace AmneziaWG daemon Fairlead ships next to wireguard-go.
+# Builds the userspace AmneziaWG daemon Fairlead ships. It also carries plain WireGuard.
 # The socket directory is pinned to /var/run/wireguard so the helper can
 # configure it the same way as wireguard-go. Go is only needed to rebuild
 # this binary; the app build does not download it.

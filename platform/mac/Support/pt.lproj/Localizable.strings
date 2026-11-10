@@ -27,6 +27,7 @@
 "Disconnecting" = "A desligar";
 "Handshake %@" = "Handshake %@";
 "Bringing up the interface and routes" = "A criar a interface e as rotas";
+"Waiting for the handshake" = "A aguardar o handshake";
 "Restoring the previous routes" = "A restaurar as rotas anteriores";
 "Traffic is bypassing WireGuard" = "O tráfego está fora do WireGuard";
 "%@  ·  gateway %@" = "%@  ·  gateway %@";
@@ -163,16 +164,18 @@
 "Settings" = "Definições";
 "Settings…" = "Definições…";
 "Open at login" = "Abrir ao iniciar sessão";
+"Start hidden" = "Iniciar oculto";
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "O Fairlead abre quando inicia sessão. Um túnel predefinido liga-se sozinho.";
+"Open in the menu bar only. Click the Fairlead icon to show the window." = "Abrir só na barra de menus. Clique no ícone do Fairlead para mostrar a janela.";
 "Default tunnel" = "Túnel predefinido";
 "None" = "Nenhum";
+"Last active" = "Último ativo";
 "Fairlead selects this tunnel when it opens and connects it." = "O Fairlead escolhe este túnel ao abrir e liga-o.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "O macOS ainda precisa de autorização. Abra Definições do Sistema → Geral → Itens de Início e permita o Fairlead.";
 "The running helper is an older copy. Fairlead will replace it." = "O assistente em execução é uma cópia antiga. O Fairlead vai substituí-lo.";
 "wireguard-go is not included in this copy of Fairlead." = "Esta cópia do Fairlead não inclui o wireguard-go.";
 "Could not resolve the endpoint." = "Não foi possível resolver o endpoint.";
 "wireguard-go did not create an interface." = "O wireguard-go não criou uma interface.";
-"wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "O wireguard-go está incluído. O assistente pede uma vez a palavra-passe de administrador e depois levanta sozinho os túneis e as rotas diretas. As configurações com chaves ficam neste Mac.";
 "Domains" = "Domínios";
 "Nothing here yet. Add a domain that should bypass WireGuard." = "Ainda não há nada. Adicione um domínio que deva contornar o WireGuard.";
 "Fairlead resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "O Fairlead resolve o nome na rede normal e envia esses endereços diretamente. Um endereço partilhado, como o de uma CDN, fica direto para todas as aplicações. A lista atualiza-se quando o registo DNS expira.";
@@ -195,7 +198,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers e DisableCookies têm de ser true ou false.";
 "Signature packets must stay on one line." = "Os pacotes de assinatura têm de ficar numa só linha.";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive tem de ser um número ou um intervalo, por exemplo 20-30.";
-"AmneziaWG configs use the included amneziawg-go. Ordinary WireGuard configs stay on wireguard-go." = "As configurações AmneziaWG usam o amneziawg-go incluído. O WireGuard normal fica no wireguard-go.";
 "Except the list" = "Exceto a lista";
 "Only the list" = "Só a lista";
 "Only these addresses use the tunnel. Everything else stays on the regular network." = "Só estes endereços usam o túnel. O resto fica na rede normal.";
@@ -213,7 +215,6 @@
 "App" = "App";
 "Nothing here yet. Add an IP, a domain, or an app." = "Ainda não há nada. Adicione um IP, um domínio ou uma app.";
 "Enter an IP, a network, or a domain." = "Introduza um IP, uma rede ou um domínio.";
-"A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "Um domínio é resolvido na rede normal. Os endereços de uma app são lembrados quando ela se liga. No macOS a rota vale para todas as apps.";
 "203.0.113.10 or example.com" = "203.0.113.10 ou example.com";
 "Add route" = "Adicionar rota";
 "One address or domain per line." = "Um endereço ou domínio por linha.";
@@ -227,3 +228,10 @@
 "%d domains.few" = "%d domínios";
 "%d domains.many" = "%d domínios";
 "%d domains.other" = "%d domínios";
+"amneziawg-go is included and carries both WireGuard and AmneziaWG. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "O amneziawg-go está incluído e cobre WireGuard e AmneziaWG. O assistente pede a palavra-passe de administrador só na primeira vez; depois o launchd mantém-no após reinícios. As configurações com chaves ficam neste Mac.";
+
+"A domain is resolved on the regular network. An app's addresses are learned as it connects." = "Um domínio é resolvido na rede normal. Os endereços de uma app são lembrados quando ela se liga.";
+"Nothing learned yet." = "Ainda não foi aprendido nada.";
+"Edit list" = "Editar lista";
+"Saving the list" = "A guardar a lista";
+"Resolved" = "Resolvido";

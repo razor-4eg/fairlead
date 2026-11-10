@@ -35,8 +35,16 @@ final class AppModel: ObservableObject {
     private var learnTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var pushedRoutes: [String: [String]] = [:]
-    private var helperUpdateTask: Task<Void, Never>?
+    private var helperStartTask: Task<Void, Never>?
     private var resolverCache: (at: Date, snap: ScutilDNS.Snapshot)?
+    /// While bypass RPC runs, status polls only fill the socket backlog.
+    private var routesBusy = 0
+    /// While up/down RPC runs — not while we wait for a handshake after up returns.
+    private var controlBusy = 0
+    /// Open the main window once after launch when Start hidden is off.
+    private var pendingMainWindow = false
+    /// User (or Finder reopen after launch) asked for the main window.
+    private var mainWindowRequested = false
     @Published var helperStale = false
 
     var selectedTunnel: Tunnel? {
@@ -57,12 +65,14 @@ init
 ===============
 */
     init() {
+        // Restored windows reopen before Start hidden can take effect.
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
         tunnels = store.load()
         settings = settingsStore.load()
-        if let id = settings.defaultTunnelID, tunnels.contains(where: { $0.id == id }) {
-            selection = id
-        } else {
-            selection = tunnels.first?.id
+        selection = preferredStartupSelection()
+        pendingMainWindow = !settings.startHidden
+        if settings.startHidden {
+            clearSavedWindowState()
         }
 
         applySavedLoginItem()
@@ -82,9 +92,43 @@ init
         }
 
         Task { [weak self] in
-            await self?.ensureCurrentHelper()
-            await self?.connectDefaultIfNeeded()
+            guard let self else { return }
+            // First install / helper update may need the password once. After that,
+            // launchd KeepAlive keeps the helper up without prompting again.
+            let needsInstall = HelperInstaller.needsUpdate()
+                || !HelperInstaller.isInstalled()
+                || !HelperInstaller.plistHasKeepAlive()
+            await self.ensureHelper(interactive: needsInstall)
+            await self.connectDefaultIfNeeded()
         }
+    }
+
+/*
+===============
+preferredStartupSelection
+===============
+*/
+    private func preferredStartupSelection() -> UUID? {
+        if let id = resolvedDefaultTunnelID(), tunnels.contains(where: { $0.id == id }) {
+            return id
+        }
+
+        return tunnels.first?.id
+    }
+
+/*
+===============
+resolvedDefaultTunnelID
+===============
+*/
+    private func resolvedDefaultTunnelID() -> UUID? {
+        let key = settings.defaultTunnelSelection
+        if key == AppSettings.lastActiveKey {
+            return settings.lastActiveTunnelID
+        }
+
+        guard !key.isEmpty else { return nil }
+        return UUID(uuidString: key)
     }
 
 /*
@@ -131,12 +175,129 @@ syncLoginItem
 /*
 ===============
 setDefaultTunnel
+`nil` / empty = none; `last` = last active; otherwise a tunnel id string.
 ===============
 */
-    func setDefaultTunnel(_ id: UUID?) {
-        let resolved = id.flatMap { value in tunnels.contains { $0.id == value } ? value : nil }
-        settings.defaultTunnelID = resolved
+    func setDefaultTunnel(_ key: String?) {
+        let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            settings.defaultTunnel = nil
+        } else if trimmed == AppSettings.lastActiveKey {
+            settings.defaultTunnel = AppSettings.lastActiveKey
+        } else if let id = UUID(uuidString: trimmed), tunnels.contains(where: { $0.id == id }) {
+            settings.defaultTunnel = id.uuidString
+        } else {
+            settings.defaultTunnel = nil
+        }
+
         settingsStore.save(settings)
+    }
+
+/*
+===============
+setStartHidden
+===============
+*/
+    func setStartHidden(_ enabled: Bool) {
+        settings.startHidden = enabled
+        settingsStore.save(settings)
+    }
+
+/*
+===============
+rememberLastActive
+===============
+*/
+    private func rememberLastActive(_ id: UUID) {
+        guard settings.lastActiveTunnelID != id else { return }
+        settings.lastActiveTunnelID = id
+        settingsStore.save(settings)
+    }
+
+    static let openMainNotification = Notification.Name("FairleadOpenMain")
+
+/*
+===============
+prepareStartHidden
+Call from applicationWillFinishLaunching so the Dock icon never appears.
+===============
+*/
+    func prepareStartHidden() {
+        guard settings.startHidden else { return }
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+/*
+===============
+finishStartHidden
+Drop any window AppKit restored after launch.
+===============
+*/
+    func finishStartHidden() {
+        guard settings.startHidden, !mainWindowRequested else { return }
+        pendingMainWindow = false
+        for window in NSApp.windows where window.canBecomeMain || window.isVisible {
+            window.isRestorable = false
+            window.orderOut(nil)
+            window.close()
+        }
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+/*
+===============
+clearSavedWindowState
+===============
+*/
+    private func clearSavedWindowState() {
+        let base = NSHomeDirectory() + "/Library/Saved Application State/com.fairlead.client.savedState"
+        try? FileManager.default.removeItem(atPath: base)
+    }
+
+/*
+===============
+requestOpenMainWindow
+Ask the menu-bar scene to run openWindow — AppKit cannot open a SwiftUI Window alone.
+===============
+*/
+    func requestOpenMainWindow() {
+        mainWindowRequested = true
+        pendingMainWindow = false
+        NSApp.setActivationPolicy(.regular)
+        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+            window.isRestorable = false
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        NotificationCenter.default.post(name: Self.openMainNotification, object: nil)
+    }
+
+/*
+===============
+revealMainWindowAtLaunchIfNeeded
+Window is not opened by default (so Start hidden stays invisible). Open it once
+when the menu-bar item appears and the user did not ask to start hidden.
+===============
+*/
+    func revealMainWindowAtLaunchIfNeeded(open: OpenWindowAction) {
+        guard pendingMainWindow else { return }
+        pendingMainWindow = false
+        mainWindowRequested = true
+        NSApp.setActivationPolicy(.regular)
+        open(id: "main")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+/*
+===============
+shouldIgnoreReopen
+Login / restoration can send reopen while Start hidden is on.
+===============
+*/
+    func shouldIgnoreReopen() -> Bool {
+        settings.startHidden && !mainWindowRequested
     }
 
 /*
@@ -168,7 +329,7 @@ connectDefaultIfNeeded
     private func connectDefaultIfNeeded() async {
         guard !didAutoConnect else { return }
         didAutoConnect = true
-        guard let id = settings.defaultTunnelID,
+        guard let id = resolvedDefaultTunnelID(),
               let tunnel = tunnels.first(where: { $0.id == id }) else { return }
         selection = id
         guard live(id).phase == .idle || live(id).phase == .disconnecting else { return }
@@ -177,30 +338,133 @@ connectDefaultIfNeeded
 
 /*
 ===============
-ensureCurrentHelper
-Replaces the launchd helper when it is older than the copy shipped in this app.
+ensureHelper
+Use the live helper when it answers. The administrator password is only for the
+first install, or when this app ships a newer helper binary / LaunchDaemon.
+Ordinary connect and disconnect never call osascript.
 ===============
 */
-    func ensureCurrentHelper() async {
-        if let helperUpdateTask {
-            await helperUpdateTask.value
+    func ensureHelper(interactive: Bool) async {
+        if let helperStartTask {
+            await helperStartTask.value
             return
         }
 
-        guard HelperInstaller.needsUpdate() else {
+        let task = Task { @MainActor in
+            await self.startHelper(interactive: interactive)
+        }
+        helperStartTask = task
+        await task.value
+        helperStartTask = nil
+    }
+
+/*
+===============
+startHelper
+===============
+*/
+    private func startHelper(interactive: Bool) async {
+        let mustInstall = HelperInstaller.needsUpdate()
+            || !HelperInstaller.isInstalled()
+            || !HelperInstaller.plistHasKeepAlive()
+
+        if await pingHelper() {
+            markHelperOnline()
+            if mustInstall {
+                helperStale = true
+                if interactive {
+                    banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
+                    await replaceHelper()
+                }
+                return
+            }
             helperStale = false
             return
         }
 
-        helperStale = true
-        let task = Task { @MainActor in
-            self.banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
-            await self.installHelper()
-            self.helperStale = HelperInstaller.needsUpdate()
+        helperOnline = false
+        helperStale = mustInstall
+        if mustInstall {
+            if !interactive {
+                return
+            }
+            if HelperInstaller.needsUpdate() || !HelperInstaller.plistHasKeepAlive() {
+                banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
+            }
+            await replaceHelper()
+            return
         }
 
-        helperUpdateTask = task
-        await task.value
+        // Installed and current: launchd KeepAlive / RunAtLoad brings it back without a password.
+        if await waitHelper(tries: 40) {
+            helperStale = false
+            banner = nil
+            return
+        }
+        if interactive {
+            banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
+        }
+    }
+
+/*
+===============
+replaceHelper
+Full privileged install. Password once per helper version.
+===============
+*/
+    private func replaceHelper() async {
+        if let error = await HelperInstaller.install() {
+            banner = error
+            helperOnline = false
+            helperStale = HelperInstaller.needsUpdate() || !HelperInstaller.plistHasKeepAlive()
+            return
+        }
+        if await waitHelper(tries: 40) {
+            helperStale = false
+            banner = nil
+            return
+        }
+        helperOnline = false
+        helperStale = HelperInstaller.needsUpdate() || !HelperInstaller.plistHasKeepAlive()
+        banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
+    }
+
+/*
+===============
+pingHelper
+===============
+*/
+    private func pingHelper() async -> Bool {
+        let response = await rpc(RPCRequest(op: "ping"), timeout: 0.4)
+        return response?.ok == true
+    }
+
+/*
+===============
+waitHelper
+===============
+*/
+    private func waitHelper(tries: Int) async -> Bool {
+        for _ in 0..<tries {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if await pingHelper() {
+                markHelperOnline()
+                return true
+            }
+        }
+        return false
+    }
+
+/*
+===============
+markHelperOnline
+===============
+*/
+    private func markHelperOnline() {
+        helperOnline = true
+        if tools.amneziaWG == nil {
+            tools = ToolLocator.locate()
+        }
     }
 
 /*
@@ -325,8 +589,13 @@ delete
 
             tunnels.removeAll { $0.id == tunnel.id }
             lives[tunnel.id] = nil
-            if settings.defaultTunnelID == tunnel.id {
+            if settings.defaultTunnelSelection == tunnel.id.uuidString {
                 setDefaultTunnel(nil)
+            }
+
+            if settings.lastActiveTunnelID == tunnel.id {
+                settings.lastActiveTunnelID = nil
+                settingsStore.save(settings)
             }
 
             if selection == tunnel.id {
@@ -369,12 +638,14 @@ connect
             await disconnect(other)
         }
 
-        await ensureCurrentHelper()
-        if HelperInstaller.needsUpdate() {
+        await ensureHelper(interactive: true)
+        if !helperOnline || HelperInstaller.needsUpdate() {
+            mutate(tunnel.id) { $0.phase = .idle }
             if banner == nil {
-                banner = FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
+                banner = HelperInstaller.needsUpdate()
+                    ? FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
+                    : FairleadL10n.text("The helper did not respond. Start it and try again.")
             }
-
             showSettings = true
             return
         }
@@ -382,6 +653,7 @@ connect
         await rememberResolvers()
         mutate(tunnel.id) { $0.phase = .connecting }
         banner = nil
+        controlBusy += 1
         let response = await rpc(
             RPCRequest(
                 op: "up",
@@ -393,6 +665,7 @@ connect
             ),
             timeout: 90
         )
+        controlBusy = max(0, controlBusy - 1)
         guard let response else {
             mutate(tunnel.id) { $0.phase = .idle }
             helperOnline = false
@@ -402,8 +675,14 @@ connect
         }
 
         if let managed = response.managed?.first(where: { $0.name == tunnel.slug }) {
-            apply(managed, to: tunnel.id, phase: .connected)
+            // Interface is up, but WireGuard may not have shaken hands yet.
+            apply(managed, to: tunnel.id, phase: .connecting)
             pushedRoutes[tunnel.slug] = managed.bypass
+            rememberLastActive(tunnel.id)
+            if let devices = response.devices {
+                absorb(devices, interface: managed.realInterface, id: tunnel.id)
+                promoteIfHandshaken(tunnel.id)
+            }
         } else {
             mutate(tunnel.id) { $0.phase = .idle }
         }
@@ -418,15 +697,22 @@ connect
 
 /*
 ===============
-shutdownTunnels
-Brings every helper-managed tunnel down before the process exits.
+shutdown
+Bring every tunnel down before the app exits. The helper stays under launchd
+(KeepAlive) so the next launch does not need the administrator password.
 ===============
 */
-    func shutdownTunnels() {
-        guard let status = try? RPCClient.call(RPCRequest(op: "status"), timeout: 8), status.ok else { return }
-        for tunnel in status.managed ?? [] {
-            _ = try? RPCClient.call(RPCRequest(op: "down", name: tunnel.name), timeout: 45)
+    func shutdown() {
+        guard helperOnline || FileManager.default.fileExists(atPath: FairleadPaths.socket) else {
+            helperOnline = false
+            return
         }
+        if let status = try? RPCClient.call(RPCRequest(op: "status"), timeout: 0.8), status.ok {
+            for tunnel in status.managed ?? [] {
+                _ = try? RPCClient.call(RPCRequest(op: "down", name: tunnel.name), timeout: 8)
+            }
+        }
+        helperOnline = false
     }
 
 /*
@@ -451,12 +737,15 @@ disconnect
 */
     func disconnect(_ tunnel: Tunnel) async {
         mutate(tunnel.id) { $0.phase = .disconnecting }
+        controlBusy += 1
         let response = await rpc(RPCRequest(op: "down", name: tunnel.slug), timeout: 60)
+        controlBusy = max(0, controlBusy - 1)
         mutate(tunnel.id) { live in
             live.phase = .idle
             live.rateDown = 0
             live.rateUp = 0
             live.realInterface = nil
+            live.handshake = nil
         }
 
         pushedRoutes[tunnel.slug] = nil
@@ -592,6 +881,127 @@ setRouteList
 
 /*
 ===============
+updateRouteList
+Replace one list's name and entries. Keeps resolved addresses for unchanged domains.
+===============
+*/
+    func updateRouteList(
+        _ listID: UUID,
+        tunnel id: UUID,
+        name: String,
+        text: String,
+        progress: @escaping (String) -> Void
+    ) async -> [(line: String, message: String)] {
+        let listName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let tunnel = tunnels.first(where: { $0.id == id }),
+              let existing = tunnel.routeLists.first(where: { $0.id == listID }),
+              !listName.isEmpty else { return [] }
+
+        let keptAddresses = Dictionary(uniqueKeysWithValues:
+            existing.entries
+                .filter { $0.kind == .domain }
+                .map { ($0.value.lowercased(), ($0.addresses, $0.refreshAt)) }
+        )
+        var failures: [(line: String, message: String)] = []
+        var entries: [RouteEntry] = []
+        var seen = Set(
+            tunnel.routeLists
+                .filter { $0.id != listID }
+                .flatMap { list in list.entries.map { "\($0.kind.rawValue) \($0.value)" } }
+        )
+        var reportedCap = false
+        let cap = 4096
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            if Task.isCancelled { return [] }
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if entries.count >= cap {
+                if !reportedCap {
+                    failures.append((line, FairleadL10n.text("A list can hold 4096 entries.")))
+                    reportedCap = true
+                } else {
+                    failures.append((line, ""))
+                }
+                continue
+            }
+            if line.contains(where: { $0.isWhitespace }) {
+                failures.append((line, FairleadL10n.text("Enter an IP, a network, or a domain.")))
+                continue
+            }
+            if let cidr = CIDR.parse(line) {
+                if cidr.prefix == 0 {
+                    failures.append((line, FairleadL10n.text("That network is too broad and would disable the whole tunnel.")))
+                } else if !seen.insert("ip \(cidr.string)").inserted {
+                    failures.append((line, FairleadL10n.text("That address is already listed.")))
+                } else {
+                    entries.append(RouteEntry(kind: .ip, value: cidr.string))
+                }
+            } else if line.contains("*") {
+                failures.append((line, FairleadL10n.text("Wildcards such as *.example.com are not supported.")))
+            } else if let domain = DomainName.normalize(line) {
+                if !seen.insert("domain \(domain)").inserted {
+                    failures.append((line, FairleadL10n.text("That domain is already listed.")))
+                } else if let kept = keptAddresses[domain] {
+                    entries.append(RouteEntry(kind: .domain, value: domain, addresses: kept.0, refreshAt: kept.1))
+                } else {
+                    entries.append(RouteEntry(kind: .domain, value: domain))
+                }
+            } else {
+                failures.append((line, FairleadL10n.text("Enter an IP, a network, or a domain.")))
+            }
+        }
+
+        if entries.isEmpty {
+            if failures.isEmpty {
+                failures.append(("", FairleadL10n.text("Enter an IP, a network, or a domain.")))
+            }
+            return failures
+        }
+
+        let domainIndexes = entries.indices.filter {
+            entries[$0].kind == .domain && entries[$0].addresses.isEmpty
+        }
+        if domainIndexes.isEmpty {
+            progress(FairleadL10n.text("Saving the list"))
+            await Task.yield()
+        } else {
+            progress(FairleadL10n.format("Resolving %d of %d", 1, domainIndexes.count))
+            await Task.yield()
+            if Task.isCancelled { return [] }
+            await rememberResolvers()
+            let target = domainLookupTarget(id)
+            let skip = Set(live(id).endpointIPs)
+            if !target.servers.isEmpty {
+                for (offset, index) in domainIndexes.enumerated() {
+                    if Task.isCancelled { return [] }
+                    progress(FairleadL10n.format("Resolving %d of %d", offset + 1, domainIndexes.count))
+                    let host = entries[index].value
+                    let answer = await Task.detached(priority: .utility) {
+                        DomainLookup.resolve(name: host, servers: target.servers, interface: target.interface)
+                    }.value
+                    if Task.isCancelled { return [] }
+                    if let answer {
+                        entries[index].addresses = mergedDomainAddresses(existing: [], answer: answer, skip: skip)
+                        entries[index].refreshAt = Date().addingTimeInterval(TimeInterval(answer.ttl))
+                    } else {
+                        entries[index].refreshAt = Date().addingTimeInterval(30)
+                    }
+                }
+            }
+        }
+
+        if Task.isCancelled { return [] }
+        progress(FairleadL10n.text("Saving the list"))
+        guard var current = tunnels.first(where: { $0.id == id }),
+              let index = current.routeLists.firstIndex(where: { $0.id == listID }) else { return failures }
+        current.routeLists[index].name = listName
+        current.routeLists[index].entries = entries
+        replace(current)
+        return failures
+    }
+
+/*
+===============
 addApplications
 ===============
 */
@@ -679,19 +1089,15 @@ setRoutePolicy
 /*
 ===============
 installHelper
+Settings button: install or restart the helper, allowing the password prompt.
 ===============
 */
     func installHelper() async {
         banner = nil
-        if let error = await HelperInstaller.install() {
-            banner = error
-            return
-        }
-
-        await refresh()
+        await ensureHelper(interactive: true)
         if helperOnline {
             banner = nil
-        } else {
+        } else if banner == nil {
             banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
         }
     }
@@ -721,9 +1127,7 @@ openMainWindow
 ===============
 */
     func openMainWindow() {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+        requestOpenMainWindow()
     }
 
     var anyConnected: Bool {
@@ -750,7 +1154,10 @@ pushRoutes
 ===============
 */
     private func pushRoutes(for tunnel: Tunnel) async {
-        let cidrs = tunnel.directCIDRs()
+        routesBusy += 1
+        defer { routesBusy = max(0, routesBusy - 1) }
+        // The shared planner caps applied routes; sending thousands only slows the helper.
+        let cidrs = Array(tunnel.directCIDRs().prefix(128))
         let response = await rpc(
             RPCRequest(
                 op: "bypass",
@@ -759,12 +1166,15 @@ pushRoutes
                 excludeLAN: tunnel.excludeLAN,
                 policy: tunnel.routePolicy.rawValue
             ),
-            timeout: 30
+            timeout: 120
         )
         guard let response else { return }
         if let managed = response.managed?.first(where: { $0.name == tunnel.slug }) {
-            apply(managed, to: tunnel.id, phase: .connected)
+            // Keep Connecting until a real handshake — bypass must not claim Connected.
+            let phase = live(tunnel.id).phase
+            apply(managed, to: tunnel.id, phase: phase == .idle ? .connecting : phase)
             pushedRoutes[tunnel.slug] = managed.bypass
+            promoteIfHandshaken(tunnel.id)
         }
 
         if let warnings = response.warnings {
@@ -781,7 +1191,7 @@ learnDestinations
 */
     private func learnDestinations() async {
         let snapshot = tunnels
-        guard snapshot.contains(where: { $0.appRules.contains { $0.enabled && $0.learn } }) else { return }
+        guard snapshot.contains(where: { $0.appRules.contains(where: \.enabled) }) else { return }
         var skip = Set<String>()
         for tunnel in snapshot {
             skip.formUnion(live(tunnel.id).endpointIPs)
@@ -798,7 +1208,7 @@ learnDestinations
             var tunnel = tunnels[index]
             var tunnelChanged = false
             for ruleIndex in tunnel.appRules.indices {
-                guard tunnel.appRules[ruleIndex].enabled, tunnel.appRules[ruleIndex].learn else { continue }
+                guard tunnel.appRules[ruleIndex].enabled else { continue }
                 guard let additions = found[tunnel.appRules[ruleIndex].id] else { continue }
                 var learned = tunnel.appRules[ruleIndex].learned
                 for ip in additions where !learned.contains(ip) && learned.count < 400 {
@@ -997,17 +1407,24 @@ refresh
 */
     private func refresh() async {
         now = Date()
-        let response = await rpc(RPCRequest(op: "status"), timeout: 8)
+        // Skip only while a control/bypass RPC holds the helper. Waiting for a
+        // handshake after up must still poll status.
+        if routesBusy > 0 || controlBusy > 0 {
+            return
+        }
+
+        // When the helper is down, fail fast so start and quit are not blocked.
+        let response = await rpc(RPCRequest(op: "status"), timeout: helperOnline ? 3 : 0.2)
         guard let response, response.ok else {
             helperOnline = false
-            if tools.wireguardGo == nil {
+            if tools.amneziaWG == nil {
                 tools = ToolLocator.locate()
             }
 
             return
         }
 
-        helperOnline = true
+        markHelperOnline()
         if let report = response.tools {
             tools = report
         }
@@ -1015,26 +1432,36 @@ refresh
         let managed = response.managed ?? []
         let devices = response.devices ?? []
         for tunnel in tunnels {
-            if live(tunnel.id).phase == .connecting || live(tunnel.id).phase == .disconnecting {
-                if let item = managed.first(where: { $0.name == tunnel.slug }), live(tunnel.id).phase == .connecting {
-                    apply(item, to: tunnel.id, phase: .connected)
-                    absorb(devices, interface: item.realInterface, id: tunnel.id)
-                }
-
+            let phase = live(tunnel.id).phase
+            if phase == .disconnecting {
                 continue
             }
 
             if let item = managed.first(where: { $0.name == tunnel.slug }) {
-                apply(item, to: tunnel.id, phase: .connected)
                 absorb(devices, interface: item.realInterface, id: tunnel.id)
-            } else if lives[tunnel.id]?.phase == .connected {
+                let next: Phase = live(tunnel.id).handshake != nil ? .connected : .connecting
+                apply(item, to: tunnel.id, phase: next)
+            } else if phase == .connected || phase == .connecting {
                 mutate(tunnel.id) {
                     $0.phase = .idle
                     $0.rateDown = 0
                     $0.rateUp = 0
+                    $0.handshake = nil
+                    $0.realInterface = nil
                 }
             }
         }
+    }
+
+/*
+===============
+promoteIfHandshaken
+Connected only after WireGuard has a real handshake — not merely an up interface.
+===============
+*/
+    private func promoteIfHandshaken(_ id: UUID) {
+        guard live(id).phase == .connecting, live(id).handshake != nil else { return }
+        mutate(id) { $0.phase = .connected }
     }
 
 /*
@@ -1117,7 +1544,7 @@ isUp
 rpc
 ===============
 */
-    private func rpc(_ request: RPCRequest, timeout: Int) async -> RPCResponse? {
+    private func rpc(_ request: RPCRequest, timeout: TimeInterval) async -> RPCResponse? {
         await Task.detached(priority: .userInitiated) {
             try? RPCClient.call(request, timeout: timeout)
         }.value

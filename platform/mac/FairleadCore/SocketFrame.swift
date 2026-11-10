@@ -32,15 +32,34 @@ public enum SocketFrame {
         return try readExact(fd, Int(length))
     }
 
-    public static func setTimeout(_ fd: Int32, seconds: Int) {
-        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+    public static func setTimeout(_ fd: Int32, seconds: TimeInterval) {
+        let clamped = max(0.05, seconds)
+        let whole = time_t(clamped)
+        var timeout = timeval(
+            tv_sec: whole,
+            tv_usec: suseconds_t((clamped - Double(whole)) * 1_000_000.0)
+        )
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    /// Prefer EPIPE over process death when the peer closes early.
+    public static func setNoSigPipe(_ fd: Int32) {
+        var value: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    /// Keep the listen / client sockets out of Process children that spawn `route`.
+    public static func setCloseOnExec(_ fd: Int32) {
+        let flags = fcntl(fd, F_GETFD)
+        guard flags >= 0 else { return }
+        _ = fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
     }
 
     public static func connect(path: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw SocketFrameError.failed(FairleadL10n.text("Could not open the socket.")) }
+        setNoSigPipe(fd)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         guard setUnixPath(path, into: &addr) else {
@@ -64,6 +83,7 @@ public enum SocketFrame {
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw SocketFrameError.failed(FairleadL10n.text("Could not create the socket.")) }
+        setNoSigPipe(fd)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         guard setUnixPath(path, into: &addr) else {
@@ -81,10 +101,11 @@ public enum SocketFrame {
             close(fd)
             throw SocketFrameError.failed(FairleadL10n.format("Could not bind the socket: %@.", message))
         }
-        guard listen(fd, 8) == 0 else {
+        guard listen(fd, 32) == 0 else {
             close(fd)
             throw SocketFrameError.failed(FairleadL10n.text("Could not listen on the socket."))
         }
+        setCloseOnExec(fd)
         return fd
     }
 
@@ -111,6 +132,9 @@ public enum SocketFrame {
                 if rc == 0 { throw SocketFrameError.disconnected }
                 if rc < 0 {
                     if errno == EINTR { continue }
+                    if errno == EPIPE || errno == ECONNRESET {
+                        throw SocketFrameError.disconnected
+                    }
                     throw SocketFrameError.failed(String(cString: strerror(errno)))
                 }
                 sent += rc
@@ -138,7 +162,7 @@ public enum SocketFrame {
 }
 
 public enum RPCClient {
-    public static func call(_ request: RPCRequest, timeout: Int = 20) throws -> RPCResponse {
+    public static func call(_ request: RPCRequest, timeout: TimeInterval = 20) throws -> RPCResponse {
         let fd = try SocketFrame.connect(path: FairleadPaths.socket)
         defer { close(fd) }
         SocketFrame.setTimeout(fd, seconds: timeout)

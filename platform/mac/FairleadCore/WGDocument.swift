@@ -1,5 +1,8 @@
+import FairleadC
 import Foundation
 
+/// A WireGuard config as sections and fields. The Swift value keeps the document editable
+/// from the UI. Every parse, edit, render, and lookup is done by the shared C kernel.
 public struct WGDocument: Equatable {
     public struct Entry: Equatable {
         public var raw: String?
@@ -31,67 +34,35 @@ public struct WGDocument: Equatable {
     }
 
     public static func parse(_ text: String) -> WGDocument {
-        var preamble: [String] = []
-        var sections: [Section] = []
-        var sawSection = false
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-
-        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") && trimmed.count > 2 {
-                sawSection = true
-                let name = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-                sections.append(Section(index: sections.count, name: name, entries: []))
-                continue
-            }
-            if !sawSection {
-                preamble.append(line)
-                continue
-            }
-            guard var section = sections.last else { continue }
-            if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix(";") {
-                section.entries.append(.line(line))
-            } else if let eq = line.firstIndex(of: "=") {
-                let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-                let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-                section.entries.append(.field(key, value))
-            } else {
-                section.entries.append(.line(line))
-            }
-            sections[sections.count - 1] = section
-        }
-        return WGDocument(preamble: preamble, sections: sections)
+        var doc = fl_doc_t()
+        fl_doc_init(&doc)
+        defer { fl_doc_free(&doc) }
+        fl_doc_parse(&doc, text)
+        return WGDocument(copying: doc)
     }
 
     public func render() -> String {
-        var lines: [String] = preamble
-        if !preamble.isEmpty && (preamble.last?.isEmpty == false) && !sections.isEmpty {
-            lines.append("")
+        withC { doc in
+            CBridge.take(fl_doc_render(doc)) ?? ""
         }
-        for (offset, section) in sections.enumerated() {
-            if offset > 0, lines.last?.isEmpty != true { lines.append("") }
-            lines.append("[\(section.name)]")
-            for entry in section.entries {
-                if let key = entry.key {
-                    lines.append("\(key) = \(entry.value ?? "")")
-                } else {
-                    lines.append(entry.raw ?? "")
-                }
-            }
-        }
-        var text = lines.joined(separator: "\n")
-        if !text.hasSuffix("\n") { text.append("\n") }
-        return text
     }
 
     public var interfaceIndex: Int? {
-        sections.firstIndex { $0.name.caseInsensitiveCompare("Interface") == .orderedSame }
+        withC { doc in
+            let index = Int(fl_doc_interface(doc))
+            return index >= 0 ? index : nil
+        }
     }
 
     public var peerIndexes: [Int] {
-        sections.indices.filter { sections[$0].name.caseInsensitiveCompare("Peer") == .orderedSame }
+        withC { doc in
+            var found = [Int32](repeating: 0, count: max(sections.count, 1))
+            let count = Int(fl_doc_peers(doc, &found, Int32(found.count)))
+            return found.prefix(max(0, min(count, found.count))).map(Int.init)
+        }
     }
 
+    /// Each non-empty value of `key`, one per line in the file.
     public func values(section: Int, key: String) -> [String] {
         guard sections.indices.contains(section) else { return [] }
         return sections[section].entries.compactMap { entry in
@@ -102,46 +73,49 @@ public struct WGDocument: Equatable {
     }
 
     public func value(section: Int, key: String) -> String {
-        values(section: section, key: key).joined(separator: ", ")
+        withC { doc in
+            CBridge.string(capacity: 16384) { buffer, cap in
+                fl_doc_value(doc, Int32(section), key, buffer, cap)
+            }
+        }
     }
 
     public mutating func setValues(section: Int, key: String, values: [String]) {
-        guard sections.indices.contains(section) else { return }
         let cleaned = values.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        var entries = sections[section].entries
-        if let first = entries.firstIndex(where: { $0.key?.caseInsensitiveCompare(key) == .orderedSame }) {
-            entries.removeAll { $0.key?.caseInsensitiveCompare(key) == .orderedSame }
-            if !cleaned.isEmpty {
-                entries.insert(.field(canonical(key), cleaned.joined(separator: ", ")), at: min(first, entries.count))
-            }
-        } else if !cleaned.isEmpty {
-            entries.append(.field(canonical(key), cleaned.joined(separator: ", ")))
+        edit { doc in
+            fl_doc_set(doc, Int32(section), key, cleaned.joined(separator: ", "))
         }
-        sections[section].entries = entries
     }
 
     public mutating func setValue(section: Int, key: String, value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        setValues(section: section, key: key, values: trimmed.isEmpty ? [] : [trimmed])
+        edit { doc in
+            fl_doc_set(doc, Int32(section), key, trimmed)
+        }
     }
 
     public mutating func ensureInterface() -> Int {
-        if let interfaceIndex { return interfaceIndex }
-        sections.insert(Section(index: 0, name: "Interface", entries: []), at: 0)
-        reindex()
-        return 0
+        var index = 0
+        edit { doc in
+            index = Int(fl_doc_ensure_interface(doc))
+        }
+        return index
     }
 
     public mutating func addPeer() -> Int {
-        sections.append(Section(index: sections.count, name: "Peer", entries: []))
-        reindex()
-        return sections.count - 1
+        var index = 0
+        edit { doc in
+            index = Int(fl_doc_add_peer(doc))
+        }
+        return index
     }
 
     public mutating func removeSection(at index: Int) {
         guard sections.indices.contains(index) else { return }
         sections.remove(at: index)
-        reindex()
+        for position in sections.indices {
+            sections[position].index = position
+        }
     }
 
     public var interfacePrivateKey: String {
@@ -150,13 +124,19 @@ public struct WGDocument: Equatable {
     }
 
     public var interfaceAddresses: String {
-        guard let interfaceIndex else { return "" }
-        return splitList(values(section: interfaceIndex, key: "Address")).joined(separator: ", ")
+        withC { doc in
+            CBridge.string(capacity: 16384) { buffer, cap in
+                fl_doc_addresses(doc, buffer, cap)
+            }
+        }
     }
 
     public var interfaceDNS: String {
-        guard let interfaceIndex else { return "" }
-        return splitList(values(section: interfaceIndex, key: "DNS")).joined(separator: ", ")
+        withC { doc in
+            CBridge.string(capacity: 16384) { buffer, cap in
+                fl_doc_dns(doc, buffer, cap)
+            }
+        }
     }
 
     public var interfaceMTU: String {
@@ -173,7 +153,11 @@ public struct WGDocument: Equatable {
     public func peerPreshared(_ index: Int) -> String { value(section: index, key: "PresharedKey") }
     public func peerEndpoint(_ index: Int) -> String { value(section: index, key: "Endpoint") }
     public func peerAllowedIPs(_ index: Int) -> String {
-        splitList(values(section: index, key: "AllowedIPs")).joined(separator: ", ")
+        withC { doc in
+            CBridge.string(capacity: 16384) { buffer, cap in
+                fl_doc_peer_allowed(doc, Int32(index), buffer, cap)
+            }
+        }
     }
     public func peerKeepalive(_ index: Int) -> String { value(section: index, key: "PersistentKeepalive") }
 
@@ -182,71 +166,105 @@ public struct WGDocument: Equatable {
     }
 
     public static func blank(privateKey: String) -> WGDocument {
-        var doc = WGDocument()
-        let iface = doc.ensureInterface()
-        doc.setValue(section: iface, key: "PrivateKey", value: privateKey)
-        doc.setValue(section: iface, key: "Address", value: "10.8.0.2/32")
-        doc.setValue(section: iface, key: "DNS", value: "1.1.1.1")
-        let peer = doc.addPeer()
-        doc.setValue(section: peer, key: "PublicKey", value: "")
-        doc.setValue(section: peer, key: "AllowedIPs", value: "0.0.0.0/0, ::/0")
-        doc.setValue(section: peer, key: "Endpoint", value: "")
-        doc.setValue(section: peer, key: "PersistentKeepalive", value: "25")
-        return doc
+        var doc = fl_doc_t()
+        fl_doc_init(&doc)
+        defer { fl_doc_free(&doc) }
+        fl_doc_blank(&doc, privateKey)
+        return WGDocument(copying: doc)
     }
+}
 
-    private mutating func reindex() {
-        for index in sections.indices {
-            sections[index].index = index
+// MARK: - Crossing into fl_doc_t
+
+extension WGDocument {
+    /// Builds a C document for the length of `body`. `fl_doc_free` releases it, so every
+    /// string and array is allocated with malloc.
+    func withC<R>(_ body: (UnsafeMutablePointer<fl_doc_t>) -> R) -> R {
+        var doc = fl_doc_t()
+        fl_doc_init(&doc)
+        defer { fl_doc_free(&doc) }
+
+        if !preamble.isEmpty {
+            let lines = malloc(preamble.count * MemoryLayout<UnsafeMutablePointer<CChar>?>.stride)!
+                .bindMemory(to: UnsafeMutablePointer<CChar>?.self, capacity: preamble.count)
+            for (offset, line) in preamble.enumerated() {
+                lines[offset] = strdup(line)
+            }
+            doc.preamble = lines
+            doc.preamble_count = Int32(preamble.count)
+            doc.preamble_cap = Int32(preamble.count)
         }
-    }
 
-    private func canonical(_ key: String) -> String {
-        switch key.lowercased() {
-        case "privatekey": return "PrivateKey"
-        case "address": return "Address"
-        case "dns": return "DNS"
-        case "mtu": return "MTU"
-        case "listenport": return "ListenPort"
-        case "publickey": return "PublicKey"
-        case "presharedkey": return "PresharedKey"
-        case "endpoint": return "Endpoint"
-        case "allowedips": return "AllowedIPs"
-        case "persistentkeepalive": return "PersistentKeepalive"
-        case "table": return "Table"
-        case "jc": return "Jc"
-        case "jmin": return "Jmin"
-        case "jmax": return "Jmax"
-        case "s1": return "S1"
-        case "s2": return "S2"
-        case "s3": return "S3"
-        case "s4": return "S4"
-        case "h1": return "H1"
-        case "h2": return "H2"
-        case "h3": return "H3"
-        case "h4": return "H4"
-        case "i1": return "I1"
-        case "i2": return "I2"
-        case "i3": return "I3"
-        case "i4": return "I4"
-        case "i5": return "I5"
-        case "headerprotectionkey": return "HeaderProtectionKey"
-        case "contentpaddingaddition": return "ContentPaddingAddition"
-        case "rekeyaftertime": return "RekeyAfterTime"
-        case "rekeytimeout": return "RekeyTimeout"
-        case "rejectaftertime": return "RejectAfterTime"
-        case "keepalivetimeout": return "KeepaliveTimeout"
-        case "maxhandshakeattempts": return "MaxHandshakeAttempts"
-        case "randomtrailers": return "RandomTrailers"
-        case "disablecookies": return "DisableCookies"
-        default: return key
+        if !sections.isEmpty {
+            let list = malloc(sections.count * MemoryLayout<fl_section_t>.stride)!
+                .bindMemory(to: fl_section_t.self, capacity: sections.count)
+            for (offset, section) in sections.enumerated() {
+                var c = fl_section_t()
+                c.name = strdup(section.name)
+                if !section.entries.isEmpty {
+                    let entries = malloc(section.entries.count * MemoryLayout<fl_entry_t>.stride)!
+                        .bindMemory(to: fl_entry_t.self, capacity: section.entries.count)
+                    for (position, entry) in section.entries.enumerated() {
+                        var e = fl_entry_t()
+                        if let key = entry.key {
+                            e.is_field = 1
+                            e.key = strdup(key)
+                            e.value = strdup(entry.value ?? "")
+                        } else {
+                            e.is_field = 0
+                            e.raw = strdup(entry.raw ?? "")
+                        }
+                        entries[position] = e
+                    }
+                    c.entries = entries
+                    c.count = Int32(section.entries.count)
+                    c.cap = Int32(section.entries.count)
+                }
+                list[offset] = c
+            }
+            doc.sections = list
+            doc.section_count = Int32(sections.count)
+            doc.section_cap = Int32(sections.count)
         }
+        return body(&doc)
     }
 
-    private func splitList(_ values: [String]) -> [String] {
-        values.flatMap { value in
-            value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }.filter { !$0.isEmpty }
+    /// Runs a C edit against this document and keeps the result.
+    private mutating func edit(_ change: (UnsafeMutablePointer<fl_doc_t>) -> Void) {
+        let updated: WGDocument = withC { doc in
+            change(doc)
+            return WGDocument(copying: doc.pointee)
+        }
+        self = updated
+    }
+
+    init(copying doc: fl_doc_t) {
+        var preamble: [String] = []
+        for index in 0..<Int(doc.preamble_count) {
+            preamble.append(doc.preamble[index].map { String(cString: $0) } ?? "")
+        }
+        var sections: [Section] = []
+        for index in 0..<Int(doc.section_count) {
+            let c = doc.sections[index]
+            var entries: [Entry] = []
+            for position in 0..<Int(c.count) {
+                let e = c.entries[position]
+                if e.is_field != 0 {
+                    entries.append(.field(
+                        e.key.map { String(cString: $0) } ?? "",
+                        e.value.map { String(cString: $0) } ?? ""
+                    ))
+                } else {
+                    entries.append(.line(e.raw.map { String(cString: $0) } ?? ""))
+                }
+            }
+            sections.append(Section(
+                index: index,
+                name: c.name.map { String(cString: $0) } ?? "",
+                entries: entries
+            ))
+        }
+        self.init(preamble: preamble, sections: sections)
     }
 }
 
@@ -260,73 +278,17 @@ public struct ConfigIssue: Equatable, Identifiable {
 }
 
 public enum ConfigCheck {
+    /// What would stop this config from coming up, in the app language.
     public static func issues(in document: WGDocument) -> [ConfigIssue] {
-        var issues: [ConfigIssue] = []
-        guard let iface = document.interfaceIndex else {
-            return [ConfigIssue(FairleadL10n.text("The config has no Interface section."))]
-        }
-        let privateKey = document.value(section: iface, key: "PrivateKey")
-        if !WGKeys.isKey(privateKey) {
-            issues.append(ConfigIssue(FairleadL10n.text("The private key must be a WireGuard key.")))
-        }
-        let addresses = document.interfaceAddresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        if addresses.isEmpty || addresses.contains(where: { CIDR.parse(String($0)) == nil }) {
-            issues.append(ConfigIssue(FairleadL10n.text("Set an interface address, for example 10.8.0.2/32.")))
-        }
-        if let mtu = Int(document.interfaceMTU), !(1280...1500).contains(mtu), !document.interfaceMTU.isEmpty {
-            issues.append(ConfigIssue(FairleadL10n.text("MTU is usually between 1280 and 1500.")))
-        } else if !document.interfaceMTU.isEmpty && Int(document.interfaceMTU) == nil {
-            issues.append(ConfigIssue(FairleadL10n.text("MTU must be a number.")))
-        }
-        let peers = document.peerIndexes
-        if peers.isEmpty {
-            issues.append(ConfigIssue(FairleadL10n.text("Add at least one Peer.")))
-        }
-        for peer in peers {
-            if !WGKeys.isKey(document.peerPublicKey(peer)) {
-                issues.append(ConfigIssue(FairleadL10n.text("A peer has an invalid public key.")))
+        document.withC { doc in
+            let (count, rows) = CBridge.rows(count: 64, width: 192) { raw in
+                CBridge.rebind(raw) { fl_config_issues(doc, $0, 64) }
             }
-            let psk = document.peerPreshared(peer)
-            if !psk.isEmpty && !WGKeys.isKey(psk) {
-                issues.append(ConfigIssue(FairleadL10n.text("PresharedKey is set, but it is not a WireGuard key.")))
-            }
-            if !validEndpoint(document.peerEndpoint(peer)) {
-                issues.append(ConfigIssue(FairleadL10n.text("Endpoint must look like host:port.")))
-            }
-            let allowed = document.peerAllowedIPs(peer).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            if allowed.isEmpty || allowed.contains(where: { CIDR.parse(String($0)) == nil }) {
-                issues.append(ConfigIssue(FairleadL10n.text("AllowedIPs must list networks, for example 0.0.0.0/0.")))
-            }
-            let keep = document.peerKeepalive(peer)
-            if !keep.isEmpty {
-                if Amnezia.isAmnezia(document) {
-                    if Amnezia.uintRange(keep, max: 65535) == nil {
-                        issues.append(ConfigIssue(FairleadL10n.text("PersistentKeepalive must be a number or a range such as 20-30.")))
-                    }
-                } else if let value = Int(keep), !(0...65535).contains(value) {
-                    issues.append(ConfigIssue(FairleadL10n.text("PersistentKeepalive is out of range.")))
-                } else if Int(keep) == nil {
-                    issues.append(ConfigIssue(FairleadL10n.text("PersistentKeepalive must be a number.")))
-                }
-            }
+            return rows.prefix(Int(count)).map { ConfigIssue(FairleadL10n.text($0)) }
         }
-        issues.append(contentsOf: Amnezia.issues(in: document))
-        return issues
     }
 
     public static func validEndpoint(_ endpoint: String) -> Bool {
-        let value = endpoint.trimmingCharacters(in: .whitespaces)
-        guard let host = EndpointParse.host(from: value), !host.isEmpty else { return false }
-        let portString: String
-        if value.hasPrefix("[") {
-            guard let bracket = value.lastIndex(of: "]"), value.index(after: bracket) < value.endIndex,
-                  value[value.index(after: bracket)] == ":" else { return false }
-            portString = String(value[value.index(bracket, offsetBy: 2)...])
-        } else {
-            guard let colon = value.lastIndex(of: ":") else { return false }
-            portString = String(value[value.index(after: colon)...])
-        }
-        guard let port = Int(portString), (1...65535).contains(port) else { return false }
-        return true
+        EndpointParse.isValid(endpoint)
     }
 }

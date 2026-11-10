@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Fairlead",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .executable(name: "Fairlead", targets: ["Fairlead"]),
         .executable(name: "FairleadHelper", targets: ["FairleadHelper"]),
@@ -15,28 +15,29 @@ let package = Package(
             linkerSettings: [.linkedLibrary("proc")]
         ),
         .target(
-            name: "CZlib",
+            name: "FairleadC",
             path: "core",
-            sources: ["qcompress.c"],
+            exclude: ["fl_abi.c"],
             publicHeadersPath: "include",
+            cSettings: [.headerSearchPath(".")],
             linkerSettings: [.linkedLibrary("z")]
         ),
         .target(
             name: "FairleadCore",
+            dependencies: ["FairleadC"],
             path: "platform/mac/FairleadCore",
-            dependencies: ["CZlib"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
             name: "FairleadHelper",
-            path: "platform/mac/Helper",
             dependencies: ["FairleadCore"],
+            path: "platform/mac/Helper",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
             name: "Fairlead",
-            path: "platform/mac/App",
             dependencies: ["FairleadCore", "CProc"],
+            path: "platform/mac/App",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

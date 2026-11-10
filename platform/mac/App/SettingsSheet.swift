@@ -48,6 +48,24 @@ struct SettingsSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Start hidden")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.text)
+                        Text("Open in the menu bar only. Click the Fairlead icon to show the window.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 12)
+                    FairleadSwitch(isOn: Binding(
+                        get: { model.settings.startHidden },
+                        set: { model.setStartHidden($0) }
+                    ))
+                }
+
                 Rectangle().fill(Theme.line).frame(height: 1)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -59,12 +77,14 @@ struct SettingsSheet: View {
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     FairleadSelect(
-                        selection: model.settings.defaultTunnelID?.uuidString ?? "",
-                        options: [("", FairleadL10n.text("None"))] + model.tunnels.map { ($0.id.uuidString, $0.name) },
+                        selection: model.settings.defaultTunnelSelection,
+                        options: [
+                            ("", FairleadL10n.text("None")),
+                            (AppSettings.lastActiveKey, FairleadL10n.text("Last active")),
+                        ] + model.tunnels.map { ($0.id.uuidString, $0.name) },
                         select: { value in
-                            model.setDefaultTunnel(value.isEmpty ? nil : UUID(uuidString: value))
+                            model.setDefaultTunnel(value.isEmpty ? nil : value)
                         }
-
                     )
                 }
             }
@@ -93,14 +113,9 @@ struct SettingsSheet: View {
             Text("Components")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.text)
-            toolRow("wireguard-go", path: model.tools.wireguardGo)
             toolRow("amneziawg-go", path: model.tools.amneziaWG)
             toolRow("Helper", path: model.helperOnline ? FairleadPaths.socket : nil)
-            Text("wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac.")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("AmneziaWG configs use the included amneziawg-go. Ordinary WireGuard configs stay on wireguard-go.")
+            Text("amneziawg-go is included and carries both WireGuard and AmneziaWG. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)

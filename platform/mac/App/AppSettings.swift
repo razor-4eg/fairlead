@@ -9,11 +9,62 @@
 import Foundation
 import ServiceManagement
 
-struct AppSettings: Codable, Equatable {
-    var launchAtLogin: Bool
-    var defaultTunnelID: UUID?
+struct AppSettings: Equatable {
+    /// Sentinel stored in `defaultTunnel` for “reconnect whatever was up last”.
+    static let lastActiveKey = "last"
 
-    static let empty = AppSettings(launchAtLogin: false, defaultTunnelID: nil)
+    var launchAtLogin: Bool
+    /// First launch opens in the menu bar only (no main window).
+    var startHidden: Bool
+    /// `nil` / empty = none; `last` = last active; otherwise a tunnel UUID string.
+    var defaultTunnel: String?
+    /// Updated on each successful connect. Used when `defaultTunnel == last`.
+    var lastActiveTunnelID: UUID?
+
+    static let empty = AppSettings(
+        launchAtLogin: false,
+        startHidden: false,
+        defaultTunnel: nil,
+        lastActiveTunnelID: nil
+    )
+
+    var defaultTunnelSelection: String {
+        let key = defaultTunnel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return key
+    }
+}
+
+extension AppSettings: Codable {
+    enum CodingKeys: String, CodingKey {
+        case launchAtLogin
+        case startHidden
+        case defaultTunnel
+        case lastActiveTunnelID
+        case defaultTunnelID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        startHidden = try container.decodeIfPresent(Bool.self, forKey: .startHidden) ?? false
+        lastActiveTunnelID = try container.decodeIfPresent(UUID.self, forKey: .lastActiveTunnelID)
+        if let key = try container.decodeIfPresent(String.self, forKey: .defaultTunnel) {
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaultTunnel = trimmed.isEmpty ? nil : trimmed
+        } else if let id = try container.decodeIfPresent(UUID.self, forKey: .defaultTunnelID) {
+            defaultTunnel = id.uuidString
+        } else {
+            defaultTunnel = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(launchAtLogin, forKey: .launchAtLogin)
+        try container.encode(startHidden, forKey: .startHidden)
+        try container.encodeIfPresent(defaultTunnel, forKey: .defaultTunnel)
+        try container.encodeIfPresent(lastActiveTunnelID, forKey: .lastActiveTunnelID)
+    }
 }
 
 final class SettingsStore {

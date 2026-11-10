@@ -27,6 +27,7 @@
 "Disconnecting" = "正在断开";
 "Handshake %@" = "握手 %@";
 "Bringing up the interface and routes" = "正在建立接口和路由";
+"Waiting for the handshake" = "正在等待握手";
 "Restoring the previous routes" = "正在恢复原来的路由";
 "Traffic is bypassing WireGuard" = "流量没有经过 WireGuard";
 "%@  ·  gateway %@" = "%@  ·  网关 %@";
@@ -163,16 +164,18 @@
 "Settings" = "设置";
 "Settings…" = "设置…";
 "Open at login" = "登录时打开";
+"Start hidden" = "隐藏启动";
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "登录后 Fairlead 会启动。默认隧道会自行连接。";
+"Open in the menu bar only. Click the Fairlead icon to show the window." = "只显示在菜单栏。点击 Fairlead 图标可打开窗口。";
 "Default tunnel" = "默认隧道";
 "None" = "无";
+"Last active" = "上次使用";
 "Fairlead selects this tunnel when it opens and connects it." = "Fairlead 打开时会选中这条隧道并连接它。";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS 还需要你的允许。请打开“系统设置”→“通用”→“登录项”，并允许 Fairlead。";
 "The running helper is an older copy. Fairlead will replace it." = "正在运行的助手是旧版本。Fairlead 会替换它。";
 "wireguard-go is not included in this copy of Fairlead." = "此 Fairlead 副本未包含 wireguard-go。";
 "Could not resolve the endpoint." = "无法解析端点地址。";
 "wireguard-go did not create an interface." = "wireguard-go 没有创建接口。";
-"wireguard-go is included. The helper asks for an administrator password once, then brings tunnels and direct routes up itself. Configs with keys stay on this Mac." = "wireguard-go 已包含在应用中。助手会询问一次管理员密码，然后自行建立隧道和直连路由。带密钥的配置只保存在这台 Mac 上。";
 "Domains" = "域名";
 "Nothing here yet. Add a domain that should bypass WireGuard." = "这里还是空的。添加应绕过 WireGuard 的域名。";
 "Fairlead resolves the name on the regular network and sends those addresses directly. A shared address, such as a CDN, becomes direct for every app. The list refreshes when the DNS record expires." = "Fairlead 通过普通网络解析该名称，并把得到的地址直接送出。CDN 这类共用地址会对所有应用生效。DNS 记录到期后，列表会重新解析。";
@@ -195,7 +198,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers 和 DisableCookies 必须是 true 或 false。";
 "Signature packets must stay on one line." = "签名包必须写在一行里。";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive 必须是数字或范围，例如 20-30。";
-"AmneziaWG configs use the included amneziawg-go. Ordinary WireGuard configs stay on wireguard-go." = "AmneziaWG 配置使用附带的 amneziawg-go。普通 WireGuard 配置仍使用 wireguard-go。";
 "Except the list" = "除列表外";
 "Only the list" = "仅列表";
 "Only these addresses use the tunnel. Everything else stays on the regular network." = "只有这些地址走隧道。其余流量留在普通网络。";
@@ -213,7 +215,6 @@
 "App" = "应用";
 "Nothing here yet. Add an IP, a domain, or an app." = "这里还是空的。添加 IP、域名或应用。";
 "Enter an IP, a network, or a domain." = "输入 IP、网段或域名。";
-"A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app." = "域名通过普通网络解析。应用的地址会在它连接时被记住。在 macOS 上，这条路由对所有应用生效。";
 "203.0.113.10 or example.com" = "203.0.113.10 或 example.com";
 "Add route" = "添加路由";
 "One address or domain per line." = "每行一个地址或域名。";
@@ -227,3 +228,10 @@
 "%d domains.few" = "%d 个域名";
 "%d domains.many" = "%d 个域名";
 "%d domains.other" = "%d 个域名";
+"amneziawg-go is included and carries both WireGuard and AmneziaWG. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "已包含 amneziawg-go，同时支持普通 WireGuard 与 AmneziaWG。助手仅在首次询问管理员密码，之后由 launchd 在重启后保持运行。带密钥的配置只保存在这台 Mac 上。";
+
+"A domain is resolved on the regular network. An app's addresses are learned as it connects." = "域名通过普通网络解析。应用的地址会在它连接时被记住。";
+"Nothing learned yet." = "尚未学到任何地址。";
+"Edit list" = "编辑列表";
+"Saving the list" = "正在保存列表";
+"Resolved" = "已解析";

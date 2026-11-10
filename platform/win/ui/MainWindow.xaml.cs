@@ -92,6 +92,7 @@ public sealed partial class MainWindow : Window {
         Activated += (_, _) => HookMinimumSize();
         HookSwitch(LanSwitch);
         HookSwitch(LoginSwitch);
+        HookSwitch(HiddenSwitch);
         Closed += (_, _) => {
             SaveWindowBounds();
             if (_quitting) {
@@ -127,6 +128,7 @@ public sealed partial class MainWindow : Window {
         _quiet = true;
         LanSwitch.IsChecked = Session.ExcludeLan;
         LoginSwitch.IsChecked = Session.LaunchAtLogin;
+        HiddenSwitch.IsChecked = Session.StartHidden;
         _quiet = false;
         PaintRules();
         PaintPolicy();
@@ -855,6 +857,18 @@ CallWindowProc
 
     /*
     ===============
+    HiddenToggled
+    Start in the tray only.
+    ===============
+    */
+    void HiddenToggled(object sender, RoutedEventArgs e) {
+        if (!_quiet) {
+            Session.SetStartHidden(HiddenSwitch.IsChecked == true);
+        }
+    }
+
+    /*
+    ===============
     DefaultChanged
     The default-tunnel combo.
     ===============
@@ -865,6 +879,16 @@ CallWindowProc
         }
 
         Session.SetDefault(item.Tag as string ?? "");
+    }
+
+    /*
+    ===============
+    ApplyStartHidden
+    Hide the main window right after launch.
+    ===============
+    */
+    internal void ApplyStartHidden() {
+        DispatcherQueue.TryEnqueue(() => this.Hide());
     }
 
     /*
@@ -1831,6 +1855,7 @@ Rule
         _quiet = true;
         DefaultCombo.Items.Clear();
         DefaultCombo.Items.Add(new ComboBoxItem { Content = "None", Tag = "" });
+        DefaultCombo.Items.Add(new ComboBoxItem { Content = "Last active", Tag = Session.LastActiveKey });
         foreach (var t in Session.Tunnels)
             DefaultCombo.Items.Add(new ComboBoxItem { Content = t.Name, Tag = t.Id });
         DefaultCombo.SelectedIndex = 0;

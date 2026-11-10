@@ -17,7 +17,7 @@ scan
 ===============
 */
     static func scan(rules: [AppRule], skip: Set<String>) -> [UUID: [String]] {
-        let active = rules.filter { $0.enabled && $0.learn && !$0.path.isEmpty }
+        let active = rules.filter { $0.enabled && !$0.path.isEmpty }
         guard !active.isEmpty else { return [:] }
 
         var pids = [Int32](repeating: 0, count: 8192)

@@ -14,11 +14,11 @@ struct BypassPane: View {
     @EnvironmentObject private var model: AppModel
     var tunnel: Tunnel
     @State private var sheet: Sheet?
-    @State private var openApps: Set<UUID> = []
 
     private enum Sheet: Identifiable {
         case add
         case list(UUID)
+        case app(UUID)
 
         var id: String {
             switch self {
@@ -26,6 +26,8 @@ struct BypassPane: View {
                 return "add"
             case .list(let id):
                 return "list-" + id.uuidString
+            case .app(let id):
+                return "app-" + id.uuidString
             }
         }
     }
@@ -104,6 +106,9 @@ struct BypassPane: View {
             case .list(let id):
                 RouteListSheet(tunnelID: tunnel.id, listID: id)
                     .environmentObject(model)
+            case .app(let id):
+                AppAddressesSheet(tunnelID: tunnel.id, ruleID: id)
+                    .environmentObject(model)
             }
         }
         .padding(18)
@@ -118,7 +123,7 @@ struct BypassPane: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Local network directly")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.text)
                 Text(lanCaption)
                     .font(.system(size: 12))
@@ -131,7 +136,7 @@ struct BypassPane: View {
                 set: { model.setExcludeLAN(tunnel.id, $0) }
             ))
         }
-        .padding(12)
+        .padding(11)
         .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -148,7 +153,7 @@ struct BypassPane: View {
     }
 
     private var listNote: some View {
-        Text("A domain is resolved on the regular network. An app's addresses are learned as it connects. On macOS the route applies to every app.")
+        Text("A domain is resolved on the regular network. An app's addresses are learned as it connects.")
             .font(.system(size: 12))
             .foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -157,45 +162,93 @@ struct BypassPane: View {
 /*
 ===============
 listRow
-One named list. View sits to the left of the switch.
 ===============
 */
     private func listRow(_ list: RouteList) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             kindMark("List")
             VStack(alignment: .leading, spacing: 2) {
                 Text(list.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(list.enabled ? Theme.text : Theme.faint)
                 Text(listCaption(list))
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
             }
 
-            Spacer()
-            Button {
-                sheet = .list(list.id)
-            } label: {
+            Spacer(minLength: 8)
+            rowActions(
+                view: { sheet = .list(list.id) },
+                enabled: Binding(
+                    get: { list.enabled },
+                    set: { model.setRouteList(list.id, tunnel: tunnel.id, enabled: $0) }
+                ),
+                remove: { model.removeRouteList(list.id, tunnel: tunnel.id) }
+            )
+        }
+        .padding(11)
+        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+/*
+===============
+appRow
+===============
+*/
+    private func appRow(_ rule: AppRule) -> some View {
+        let missing = !FileManager.default.fileExists(atPath: rule.path)
+        return HStack(spacing: 8) {
+            kindMark("App")
+            HStack(spacing: 10) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: rule.path))
+                    .resizable()
+                    .frame(width: 28, height: 28)
+                    .opacity(missing ? 0.4 : 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rule.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
+                    Text(missing ? FairleadL10n.text("App not found") : FairleadL10n.addressCount(rule.learned.count))
+                        .font(.system(size: 12))
+                        .foregroundStyle(missing ? Theme.danger : Theme.muted)
+                }
+            }
+
+            Spacer(minLength: 8)
+            rowActions(
+                view: { sheet = .app(rule.id) },
+                enabled: Binding(
+                    get: { rule.enabled },
+                    set: { model.setApp(rule.id, tunnel: tunnel.id, enabled: $0) }
+                ),
+                remove: { model.removeApp(rule.id, tunnel: tunnel.id) }
+            )
+        }
+        .padding(11)
+        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+/*
+===============
+rowActions
+===============
+*/
+    private func rowActions(view: @escaping () -> Void, enabled: Binding<Bool>, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Button(action: view) {
                 Text(FairleadL10n.text("View"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.accent)
             }
             .buttonStyle(.plain)
-            FairleadSwitch(isOn: Binding(
-                get: { list.enabled },
-                set: { model.setRouteList(list.id, tunnel: tunnel.id, enabled: $0) }
-            ))
-            Button {
-                model.removeRouteList(list.id, tunnel: tunnel.id)
-            } label: {
+            FairleadSwitch(isOn: enabled)
+            Button(action: remove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.faint)
             }
             .buttonStyle(.plain)
         }
-        .padding(10)
-        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
 /*
@@ -224,73 +277,8 @@ kindMark
         Text(title)
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(Theme.muted)
-            .frame(minWidth: 44, alignment: .leading)
+            .frame(width: 28, alignment: .leading)
     }
-
-/*
-===============
-appRow
-===============
-*/
-    private func appRow(_ rule: AppRule) -> some View {
-        let missing = !FileManager.default.fileExists(atPath: rule.path)
-        let expanded = openApps.contains(rule.id)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                kindMark("App")
-                Image(nsImage: NSWorkspace.shared.icon(forFile: rule.path))
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                    .opacity(missing ? 0.4 : 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(rule.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.text)
-                    Text(missing ? FairleadL10n.text("App not found") : FairleadL10n.addressCount(rule.learned.count))
-                        .font(.system(size: 11))
-                        .foregroundStyle(missing ? Theme.danger : Theme.muted)
-                }
-
-                Spacer()
-                FairleadSwitch(
-                    isOn: Binding(
-                        get: { rule.learn },
-                        set: { model.setApp(rule.id, tunnel: tunnel.id, learn: $0) }
-                    ),
-                    label: "Learn"
-                )
-                FairleadSwitch(isOn: Binding(
-                    get: { rule.enabled },
-                    set: { model.setApp(rule.id, tunnel: tunnel.id, enabled: $0) }
-                ))
-                Button {
-                    model.removeApp(rule.id, tunnel: tunnel.id)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.faint)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if !rule.learned.isEmpty {
-                Button(FairleadL10n.text(expanded ? "Hide addresses" : "Show addresses")) {
-                    if expanded { openApps.remove(rule.id) } else { openApps.insert(rule.id) }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                if expanded {
-                    FlowAddresses(addresses: rule.learned) { address in
-                        model.forget(address, app: rule.id, tunnel: tunnel.id)
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
 }
 
 struct AddRouteSheet: View {
@@ -418,26 +406,187 @@ struct RouteListSheet: View {
     @Environment(\.dismiss) private var dismiss
     var tunnelID: UUID
     var listID: UUID
+    @State private var name = ""
+    @State private var text = ""
+    @State private var failures: [String] = []
+    @State private var progress = ""
+    @State private var busy = false
+    @State private var saveTask: Task<Void, Never>?
+    @State private var loaded = false
 
     private var list: RouteList? {
         model.tunnels.first { $0.id == tunnelID }?.routeLists.first { $0.id == listID }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(list?.name ?? "")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Edit list")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Theme.text)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if let list {
-                        ForEach(list.entries) { entry in
-                            entryRow(entry)
-                        }
+            Text("One address or domain per line.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.muted)
+            TextField("Name", text: $name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.text)
+                .padding(10)
+                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                .disabled(busy)
+            TextEditor(text: $text)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(Theme.text)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .frame(height: 180)
+                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                .disabled(busy)
+            if !resolvedPreview.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Resolved")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                    ScrollView {
+                        Text(resolvedPreview)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 120)
+                    .padding(10)
+                    .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                }
+            }
+
+            if !failures.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(failures, id: \.self) { failure in
+                        Text(failure)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.danger)
                     }
                 }
             }
-            .frame(maxHeight: 360)
+
+            HStack {
+                Text(progress)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                Spacer()
+                FairleadButton(title: "Cancel") {
+                    saveTask?.cancel()
+                    dismiss()
+                }
+                FairleadButton(title: "Save", prominent: canSave) { commit() }
+                    .disabled(!canSave)
+                    .opacity(canSave ? 1 : 0.45)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .background(Theme.bg)
+        .onAppear(perform: load)
+        .onDisappear { saveTask?.cancel() }
+    }
+
+    private var canSave: Bool {
+        !busy
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var resolvedPreview: String {
+        guard let list else { return "" }
+        var lines: [String] = []
+        for entry in list.entries where entry.kind == .domain {
+            lines.append(entry.value)
+            if entry.addresses.isEmpty {
+                lines.append("  " + (entry.refreshAt == nil
+                    ? FairleadL10n.text("Resolving…")
+                    : FairleadL10n.format("Could not resolve %@.", entry.value)))
+            } else {
+                for address in entry.addresses {
+                    lines.append("  " + address)
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+/*
+===============
+load
+===============
+*/
+    private func load() {
+        guard !loaded, let list else { return }
+        loaded = true
+        name = list.name
+        text = list.entries.map(\.value).joined(separator: "\n")
+    }
+
+/*
+===============
+commit
+===============
+*/
+    private func commit() {
+        let listName = name
+        let body = text
+        busy = true
+        failures = []
+        progress = ""
+        saveTask?.cancel()
+        saveTask = Task {
+            let problems = await model.updateRouteList(listID, tunnel: tunnelID, name: listName, text: body) { message in
+                progress = message
+            }
+            guard !Task.isCancelled else { return }
+            busy = false
+            progress = ""
+            let kept = problems.filter { !$0.message.isEmpty }
+            if kept.isEmpty {
+                dismiss()
+                return
+            }
+
+            text = problems.map(\.line).joined(separator: "\n")
+            failures = kept.map { problem in
+                problem.line.isEmpty ? problem.message : "\(problem.line): \(problem.message)"
+            }
+        }
+    }
+}
+
+struct AppAddressesSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    var tunnelID: UUID
+    var ruleID: UUID
+
+    private var rule: AppRule? {
+        model.tunnels.first { $0.id == tunnelID }?.appRules.first { $0.id == ruleID }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(rule?.name ?? "")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Theme.text)
+            ScrollView {
+                Text(bodyText)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 280)
+            .padding(10)
+            .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
             HStack {
                 Spacer()
                 FairleadButton(title: "Close") { dismiss() }
@@ -448,58 +597,11 @@ struct RouteListSheet: View {
         .background(Theme.bg)
     }
 
-/*
-===============
-entryRow
-===============
-*/
-    private func entryRow(_ entry: RouteEntry) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(entry.value)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(Theme.text)
-            if entry.kind == .domain {
-                if entry.addresses.isEmpty {
-                    Text(entry.refreshAt == nil
-                         ? FairleadL10n.text("Resolving…")
-                         : FairleadL10n.format("Could not resolve %@.", entry.value))
-                        .font(.system(size: 11))
-                        .foregroundStyle(entry.refreshAt == nil ? Theme.muted : Theme.danger)
-                } else {
-                    ForEach(entry.addresses, id: \.self) { address in
-                        Text(address)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Theme.muted)
-                    }
-                }
-            }
+    private var bodyText: String {
+        guard let rule else { return "" }
+        if rule.learned.isEmpty {
+            return FairleadL10n.text("Nothing learned yet.")
         }
-    }
-}
-
-struct FlowAddresses: View {
-    var addresses: [String]
-    var remove: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(addresses, id: \.self) { address in
-                HStack(spacing: 8) {
-                    Text(address)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.text)
-                    Spacer()
-                    Button {
-                        remove(address)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.faint)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.top, 2)
+        return rule.learned.joined(separator: "\n")
     }
 }

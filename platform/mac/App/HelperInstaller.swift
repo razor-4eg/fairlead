@@ -136,18 +136,14 @@ binaryURL
 /*
 ===============
 install
+Copies the bundled helper into launchd. Asks for the administrator password.
+After this succeeds once, launchd keeps the helper up (KeepAlive + RunAtLoad),
+so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
 ===============
 */
     static func install() async -> String? {
         guard let binary = binaryURL() else {
             return FairleadL10n.text("FairleadHelper is missing next to Fairlead. Build the app with scripts/build-app.sh.")
-        }
-
-        if !needsUpdate() {
-            if FileManager.default.fileExists(atPath: FairleadPaths.socket) { return nil }
-            if FileManager.default.isReadableFile(atPath: "/Library/LaunchDaemons/com.fairlead.helper.plist") {
-                return await kickstart()
-            }
         }
 
         guard let fingerprint = bundledFingerprint() else {
@@ -186,16 +182,22 @@ install
         killall -9 fairlead-helper harbor-helper 2>/dev/null || true
         cp "$SRC" /usr/local/libexec/fairlead-helper
         chmod 755 /usr/local/libexec/fairlead-helper
-        codesign --force --sign - --identifier "$LABEL" /usr/local/libexec/fairlead-helper
-        GO_SRC="$(dirname "$SRC")/wireguard-go"
-        if [[ -x "$GO_SRC" ]]; then
-          cp "$GO_SRC" /usr/local/libexec/fairlead-wireguard-go
-          chmod 755 /usr/local/libexec/fairlead-wireguard-go
+        # codesign prints "replacing existing signature" on stderr. osascript treats
+        # any stderr from a failing command as the error text, so keep it in the log.
+        if ! codesign --force --sign - --identifier "$LABEL" /usr/local/libexec/fairlead-helper >>"$LOG" 2>&1; then
+          echo \(shellQuote(FairleadL10n.text("Could not sign the helper."))) >&2
+          tail -n 20 "$LOG" >&2 || true
+          exit 1
         fi
+        # amneziawg-go carries plain WireGuard too. Drop the old wireguard-go helper copy.
+        rm -f /usr/local/libexec/fairlead-wireguard-go
         AWG_SRC="$(dirname "$SRC")/amneziawg-go"
         if [[ -x "$AWG_SRC" ]]; then
           cp "$AWG_SRC" /usr/local/libexec/fairlead-amneziawg-go
           chmod 755 /usr/local/libexec/fairlead-amneziawg-go
+        else
+          echo \(shellQuote(FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."))) >&2
+          exit 1
         fi
         printf '%s\n' \(shellQuote(fingerprint)) > \(shellQuote(stampPath))
         chmod 644 \(shellQuote(stampPath))
@@ -238,6 +240,10 @@ install
           </array>
           <key>RunAtLoad</key>
           <true/>
+          <key>KeepAlive</key>
+          <true/>
+          <key>ThrottleInterval</key>
+          <integer>2</integer>
           <key>StandardOutPath</key>
           <string>$LOG</string>
           <key>StandardErrorPath</key>
@@ -254,14 +260,14 @@ install
           tail -n 20 "$LOG" >&2 || true
           exit 1
         fi
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
           if [[ -S /var/run/fairlead/fairlead.sock ]]; then
             exit 0
           fi
-          sleep 0.15
+          sleep 0.1
         done
         echo \(shellQuote(FairleadL10n.text("The helper did not open a socket. Last log lines:"))) >&2
-        tail -n 20 "$LOG" >&2 || true
+        tail -n 40 "$LOG" >&2 || true
         exit 1
         """
         return await runShell(script)
@@ -269,26 +275,26 @@ install
 
 /*
 ===============
-kickstart
-Starts the already-installed helper. Does not copy or re-sign it, so macOS does not ask to approve a new background item.
+isInstalled
 ===============
 */
-    private static func kickstart() async -> String? {
-        let script = """
-        #!/bin/bash
-        set -euo pipefail
-        launchctl kickstart -k system/com.fairlead.helper
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
-          if [[ -S /var/run/fairlead/fairlead.sock ]]; then
-            exit 0
-          fi
-          sleep 0.15
-        done
-        echo \(shellQuote(FairleadL10n.text("The helper did not open a socket. Last log lines:"))) >&2
-        tail -n 20 /var/log/fairlead-helper.log >&2 || true
-        exit 1
-        """
-        return await runShell(script)
+    static func isInstalled() -> Bool {
+        FileManager.default.isExecutableFile(atPath: FairleadPaths.helperBinary)
+            && FileManager.default.isReadableFile(atPath: "/Library/LaunchDaemons/com.fairlead.helper.plist")
+    }
+
+/*
+===============
+plistHasKeepAlive
+Older installs lack KeepAlive, so a crash left the helper dead until a password kickstart.
+===============
+*/
+    static func plistHasKeepAlive() -> Bool {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: "/Library/LaunchDaemons/com.fairlead.helper.plist")),
+              let text = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return text.contains("<key>KeepAlive</key>")
     }
 
 /*
