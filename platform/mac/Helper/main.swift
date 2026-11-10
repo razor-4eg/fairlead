@@ -827,8 +827,8 @@ snapshotResponse
 ===============
 */
 private func snapshotResponse(id: String) -> RPCResponse {
-    let managed = state.tunnels.map { managed($0.key, $0.value) }.sorted { $0.name < $1.name }
-    return RPCResponse(id: id, ok: true, tools: ToolLocator.locate(), managed: managed, devices: currentDevices())
+    let tunnels = state.tunnels.map { managed($0.key, $0.value) }.sorted { $0.name < $1.name }
+    return RPCResponse(id: id, ok: true, tools: ToolLocator.locate(), managed: tunnels, devices: currentDevices())
 }
 
 /*
