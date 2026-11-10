@@ -45,6 +45,19 @@ public sealed partial class MainWindow : Window {
     int _sheetEpoch;
     Storyboard? _sheetBoard;
     CancellationTokenSource? _routeCts;
+    SizeInt32 _normalSize = new(1479, 1013);
+    PointInt32 _normalPos;
+    bool _windowReady;
+    string _routeAutoName = "";
+    RouteList? _editingList;
+    CancellationTokenSource? _listCts;
+    List<InstalledApp> _installed = new();
+    int _appScanEpoch;
+
+    static string WindowPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Fairlead",
+        "window.json");
 
     /*
     ===============
@@ -69,16 +82,18 @@ public sealed partial class MainWindow : Window {
             AppWindow.SetIcon(icon);
         }
 
-        AppWindow.Resize(new SizeInt32(1479, 1013));
         if (AppWindow.Presenter is OverlappedPresenter presenter) {
             presenter.PreferredMinimumWidth = 980;
             presenter.PreferredMinimumHeight = 660;
         }
 
+        RestoreWindowBounds();
+        AppWindow.Changed += OnWindowChanged;
         Activated += (_, _) => HookMinimumSize();
         HookSwitch(LanSwitch);
         HookSwitch(LoginSwitch);
         Closed += (_, _) => {
+            SaveWindowBounds();
             if (_quitting) {
                 _tray.Dispose();
             }
@@ -338,12 +353,126 @@ CallWindowProc
     ===============
     */
     void OnClosing(AppWindow sender, AppWindowClosingEventArgs args) {
+        SaveWindowBounds();
         if (_quitting) {
             return;
         }
 
         args.Cancel = true;
         DispatcherQueue.TryEnqueue(() => this.Hide());
+    }
+
+    /*
+    ===============
+    OnWindowChanged
+    Keep the last normal size while the window is not maximized.
+    ===============
+    */
+    void OnWindowChanged(AppWindow sender, AppWindowChangedEventArgs args) {
+        if (!_windowReady) {
+            return;
+        }
+
+        if (AppWindow.Presenter is OverlappedPresenter op && op.State == OverlappedPresenterState.Maximized) {
+            return;
+        }
+
+        if (args.DidSizeChange) {
+            _normalSize = AppWindow.Size;
+        }
+
+        if (args.DidPositionChange) {
+            _normalPos = AppWindow.Position;
+        }
+    }
+
+    /*
+    ===============
+    RestoreWindowBounds
+    Apply the last saved size, or the default.
+    ===============
+    */
+    void RestoreWindowBounds() {
+        int width = _normalSize.Width;
+        int height = _normalSize.Height;
+        int? x = null;
+        int? y = null;
+        bool maximized = false;
+        try {
+            string path = WindowPath;
+            if (File.Exists(path)) {
+                using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                var root = doc.RootElement;
+                if (root.TryGetProperty("width", out var w)) {
+                    width = w.GetInt32();
+                }
+
+                if (root.TryGetProperty("height", out var h)) {
+                    height = h.GetInt32();
+                }
+
+                if (root.TryGetProperty("x", out var px)) {
+                    x = px.GetInt32();
+                }
+
+                if (root.TryGetProperty("y", out var py)) {
+                    y = py.GetInt32();
+                }
+
+                if (root.TryGetProperty("maximized", out var max)) {
+                    maximized = max.GetBoolean();
+                }
+            }
+        } catch {
+        }
+
+        width = Math.Max(980, width);
+        height = Math.Max(660, height);
+        _normalSize = new SizeInt32(width, height);
+        AppWindow.Resize(_normalSize);
+        if (x is int left && y is int top) {
+            _normalPos = new PointInt32(left, top);
+            AppWindow.Move(_normalPos);
+        } else {
+            _normalPos = AppWindow.Position;
+        }
+
+        if (maximized && AppWindow.Presenter is OverlappedPresenter presenter) {
+            presenter.Maximize();
+        }
+
+        _windowReady = true;
+    }
+
+    /*
+    ===============
+    SaveWindowBounds
+    Remember size and position for the next launch.
+    ===============
+    */
+    void SaveWindowBounds() {
+        try {
+            bool maximized = AppWindow.Presenter is OverlappedPresenter op && op.State == OverlappedPresenterState.Maximized;
+            if (!maximized) {
+                _normalSize = AppWindow.Size;
+                _normalPos = AppWindow.Position;
+            }
+
+            int width = Math.Max(980, _normalSize.Width);
+            int height = Math.Max(660, _normalSize.Height);
+            string dir = Path.GetDirectoryName(WindowPath)!;
+            Directory.CreateDirectory(dir);
+            string json =
+                "{\n" +
+                $"  \"width\": {width},\n" +
+                $"  \"height\": {height},\n" +
+                $"  \"x\": {_normalPos.X},\n" +
+                $"  \"y\": {_normalPos.Y},\n" +
+                $"  \"maximized\": {(maximized ? "true" : "false")}\n" +
+                "}\n";
+            File.WriteAllText(WindowPath, json);
+        } catch {
+        }
     }
 
     /*
@@ -479,7 +608,7 @@ CallWindowProc
         if (VisualTreeHelper.GetChild(root, 1) is Microsoft.UI.Xaml.Shapes.Ellipse knob) {
             knob.Fill = (Brush)Application.Current.Resources[on ? "ToggleSwitchKnobFillOn" : "ToggleSwitchKnobFillOff"];
             if (knob.RenderTransform is TranslateTransform shift) {
-                shift.X = on ? 20 : 0;
+                shift.X = on ? 15 : 0;
             }
         }
     }
@@ -538,6 +667,7 @@ CallWindowProc
     ===============
     */
     void OpenRoutes(object sender, RoutedEventArgs e) {
+        _routeAutoName = "";
         RouteName.Text = "";
         RouteBox.Text = "";
         RouteHint.Visibility = Visibility.Visible;
@@ -554,18 +684,146 @@ CallWindowProc
     /*
     ===============
     AddApp
-    Pick an application.
+    Show Start Menu apps; Browse… still opens the system picker.
     ===============
     */
-    async void AddApp(object sender, RoutedEventArgs e) {
+    void AddApp(object sender, RoutedEventArgs e) {
+        AppSearch.Text = "";
+        AppList.ItemsSource = null;
+        AppList.Visibility = Visibility.Collapsed;
+        AppStatus.Text = "Looking for apps…";
+        AppStatus.Visibility = Visibility.Visible;
+        ShowSheet(AppPane);
+        int epoch = ++_appScanEpoch;
+        _ = LoadInstalled(epoch);
+    }
+
+    /*
+    ===============
+    LoadInstalled
+    Scan Start Menu shortcuts off the UI thread, then fill the list.
+    ===============
+    */
+    async Task LoadInstalled(int epoch) {
+        List<InstalledApp> found;
+        try {
+            found = await Task.Run(InstalledApps.Scan);
+        } catch {
+            found = new();
+        }
+
+        if (epoch != _appScanEpoch) {
+            return;
+        }
+
+        _installed = found;
+        FillAppList();
+    }
+
+    /*
+    ===============
+    FillAppList
+    Filter out apps already on the tunnel and apply the search box.
+    ===============
+    */
+    void FillAppList() {
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (Session.Selected != null) {
+            foreach (var app in Session.Selected.Apps) {
+                taken.Add(app.Path);
+            }
+        }
+
+        string q = AppSearch.Text.Trim();
+        var rows = new List<AppPickItem>();
+        foreach (var app in _installed) {
+            if (taken.Contains(app.Path)) {
+                continue;
+            }
+
+            if (q.Length > 0
+                && app.Name.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) < 0
+                && app.Path.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) {
+                continue;
+            }
+
+            rows.Add(new AppPickItem {
+                Name = app.Name,
+                Path = app.Path,
+                Icon = AppIcon(app.Path)
+            });
+        }
+
+        AppList.ItemsSource = rows;
+        if (rows.Count == 0) {
+            AppList.Visibility = Visibility.Collapsed;
+            AppStatus.Text = _installed.Count == 0
+                ? "No apps found. Use Browse… to pick an .exe."
+                : "No matches.";
+            AppStatus.Visibility = Visibility.Visible;
+        } else {
+            AppStatus.Visibility = Visibility.Collapsed;
+            AppList.Visibility = Visibility.Visible;
+        }
+    }
+
+    /*
+    ===============
+    AppSearchChanged
+    ===============
+    */
+    void AppSearchChanged(object sender, TextChangedEventArgs e) {
+        if (AppPane.Visibility != Visibility.Visible) {
+            return;
+        }
+
+        FillAppList();
+    }
+
+    /*
+    ===============
+    AppChosen
+    Add the clicked Start Menu app.
+    ===============
+    */
+    void AppChosen(object sender, ItemClickEventArgs e) {
+        if (e.ClickedItem is not AppPickItem item) {
+            return;
+        }
+
+        Session.AddProgram(item.Path, item.Name);
+        PaintRules();
+        if (Session.Selected != null && Session.Selected.Apps.Count >= 12) {
+            CloseSheet(this, new RoutedEventArgs());
+            return;
+        }
+
+        FillAppList();
+    }
+
+    /*
+    ===============
+    BrowseApp
+    Fall back to the system .exe picker.
+    ===============
+    */
+    async void BrowseApp(object sender, RoutedEventArgs e) {
         var picker = new FileOpenPicker();
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         picker.FileTypeFilter.Add(".exe");
         var file = await picker.PickSingleFileAsync();
-        if (file != null) {
-            Session.AddProgram(file.Path);
-            PaintRules();
+        if (file == null) {
+            return;
         }
+
+        Session.AddProgram(file.Path);
+        PaintRules();
+        if (Session.Selected != null && Session.Selected.Apps.Count >= 12) {
+            CloseSheet(this, new RoutedEventArgs());
+            return;
+        }
+
+        FillAppList();
     }
 
     /*
@@ -868,6 +1126,21 @@ CallWindowProc
 
     /*
     ===============
+    OnEscape
+    Close any open sheet.
+    ===============
+    */
+    void OnEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) {
+        if (Overlay.Visibility != Visibility.Visible) {
+            return;
+        }
+
+        args.Handled = true;
+        CloseSheet(this, new RoutedEventArgs());
+    }
+
+    /*
+    ===============
     CloseSheet
     Start the sheet closing.
     ===============
@@ -875,7 +1148,10 @@ CallWindowProc
     void CloseSheet(object sender, RoutedEventArgs e) {
         _creating = false;
         _editing = null;
+        _editingList = null;
         _routeCts?.Cancel();
+        _listCts?.Cancel();
+        _appScanEpoch++;
         if (Overlay.Visibility != Visibility.Visible) {
             return;
         }
@@ -925,12 +1201,58 @@ CallWindowProc
     /*
     ===============
     RouteChanged
-    Enable the add button when the box has text.
+    Enable the add button when the box has text. Fill the name after paste when it is still empty.
     ===============
     */
     void RouteChanged(object sender, TextChangedEventArgs e) {
         RouteHint.Visibility = RouteBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (ReferenceEquals(sender, RouteBox)) {
+            SuggestRouteName();
+        }
+
         ApplyRouteAdd();
+    }
+
+    /*
+    ===============
+    SuggestRouteName
+    One domain alone becomes the name. Otherwise "N elements".
+    ===============
+    */
+    void SuggestRouteName() {
+        string current = RouteName.Text.Trim();
+        if (current.Length > 0 && !string.Equals(current, _routeAutoName, StringComparison.Ordinal)) {
+            return;
+        }
+
+        int count = 0;
+        string? aloneDomain = null;
+        foreach (var raw in RouteBox.Text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')) {
+            string line = raw.Trim();
+            if (line.Length == 0) {
+                continue;
+            }
+
+            var (kind, value, note, err) = Core.Classify(line);
+            if (note.Length > 0 || kind == "error" || kind.Length == 0) {
+                continue;
+            }
+
+            count++;
+            if (kind == "domain") {
+                aloneDomain = count == 1 ? value : null;
+            } else {
+                aloneDomain = null;
+            }
+        }
+
+        string suggested = count == 0
+            ? ""
+            : aloneDomain ?? (count == 1 ? "1 element" : count + " elements");
+        _routeAutoName = suggested;
+        if (!string.Equals(RouteName.Text, suggested, StringComparison.Ordinal)) {
+            RouteName.Text = suggested;
+        }
     }
 
     /*
@@ -968,6 +1290,7 @@ CallWindowProc
         RoutePane.Visibility = pane == RoutePane ? Visibility.Visible : Visibility.Collapsed;
         ListPane.Visibility = pane == ListPane ? Visibility.Visible : Visibility.Collapsed;
         ConfirmPane.Visibility = pane == ConfirmPane ? Visibility.Visible : Visibility.Collapsed;
+        AppPane.Visibility = pane == AppPane ? Visibility.Visible : Visibility.Collapsed;
         Overlay.Visibility = Visibility.Visible;
         _sheetBoard = SheetMotion(0, 0.96, 1, 1, 200);
         _sheetBoard.Begin();
@@ -1028,8 +1351,13 @@ CallWindowProc
     ===============
     */
     void AddField(string key, string label, string value, bool secret) {
-        var row = new StackPanel { Tag = key, Spacing = 4 };
-        row.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = (Brush)Application.Current.Resources["MutedBrush"] });
+        var row = new StackPanel { Tag = key, Spacing = 6 };
+        row.Children.Add(new TextBlock {
+            Text = label,
+            FontSize = 11,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            Foreground = (Brush)Application.Current.Resources["MutedBrush"]
+        });
         var box = new TextBox { Text = value, Style = (Style)Application.Current.Resources["QuietBox"], VerticalAlignment = VerticalAlignment.Center };
         EditorFields.Children.Add(row);
         if (!secret) {
@@ -1042,8 +1370,8 @@ CallWindowProc
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.Children.Add(box);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        var show = new Button { Content = "Show", Style = (Style)Application.Current.Resources["PillButton"] };
-        var neu = new Button { Content = "New key", Style = (Style)Application.Current.Resources["PillButton"] };
+        var show = new Button { Content = "Show", Style = (Style)Application.Current.Resources["LinkButton"] };
+        var neu = new Button { Content = "New key", Style = (Style)Application.Current.Resources["LinkButton"] };
         bool hidden = true;
         string real = value;
         _secrets[box] = real;
@@ -1135,13 +1463,169 @@ CallWindowProc
     /*
     ===============
     OpenList
-    The addresses and domains in one list.
+    Edit one route list: name, source lines, and a read-only resolve preview.
     ===============
     */
     void OpenList(RouteList list) {
-        ListTitle.Text = list.Name;
-        ListBox.Text = ListBody(list);
+        _editingList = list;
+        ListTitle.Text = "Edit list";
+        ListName.Text = list.Name;
+        ListName.IsReadOnly = false;
+        ListName.Visibility = Visibility.Visible;
+        ListHint.Visibility = Visibility.Visible;
+        ListEntries.Text = string.Join("\n", list.Entries.Select(entry => entry.Value));
+        ListEntries.IsReadOnly = false;
+        ListEntries.Height = 180;
+        string resolved = ResolvedBody(list);
+        ListResolved.Text = resolved;
+        ListResolvedPane.Visibility = resolved.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ListError.Visibility = Visibility.Collapsed;
+        ListError.Text = "";
+        ListProgress.Visibility = Visibility.Collapsed;
+        ListClose.Visibility = Visibility.Collapsed;
+        ListCancel.Visibility = Visibility.Visible;
+        ListSave.Visibility = Visibility.Visible;
+        ApplyListSave();
         ShowSheet(ListPane);
+    }
+
+    /*
+    ===============
+    OpenApp
+    The addresses learned for one app.
+    ===============
+    */
+    void OpenApp(AppRule app) {
+        _editingList = null;
+        ListTitle.Text = app.Name;
+        ListName.Text = "";
+        ListName.Visibility = Visibility.Collapsed;
+        ListHint.Visibility = Visibility.Collapsed;
+        ListEntries.Text = app.Learned.Count == 0 ? "Nothing learned yet." : string.Join("\n", app.Learned);
+        ListEntries.IsReadOnly = true;
+        ListEntries.Height = 280;
+        ListResolved.Text = "";
+        ListResolvedPane.Visibility = Visibility.Collapsed;
+        ListError.Visibility = Visibility.Collapsed;
+        ListProgress.Visibility = Visibility.Collapsed;
+        ListClose.Visibility = Visibility.Visible;
+        ListCancel.Visibility = Visibility.Collapsed;
+        ListSave.Visibility = Visibility.Collapsed;
+        ShowSheet(ListPane);
+    }
+
+    /*
+    ===============
+    ListChanged
+    Enable Save when the edited list still has a name and at least one line.
+    ===============
+    */
+    void ListChanged(object sender, TextChangedEventArgs e) {
+        if (_editingList == null) {
+            return;
+        }
+
+        ApplyListSave();
+    }
+
+    /*
+    ===============
+    ApplyListSave
+    ===============
+    */
+    void ApplyListSave() {
+        if (_listCts != null || _editingList == null) {
+            ListSave.IsEnabled = false;
+            return;
+        }
+
+        ListSave.IsEnabled = ListName.Text.Trim().Length > 0 && ListEntries.Text.Trim().Length > 0;
+    }
+
+    /*
+    ===============
+    SaveList
+    Commit edits to the open route list.
+    ===============
+    */
+    async void SaveList(object sender, RoutedEventArgs e) {
+        if (_editingList == null || _listCts != null) {
+            return;
+        }
+
+        var list = _editingList;
+        var cts = new CancellationTokenSource();
+        _listCts = cts;
+        ListSave.IsEnabled = false;
+        ListName.IsEnabled = false;
+        ListEntries.IsEnabled = false;
+        ListError.Visibility = Visibility.Collapsed;
+        ListProgress.Text = "";
+        ListProgress.Visibility = Visibility.Visible;
+        try {
+            var problems = await Session.UpdateRouteList(list, ListName.Text, ListEntries.Text, text => ListProgress.Text = text, cts.Token);
+            if (cts.IsCancellationRequested) {
+                return;
+            }
+
+            PaintRules();
+            var kept = problems.Where(problem => problem.Message.Length > 0).ToList();
+            if (kept.Count == 0) {
+                var done = _listCts;
+                _listCts = null;
+                done?.Dispose();
+                CloseSheet(this, e);
+                return;
+            }
+
+            ListEntries.Text = string.Join("\n", problems.Select(problem => problem.Line));
+            ListError.Text = string.Join("\n", kept.Select(problem => problem.Line.Length == 0 ? problem.Message : problem.Line + ": " + problem.Message));
+            ListError.Visibility = Visibility.Visible;
+            ListResolved.Text = ResolvedBody(list);
+            ListResolvedPane.Visibility = ListResolved.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        } catch (OperationCanceledException) {
+        } finally {
+            if (ReferenceEquals(_listCts, cts)) {
+                _listCts = null;
+                cts.Dispose();
+            }
+
+            ListProgress.Visibility = Visibility.Collapsed;
+            ListName.IsEnabled = true;
+            ListEntries.IsEnabled = true;
+            ApplyListSave();
+        }
+    }
+
+    /*
+    ===============
+    ResolvedBody
+    Domains with the IPs already looked up.
+    ===============
+    */
+    static string ResolvedBody(RouteList list) {
+        var sb = new StringBuilder();
+        foreach (var entry in list.Entries) {
+            if (entry.Kind != "domain") {
+                continue;
+            }
+
+            if (sb.Length > 0) {
+                sb.Append('\n');
+            }
+
+            sb.Append(entry.Value);
+            if (entry.Addresses.Count == 0) {
+                sb.Append("\n  ").Append(entry.Status.Length > 0 ? entry.Status : "Looking up the address");
+                continue;
+            }
+
+            foreach (var ip in entry.Addresses) {
+                sb.Append("\n  ").Append(ip);
+            }
+        }
+
+        return sb.ToString();
     }
 
     /*
@@ -1173,36 +1657,6 @@ CallWindowProc
 
     /*
     ===============
-    ListBody
-    ===============
-    */
-    static string ListBody(RouteList list) {
-        var sb = new StringBuilder();
-        foreach (var entry in list.Entries) {
-            if (sb.Length > 0) {
-                sb.Append('\n');
-            }
-
-            sb.Append(entry.Value);
-            if (entry.Kind != "domain") {
-                continue;
-            }
-
-            if (entry.Addresses.Count == 0) {
-                sb.Append("\n  ").Append(entry.Status.Length > 0 ? entry.Status : "Looking up the address");
-                continue;
-            }
-
-            foreach (var ip in entry.Addresses) {
-                sb.Append("\n  ").Append(ip);
-            }
-        }
-
-        return sb.ToString();
-    }
-
-    /*
-    ===============
     PaintRules
     The route list.
     ===============
@@ -1226,7 +1680,8 @@ CallWindowProc
             foreach (var a in t.Apps) {
                 bool missing = !File.Exists(a.Path);
                 string sub = missing ? "App not found" : a.Learned.Count + " addresses";
-                Rules.Children.Add(Rule("App", a.Name, sub, a.Enabled, a.Path, v => a.Enabled = v, () => t.Apps.Remove(a), missing));
+                var app = a;
+                Rules.Children.Add(Rule("App", a.Name, sub, a.Enabled, a.Path, v => a.Enabled = v, () => t.Apps.Remove(a), missing, look: () => OpenApp(app)));
             }
         } finally {
             _painting = false;
@@ -1239,15 +1694,34 @@ Rule
 ===============
 */
     UIElement Rule(string kind, string title, string sub, bool on, string? iconPath, Action<bool> set, Action remove, bool missing = false, Action? look = null) {
-        var grid = new Grid { Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 0, 8), ColumnSpacing = 12 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+        var grid = new Grid { Padding = new Thickness(11), Margin = new Thickness(0, 0, 0, 8), ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var k = new TextBlock { Text = kind, Foreground = (Brush)Application.Current.Resources["FaintBrush"], VerticalAlignment = VerticalAlignment.Center };
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, Foreground = (Brush)Application.Current.Resources["TextBrush"], TextWrapping = TextWrapping.Wrap });
+        var k = new TextBlock {
+            Text = kind,
+            FontSize = 10,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = (Brush)Application.Current.Resources["MutedBrush"],
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 28,
+            Margin = new Thickness(0, 0, 2, 0)
+        };
+        var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock {
+            Text = title,
+            FontSize = 14,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            Foreground = (Brush)Application.Current.Resources[on ? "TextBrush" : "FaintBrush"],
+            TextWrapping = TextWrapping.Wrap
+        });
         if (sub.Length > 0) {
-            text.Children.Add(new TextBlock { Text = sub, FontSize = 12, Foreground = (Brush)Application.Current.Resources[missing ? "DangerBrush" : "MutedBrush"], TextWrapping = TextWrapping.Wrap });
+            text.Children.Add(new TextBlock {
+                Text = sub,
+                FontSize = 12,
+                Foreground = (Brush)Application.Current.Resources[missing ? "DangerBrush" : "MutedBrush"],
+                TextWrapping = TextWrapping.Wrap
+            });
         }
 
         var body = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
@@ -1270,6 +1744,7 @@ Rule
             value = next;
             set(value);
             await Session.ChangedRules();
+            PaintRules();
         };
         var x = new Button { Style = (Style)Application.Current.Resources["MarkButton"] };
         x.Content = new TextBlock {
@@ -1289,9 +1764,7 @@ Rule
         if (look != null) {
             var view = new Button {
                 Content = "View",
-                Style = (Style)Application.Current.Resources["PillButton"],
-                Padding = new Thickness(12, 6, 12, 6),
-                FontSize = 12
+                Style = (Style)Application.Current.Resources["LinkButton"]
             };
             view.Click += (_, _) => look();
             actions.Children.Add(view);
@@ -1304,7 +1777,7 @@ Rule
         grid.Children.Add(k);
         grid.Children.Add(body);
         grid.Children.Add(actions);
-        grid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(16, 255, 255, 255));
+        grid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(8, 255, 255, 255));
         grid.CornerRadius = new CornerRadius(10);
         return grid;
     }
@@ -1390,6 +1863,12 @@ Rule
         var items = await e.DataView.GetStorageItemsAsync();
         foreach (var item in items) Session.ImportFile(item.Path);
     }
+}
+
+public sealed class AppPickItem {
+    public string Name { get; init; } = "";
+    public string Path { get; init; } = "";
+    public ImageSource? Icon { get; init; }
 }
 
 sealed class TrayAction : ICommand {

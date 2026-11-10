@@ -935,8 +935,12 @@ static int add_route(const char *cidr_text, int via_tunnel) {
 		return 0;
 	}
 
-	if (CreateIpForwardEntry2(&row) != NO_ERROR && GetLastError() != ERROR_OBJECT_ALREADY_EXISTS) {
-		return 0;
+	{
+		DWORD err = CreateIpForwardEntry2(&row);
+
+		if (err != NO_ERROR && err != ERROR_OBJECT_ALREADY_EXISTS) {
+			return 0;
+		}
 	}
 
 	for (i = 0; i < s_session.route_count; i++) {

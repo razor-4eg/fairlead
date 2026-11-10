@@ -165,6 +165,7 @@ public sealed class Session : Bindable {
 	readonly string _token;
 	readonly string _exeDir;
 	readonly HashSet<string> _resolving = new();
+	readonly SemaphoreSlim _pipe = new(1, 1);
 
     /*
     ===============
@@ -540,9 +541,7 @@ public sealed class Session : Bindable {
         Selected.SelectedPolicy = through;
         Save();
         Touch();
-        if (Selected.Connected) {
-            await Task.Run(() => Call(Rpc("bypass", Selected, true)));
-        }
+        await PushBypass(Selected);
     }
 
     /*
@@ -559,9 +558,7 @@ public sealed class Session : Bindable {
         Selected.ExcludeLan = on;
         Save();
         Touch();
-        if (Selected.Connected) {
-            await Task.Run(() => Call(Rpc("bypass", Selected, true)));
-        }
+        await PushBypass(Selected);
     }
 
     /*
@@ -573,9 +570,41 @@ public sealed class Session : Bindable {
     public async Task ChangedRules() {
         Save();
         Touch();
-        if (Selected?.Connected == true) {
-            await Task.Run(() => Call(Rpc("bypass", Selected, true)));
+        await PushBypass(Selected);
+    }
+
+    /*
+    ===============
+    PushBypass
+    Replace routes on a live tunnel. The helper pipe is single-client; Call serializes.
+    ===============
+    */
+    async Task PushBypass(Tunnel? t) {
+        if (t == null || !t.Connected) {
+            return;
         }
+
+        string body = Rpc("bypass", t, true);
+        string? reply = await Task.Run(() => Call(body));
+        if (reply != null && reply.Contains("\"ok\":true")) {
+            ApplyStatus(reply);
+            if (Banner.Length > 0 && Banner.StartsWith("Could not update routes", StringComparison.Ordinal)) {
+                Banner = "";
+                Raise(nameof(Banner));
+            }
+
+            return;
+        }
+
+        // One retry: a status tick may have owned the pipe for the first attempt.
+        reply = await Task.Run(() => Call(body));
+        if (reply != null && reply.Contains("\"ok\":true")) {
+            ApplyStatus(reply);
+            return;
+        }
+
+        Banner = ErrorOf(reply) ?? "Could not update routes on the live tunnel.";
+        Raise(nameof(Banner));
     }
 
     /*
@@ -643,7 +672,7 @@ public sealed class Session : Bindable {
         } else {
             for (int i = 0; i < domains.Count; i++) {
                 cancel.ThrowIfCancellationRequested();
-                progress("Resolving " + (i + 1) + " of " + domains.Count);
+                progress(domains[i].Value + "  " + (i + 1) + "/" + domains.Count);
                 await Task.Yield();
                 cancel.ThrowIfCancellationRequested();
                 await ResolveEntry(domains[i]);
@@ -660,11 +689,107 @@ public sealed class Session : Bindable {
 
     /*
     ===============
+    UpdateRouteList
+    Replace one list's name and entries. Keeps resolved addresses for unchanged domains.
+    ===============
+    */
+    public async Task<List<RouteProblem>> UpdateRouteList(RouteList list, string name, string text, Action<string> progress, CancellationToken cancel) {
+        var problems = new List<RouteProblem>();
+        if (Selected == null || name.Trim().Length == 0) {
+            return problems;
+        }
+
+        var keptAddresses = list.Entries
+            .Where(entry => entry.Kind == "domain")
+            .GroupBy(entry => entry.Value, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => (group.First().Addresses.ToList(), group.First().Status), StringComparer.OrdinalIgnoreCase);
+
+        var next = new List<RouteEntry>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var existing in Selected.Lists) {
+            if (existing.Id == list.Id) {
+                continue;
+            }
+
+            foreach (var entry in existing.Entries) {
+                seen.Add(entry.Kind + " " + entry.Value);
+            }
+        }
+
+        bool reportedCap = false;
+        foreach (var raw in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')) {
+            cancel.ThrowIfCancellationRequested();
+            string line = raw.Trim();
+            if (line.Length == 0) {
+                continue;
+            }
+
+            if (next.Count >= 4096) {
+                problems.Add(new RouteProblem { Line = line, Message = reportedCap ? "" : "A list can hold 4096 entries." });
+                reportedCap = true;
+                continue;
+            }
+
+            var (kind, value, note, err) = Core.Classify(line);
+            if (note.Length > 0 || kind == "error" || kind.Length == 0) {
+                problems.Add(new RouteProblem { Line = line, Message = err.Length > 0 ? err : "Enter an IP, a network, or a domain." });
+                continue;
+            }
+
+            if (!seen.Add(kind + " " + value)) {
+                string message = kind == "domain" ? "That domain is already listed." : "That address is already listed.";
+                problems.Add(new RouteProblem { Line = line, Message = message });
+                continue;
+            }
+
+            var entry = new RouteEntry { Id = Id(), Kind = kind, Value = value };
+            if (kind == "domain" && keptAddresses.TryGetValue(value, out var prior)) {
+                entry.Addresses = prior.Item1;
+                entry.Status = prior.Item2;
+            }
+
+            next.Add(entry);
+        }
+
+        if (next.Count == 0) {
+            if (problems.Count == 0) {
+                problems.Add(new RouteProblem { Message = "Enter an IP, a network, or a domain." });
+            }
+
+            return problems;
+        }
+
+        var domains = next.Where(entry => entry.Kind == "domain" && entry.Addresses.Count == 0 && entry.Status.Length == 0).ToList();
+        if (domains.Count == 0) {
+            progress("Saving the list");
+            await Task.Yield();
+        } else {
+            for (int i = 0; i < domains.Count; i++) {
+                cancel.ThrowIfCancellationRequested();
+                progress(domains[i].Value + "  " + (i + 1) + "/" + domains.Count);
+                await Task.Yield();
+                cancel.ThrowIfCancellationRequested();
+                await ResolveEntry(domains[i]);
+            }
+        }
+
+        cancel.ThrowIfCancellationRequested();
+        progress("Saving the list");
+        list.Name = name.Trim();
+        list.Entries.Clear();
+        list.Entries.AddRange(next);
+        await ChangedRules();
+        RulesChanged?.Invoke();
+        return problems;
+    }
+
+    /*
+    ===============
     AddProgram
     Remember an application and learn the addresses it uses.
     ===============
     */
-    public void AddProgram(string path) {
+    public void AddProgram(string path, string? name = null) {
         if (Selected == null || Selected.Apps.Count >= 12) {
             return;
         }
@@ -673,7 +798,12 @@ public sealed class Session : Bindable {
             return;
         }
 
-        Selected.Apps.Add(new AppRule { Id = Id(), Path = path, Name = Path.GetFileName(path), Enabled = true, Learn = true });
+        string label = (name ?? "").Trim();
+        if (label.Length == 0) {
+            label = Path.GetFileName(path);
+        }
+
+        Selected.Apps.Add(new AppRule { Id = Id(), Path = path, Name = label, Enabled = true, Learn = true });
         _ = ChangedRules();
         RulesChanged?.Invoke();
     }
@@ -879,9 +1009,7 @@ public sealed class Session : Bindable {
 
         Save();
         RulesChanged?.Invoke();
-        if (t.Connected) {
-            await Task.Run(() => Call(Rpc("bypass", t, true)));
-        }
+        await PushBypass(t);
     }
 
     /*
@@ -899,18 +1027,20 @@ public sealed class Session : Bindable {
         var found = await Task.Run(SnapshotTcp);
         bool changed = false;
         foreach (var app in t.Apps.Where(a => a.Enabled && a.Learn)) {
-            if (!found.TryGetValue(app.Path, out var ips)) {
-                continue;
-            }
-
-            foreach (var ip in ips) {
-                string cidr = ip + "/32";
-                if (app.Learned.Contains(cidr) || app.Learned.Count >= 24) {
+            foreach (var pair in found) {
+                if (!BelongsTo(pair.Key, app.Path)) {
                     continue;
                 }
 
-                app.Learned.Add(cidr);
-                changed = true;
+                foreach (var ip in pair.Value) {
+                    string cidr = ip + "/32";
+                    if (app.Learned.Contains(cidr) || app.Learned.Count >= 400) {
+                        continue;
+                    }
+
+                    app.Learned.Add(cidr);
+                    changed = true;
+                }
             }
         }
 
@@ -918,7 +1048,7 @@ public sealed class Session : Bindable {
             Save();
             Touch();
             RulesChanged?.Invoke();
-            await Task.Run(() => Call(Rpc("bypass", t, true)));
+            await PushBypass(t);
         }
     }
 
@@ -1231,9 +1361,10 @@ public sealed class Session : Bindable {
     ===============
     */
     string? Call(string body) {
+        _pipe.Wait();
         try {
             using var pipe = new NamedPipeClientStream(".", "fairlead", PipeDirection.InOut);
-            pipe.Connect(800);
+            pipe.Connect(5000);
             byte[] bytes = Encoding.UTF8.GetBytes(body);
             var hdr = new byte[] { (byte)(bytes.Length >> 24), (byte)(bytes.Length >> 16), (byte)(bytes.Length >> 8), (byte)bytes.Length };
             pipe.Write(hdr);
@@ -1261,6 +1392,8 @@ public sealed class Session : Bindable {
             return Encoding.UTF8.GetString(buf, 0, got);
         } catch {
             return null;
+        } finally {
+            _pipe.Release();
         }
     }
 
@@ -1423,6 +1556,31 @@ public sealed class Session : Bindable {
     static bool IsAdmin() {
         using var id = WindowsIdentity.GetCurrent();
         return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    /*
+    ===============
+    BelongsTo
+    Same exe, or any process under the install folder (launcher → updater → app).
+    ===============
+    */
+    static bool BelongsTo(string processPath, string appPath) {
+        if (processPath.Length == 0 || appPath.Length == 0) {
+            return false;
+        }
+
+        if (string.Equals(processPath, appPath, StringComparison.OrdinalIgnoreCase)) {
+            return true;
+        }
+
+        string? root = Path.GetDirectoryName(appPath);
+        if (string.IsNullOrEmpty(root)) {
+            return false;
+        }
+
+        root = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return processPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
 /*
