@@ -2,9 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Command Line Tools for this OS don't ship SwiftUIMacros. The 26.5 SDK
-# still exposes SwiftUI state as a normal property wrapper, so the app builds.
-export SDKROOT="${SDKROOT:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk}"
+# Local CLT builds need the 26.5 SDK (SwiftUIMacros). Xcode / CI already have a
+# usable SDK — leave SDKROOT alone unless the caller or that CLT path is set.
+if [[ -z "${SDKROOT:-}" && -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ]]; then
+  export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+fi
 
 if [[ ! -f platform/mac/Support/AppIcon.icns ]]; then
   if [[ -f scripts/make-icon.py ]]; then

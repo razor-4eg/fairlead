@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and upload (e.g. v1.1.1)"
+        required: true
+        default: "v1.1.1"
+      ref:
+        description: "Git ref to build from (commit/branch/tag). Empty = the release tag."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      ref: ${{ steps.meta.outputs.ref }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+            REF="${{ github.event.inputs.ref }}"
+            if [[ -z "$REF" ]]; then
+              REF="$TAG"
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+            REF="$TAG"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "Tag must look like v1.2.3, got: $TAG" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+  mac:
+    needs: version
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build amneziawg-go
+        run: ./scripts/build-amneziawg-go.sh
+
+      - name: Build Fairlead.app
+        run: ./scripts/build-app.sh
+
+      - name: Package zip
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          OUT="dist/Fairlead-${VERSION}-macos-arm64.zip"
+          rm -f "$OUT"
+          ditto -c -k --keepParent dist/Fairlead.app "$OUT"
+          ls -lh "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64
+          path: dist/Fairlead-${{ needs.version.outputs.version }}-macos-arm64.zip
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-zlib
+          path-type: minimal
+
+      - name: Build amneziawg-go + wintun
+        shell: pwsh
+        run: .\scripts\build-win-userspace.ps1
+
+      - name: Build Fairlead
+        shell: cmd
+        run: scripts\build-win.bat
+
+      - name: Check build log
+        shell: pwsh
+        run: |
+          if (Test-Path .build\win\build.log) {
+            Get-Content .build\win\build.log -Tail 80
+          }
+          if (-not (Test-Path dist\win\Fairlead.exe)) {
+            throw "dist\win\Fairlead.exe missing"
+          }
+          if (-not (Test-Path dist\win\fairlead-helper.exe)) {
+            throw "dist\win\fairlead-helper.exe missing"
+          }
+          if (-not (Test-Path dist\win\amneziawg-go.exe)) {
+            throw "dist\win\amneziawg-go.exe missing"
+          }
+          if (-not (Test-Path dist\win\wintun.dll)) {
+            throw "dist\win\wintun.dll missing"
+          }
+
+      - name: Package zip
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $out = "dist\Fairlead-$env:VERSION-windows-x64.zip"
+          if (Test-Path $out) { Remove-Item $out -Force }
+          Push-Location dist\win
+          tar.exe -a -c -f "..\Fairlead-$env:VERSION-windows-x64.zip" *
+          if ($LASTEXITCODE -ne 0) { throw "zip failed" }
+          Pop-Location
+          Get-Item $out | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/Fairlead-${{ needs.version.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [version, mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          MAC="artifacts/mac-arm64/Fairlead-${VERSION}-macos-arm64.zip"
+          WIN="artifacts/windows-x64/Fairlead-${VERSION}-windows-x64.zip"
+          ls -lh "$MAC" "$WIN"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Fairlead ${VERSION}" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+          gh release upload "$TAG" "$MAC" "$WIN" --clobber
+          gh release view "$TAG"
