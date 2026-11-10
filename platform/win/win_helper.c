@@ -8,6 +8,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <psapi.h>
 #include <sddl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -550,6 +551,60 @@ static DWORD WINAPI register_task(void *unused) {
 
 /*
 ===============
+claim_singleton
+End other fairlead-helper processes so this one can own the pipe.
+===============
+*/
+static void claim_singleton(void) {
+	DWORD	pids[1024];
+	DWORD	needed;
+	DWORD	self;
+	DWORD	i;
+	DWORD	n;
+	HANDLE	proc;
+	wchar_t	path[MAX_PATH];
+	DWORD	path_n;
+	wchar_t	*base;
+
+	self = GetCurrentProcessId();
+
+	if (!EnumProcesses(pids, sizeof(pids), &needed)) {
+		return;
+	}
+
+	n = needed / sizeof(DWORD);
+
+	for (i = 0; i < n; i++) {
+		if (pids[i] == 0 || pids[i] == self) {
+			continue;
+		}
+
+		proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pids[i]);
+
+		if (!proc) {
+			continue;
+		}
+
+		path_n = MAX_PATH;
+
+		if (QueryFullProcessImageNameW(proc, 0, path, &path_n)) {
+			base = wcsrchr(path, L'\\');
+			base = base ? base + 1 : path;
+
+			if (_wcsicmp(base, L"fairlead-helper.exe") == 0) {
+				TerminateProcess(proc, 1);
+				WaitForSingleObject(proc, 4000);
+			}
+		}
+
+		CloseHandle(proc);
+	}
+
+	Sleep(200);
+}
+
+/*
+===============
 helper_main
 Serve the pipe until the app quits, or the pipe breaks.
 ===============
@@ -562,12 +617,14 @@ int helper_main(const char *token, const char *exe_dir) {
 	char				*body;
 	char				*reply;
 	int					rlen;
+	int					attempt;
 
 	PSECURITY_DESCRIPTOR sd = NULL;
 
 	snprintf(s_token, sizeof(s_token), "%s", token ? token : "");
 	snprintf(s_exe_dir, sizeof(s_exe_dir), "%s", exe_dir ? exe_dir : ".");
 	win_tun_reconcile();
+	claim_singleton();
 
 	if (!ConvertStringSecurityDescriptorToSecurityDescriptorA("D:(A;;GA;;;AU)", SDDL_REVISION_1, &sd, NULL)) {
 		return 1;
@@ -576,8 +633,19 @@ int helper_main(const char *token, const char *exe_dir) {
 	memset(&sa, 0, sizeof(sa));
 	sa.nLength = sizeof(sa);
 	sa.lpSecurityDescriptor = sd;
-	pipe = CreateNamedPipeA("\\\\.\\pipe\\fairlead", PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-		1, 1 << 20, 1 << 20, 0, &sa);
+	pipe = INVALID_HANDLE_VALUE;
+
+	for (attempt = 0; attempt < 8; attempt++) {
+		pipe = CreateNamedPipeA("\\\\.\\pipe\\fairlead", PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+			1, 1 << 20, 1 << 20, 0, &sa);
+
+		if (pipe != INVALID_HANDLE_VALUE) {
+			break;
+		}
+
+		claim_singleton();
+		Sleep(150);
+	}
 
 	if (pipe == INVALID_HANDLE_VALUE) {
 		LocalFree(sd);

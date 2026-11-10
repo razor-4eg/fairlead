@@ -166,6 +166,7 @@ public sealed class Session : Bindable {
 	readonly string _exeDir;
 	readonly HashSet<string> _resolving = new();
 	readonly SemaphoreSlim _pipe = new(1, 1);
+	readonly SemaphoreSlim _helperStart = new(1, 1);
 
     /*
     ===============
@@ -279,7 +280,9 @@ public sealed class Session : Bindable {
     public async Task Tick() {
         RefreshTools();
         bool busy = Tunnels.Any(t => t.Phase == "Connecting" || t.Phase == "Disconnecting");
-        string? reply = await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"status\"}"));
+        // When the helper is down, fail fast — a 5s Connect blocks StartHelper and Quit.
+        int wait = HelperOnline ? 3000 : 200;
+        string? reply = await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"status\"}", wait));
         if (reply != null && reply.Contains("\"ok\":true")) {
             HelperOnline = true;
         } else if (!busy) {
@@ -290,7 +293,10 @@ public sealed class Session : Bindable {
             ApplyStatus(reply);
         }
 
-        await Learn();
+        if (HelperOnline) {
+            await Learn();
+        }
+
         RefreshTools();
     }
 
@@ -499,7 +505,11 @@ public sealed class Session : Bindable {
     public async Task Shutdown() {
         foreach (var t in Tunnels.Where(x => x.Connected || x.Phase == "Connecting").ToList())
             await Disconnect(t);
-        await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"quit\"}"));
+        if (HelperOnline) {
+            await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"quit\"}", 800));
+        }
+
+        HelperOnline = false;
     }
 
     /*
@@ -855,33 +865,81 @@ public sealed class Session : Bindable {
     ===============
     */
     public async Task EnsureHelper() {
-        string? reply = await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"ping\"}"));
-        if (reply != null && reply.Contains("\"ok\":true")) {
-            HelperOnline = true;
-            Raise(nameof(HelperText));
-            RefreshTools();
+        if (await PingHelper()) {
+            MarkHelperOnline();
             return;
         }
 
-        await StartHelper();
+        // Auto-start: scheduled task only. No UAC prompt behind the window.
+        await StartHelper(interactive: false);
     }
 
     /*
     ===============
     StartHelper
-    The elevated helper. The first run records the login task.
+    Settings button: allow the elevation prompt.
     ===============
     */
-    public async Task StartHelper() {
+    public Task StartHelper() => StartHelper(interactive: true);
+
+    /*
+    ===============
+    StartHelper
+    Bring the helper up. interactive=true may show UAC.
+    ===============
+    */
+    async Task StartHelper(bool interactive) {
         string exe = Path.Combine(_exeDir, "fairlead-helper.exe");
         if (!File.Exists(exe)) {
+            Banner = "fairlead-helper.exe is missing from " + _exeDir;
+            Raise(nameof(Banner));
             return;
         }
 
-        if (await ReachHelper(true)) {
-            return;
-        }
+        await _helperStart.WaitAsync();
+        try {
+            if (await PingHelper()) {
+                MarkHelperOnline();
+                return;
+            }
 
+            if (await Task.Run(RunScheduledHelper) && await WaitHelper(16)) {
+                return;
+            }
+
+            if (!interactive) {
+                return;
+            }
+
+            if (!await LaunchHelper(exe)) {
+                return;
+            }
+
+            if (await WaitHelper(20)) {
+                return;
+            }
+
+            await Task.Run(StopHelpers);
+            if (!await LaunchHelper(exe)) {
+                return;
+            }
+
+            if (!await WaitHelper(20)) {
+                Banner = "The helper did not start.";
+                Raise(nameof(Banner));
+            }
+        } finally {
+            _helperStart.Release();
+        }
+    }
+
+    /*
+    ===============
+    LaunchHelper
+    Start the helper next to this app, elevating when needed.
+    ===============
+    */
+    async Task<bool> LaunchHelper(string exe) {
         var info = new ProcessStartInfo(exe, "--helper " + _token) {
             UseShellExecute = true,
             WorkingDirectory = _exeDir,
@@ -892,36 +950,80 @@ public sealed class Session : Bindable {
         }
 
         try {
-            Process.Start(info);
+            Process? proc = Process.Start(info);
+            if (proc == null) {
+                return false;
+            }
+
+            await Task.Delay(300);
+            return true;
         } catch {
-            return;
+            Banner = "The helper start was cancelled.";
+            Raise(nameof(Banner));
+            return false;
         }
-        await ReachHelper(false);
     }
 
     /*
     ===============
-    ReachHelper
-    True when the pipe answers a ping.
+    PingHelper
+    One short ping against the live pipe.
     ===============
     */
-    async Task<bool> ReachHelper(bool scheduled) {
-        if (scheduled && !await Task.Run(RunScheduledHelper)) {
-            return false;
-        }
+    async Task<bool> PingHelper() {
+        string? reply = await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"ping\"}", 400));
+        return reply != null && reply.Contains("\"ok\":true");
+    }
 
-        for (int i = 0; i < 20; i++) {
-            await Task.Delay(250);
-            string? reply = await Task.Run(() => Call("{\"token\":" + JsonQuote(_token) + ",\"op\":\"ping\"}"));
-            if (reply != null && reply.Contains("\"ok\":true")) {
-                HelperOnline = true;
-                Raise(nameof(HelperText));
-                RefreshTools();
+    /*
+    ===============
+    WaitHelper
+    Poll until the helper answers, or give up (~tries * 0.35s).
+    ===============
+    */
+    async Task<bool> WaitHelper(int tries) {
+        for (int i = 0; i < tries; i++) {
+            await Task.Delay(150);
+            if (await PingHelper()) {
+                MarkHelperOnline();
                 return true;
             }
         }
 
         return false;
+    }
+
+    void MarkHelperOnline() {
+        HelperOnline = true;
+        Raise(nameof(HelperText));
+        RefreshTools();
+    }
+
+    /*
+    ===============
+    StopHelpers
+    End every fairlead-helper process we can. Elevated peers need the new helper to claim the pipe.
+    ===============
+    */
+    static void StopHelpers() {
+        Process[] list;
+        try {
+            list = Process.GetProcessesByName("fairlead-helper");
+        } catch {
+            return;
+        }
+
+        foreach (var proc in list) {
+            try {
+                if (!proc.HasExited) {
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(4000);
+                }
+            } catch {
+            } finally {
+                proc.Dispose();
+            }
+        }
     }
 
     /*
@@ -1360,11 +1462,14 @@ public sealed class Session : Bindable {
     Send one JSON message and return the reply.
     ===============
     */
-    string? Call(string body) {
-        _pipe.Wait();
+    string? Call(string body, int connectMs = 5000) {
+        if (!_pipe.Wait(connectMs + 1000)) {
+            return null;
+        }
+
         try {
             using var pipe = new NamedPipeClientStream(".", "fairlead", PipeDirection.InOut);
-            pipe.Connect(5000);
+            pipe.Connect(Math.Max(50, connectMs));
             byte[] bytes = Encoding.UTF8.GetBytes(body);
             var hdr = new byte[] { (byte)(bytes.Length >> 24), (byte)(bytes.Length >> 16), (byte)(bytes.Length >> 8), (byte)bytes.Length };
             pipe.Write(hdr);

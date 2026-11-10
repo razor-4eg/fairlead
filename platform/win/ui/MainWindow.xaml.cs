@@ -246,6 +246,7 @@ public sealed partial class MainWindow : Window {
             }
 
             _quitting = true;
+            _timer.Stop();
             try {
                 await Session.Shutdown();
             } finally {

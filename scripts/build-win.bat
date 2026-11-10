@@ -10,7 +10,7 @@ set CORE=core/fl.c core/fl_ip.c core/fl_doc.c core/fl_keys.c core/fl_dns.c core/
 
 gcc -shared %CFLAGS% -o "%STAGE%\fairlead-core.dll" %CORE% core/fl_abi.c -Wl,-Bstatic -lz -Wl,-Bdynamic -lws2_32 -lbcrypt > "%STAGE%\build.log" 2>&1
 if errorlevel 1 goto done
-gcc %CFLAGS% -o "%STAGE%\fairlead-helper.exe" %CORE% platform/win/win_tun.c platform/win/win_helper.c platform/win/win_main.c -mwindows -municode -Wl,-Bstatic -lz -Wl,-Bdynamic -lws2_32 -lbcrypt -liphlpapi -ladvapi32 >> "%STAGE%\build.log" 2>&1
+gcc %CFLAGS% -o "%STAGE%\fairlead-helper.exe" %CORE% platform/win/win_tun.c platform/win/win_helper.c platform/win/win_main.c -mwindows -municode -Wl,-Bstatic -lz -Wl,-Bdynamic -lws2_32 -lbcrypt -liphlpapi -ladvapi32 -lpsapi >> "%STAGE%\build.log" 2>&1
 if errorlevel 1 goto done
 
 where dotnet >nul 2>&1
