@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "../../core/base.h"
+#include "../../core/net.h"
 #include "win_tun.h"
 
 static char s_token[80];
@@ -150,7 +151,8 @@ static char *handle_request(const char *body) {
 	const char			*config;
 	const char			*policy;
 	const json_t		*cidrs;
-	const char			*cidr_list[64];
+	const char			**cidr_list;
+	int					cidr_cap;
 	int					cidr_count;
 	int					exclude;
 	int					selected;
@@ -166,6 +168,8 @@ static char *handle_request(const char *body) {
 	char				num[64];
 
 	cidr_count = 0;
+	cidr_cap = BYPASS_MAX;
+	cidr_list = NULL;
 	exclude = 0;
 	selected = 0;
 	buf = NULL;
@@ -174,7 +178,7 @@ static char *handle_request(const char *body) {
 	ok = 0;
 	error = NULL;
 
-	arena_init(&arena, 1 << 20);
+	arena_init(&arena, 1 << 22);
 	root = json_parse(&arena, body);
 
 	if (!root) {
@@ -201,9 +205,15 @@ static char *handle_request(const char *body) {
 
 	selected = policy && strcmp(policy, "selected") == 0;
 	cidrs = json_get(root, "cidrs");
+	cidr_list = (const char **)malloc((size_t)cidr_cap * sizeof(*cidr_list));
+
+	if (!cidr_list) {
+		arena_free(&arena);
+		return _strdup("{\"id\":\"\",\"ok\":false,\"error\":\"Not enough memory.\"}");
+	}
 
 	if (cidrs && cidrs->type == JSON_ARR) {
-		for (c = cidrs->child; c && cidr_count < 64; c = c->next) {
+		for (c = cidrs->child; c && cidr_count < cidr_cap; c = c->next) {
 			s = json_string(c);
 
 			if (s) {
@@ -333,6 +343,7 @@ static char *handle_request(const char *body) {
 	}
 
 	append(&buf, &len, &cap, "]}");
+	free((void *)cidr_list);
 	arena_free(&arena);
 	return buf;
 }

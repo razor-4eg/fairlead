@@ -1,3 +1,4 @@
+import Darwin
 import FairleadC
 import Foundation
 
@@ -45,7 +46,9 @@ public enum BypassPlanner {
 
     /// `routes` follow the policy. `direct` is the local network kept off the tunnel when only the list uses it.
     public static func routes(_ input: BypassInput) -> (routes: [String], direct: [String], warnings: [String]) {
-        var plan = bypass_t()
+        let plan = UnsafeMutablePointer<bypass_t>.allocate(capacity: 1)
+        memset(plan, 0, MemoryLayout<bypass_t>.stride)
+        defer { plan.deallocate() }
         let selected: Int32 = input.policy == .selected ? 1 : 0
         let excludeLAN: Int32 = input.excludeLAN ? 1 : 0
         CBridge.withCStrings(input.rules) { rules, ruleCount in
@@ -59,16 +62,16 @@ public enum BypassPlanner {
                             lan, lanCount,
                             excludeLAN,
                             endpoints, endpointCount,
-                            &plan
+                            plan
                         )
                     }
                 }
             }
         }
         return (
-            strings(plan.routes, count: Int(plan.route_count)),
-            strings(plan.direct, count: Int(plan.direct_count)),
-            strings(plan.warnings, count: Int(plan.warning_count), width: 256).map {
+            strings(plan.pointee.routes, count: Int(plan.pointee.route_count)),
+            strings(plan.pointee.direct, count: Int(plan.pointee.direct_count)),
+            strings(plan.pointee.warnings, count: Int(plan.pointee.warning_count), width: 256).map {
                 CBridge.localize($0, templates: warningTemplates)
             }
         )

@@ -85,7 +85,8 @@ int		domain_normalize(const char *raw, char *buf, int cap);
 int		dns_query(uint16_t id, const char *name, uint16_t type, int edns, unsigned char *out, int cap);
 int		dns_parse(const unsigned char *data, int len, uint16_t id, dns_reply_t *out);
 
-#define BYPASS_MAX 64
+/* Large Direct lists (thousands of /32s) must fit. Callers heap-allocate bypass_t. */
+#define BYPASS_MAX 8192
 
 typedef struct bypass_s {
 	char routes[BYPASS_MAX][64];

@@ -1831,7 +1831,7 @@ Append one network.
 ===============
 */
 static int push_cidr(cidr_t *list, int *count, int cap, const cidr_t *cidr) {
-	if (*count >= cap) {
+	if (!list || *count >= cap) {
 		return 0;
 	}
 
@@ -1930,7 +1930,7 @@ static void take(bypass_t *out, int selected, const char *raw, const char *origi
 		}
 	}
 
-	push_cidr(list, count, 128, &cidr);
+	push_cidr(list, count, BYPASS_MAX, &cidr);
 }
 
 /*
@@ -1948,15 +1948,25 @@ void bypass_plan(
 	const char **endpoints, int endpoint_count,
 	bypass_t *out)
 {
-	cidr_t cidrs[128];
-	cidr_t direct[128];
+	cidr_t *cidrs;
+	cidr_t *direct;
 	int cidr_count = 0;
 	int direct_count = 0;
 	ip_t eps[16];
 	int ep_count = 0;
 	int i;
+	int skipped = 0;
 
 	memset(out, 0, sizeof(*out));
+	cidrs = (cidr_t *)calloc((size_t)BYPASS_MAX, sizeof(cidr_t));
+	direct = (cidr_t *)calloc((size_t)BYPASS_MAX, sizeof(cidr_t));
+
+	if (!cidrs || !direct) {
+		free(cidrs);
+		free(direct);
+		warn(out, "Not enough memory for the route plan.");
+		return;
+	}
 
 	for (i = 0; i < endpoint_count && ep_count < 16; i++) {
 		ip_t ip;
@@ -1967,11 +1977,23 @@ void bypass_plan(
 	}
 
 	for (i = 0; i < rule_count; i++) {
+		int before = cidr_count;
+
 		take(out, policy_selected, rules[i], rules[i], eps, ep_count, cidrs, &cidr_count);
+
+		if (before == cidr_count && cidr_count >= BYPASS_MAX) {
+			skipped++;
+		}
 	}
 
 	for (i = 0; i < learned_count; i++) {
+		int before = cidr_count;
+
 		take(out, policy_selected, learned[i], learned[i], eps, ep_count, cidrs, &cidr_count);
+
+		if (before == cidr_count && cidr_count >= BYPASS_MAX) {
+			skipped++;
+		}
 	}
 
 	if (exclude_lan) {
@@ -1988,8 +2010,17 @@ void bypass_plan(
 		}
 	}
 
+	if (skipped > 0) {
+		char msg[256];
+
+		snprintf(msg, sizeof(msg), "Skipped %d addresses; the route plan is full.", skipped);
+		warn(out, msg);
+	}
+
 	out->route_count = unique_sort(cidrs, cidr_count, out->routes, BYPASS_MAX);
 	out->direct_count = unique_sort(direct, direct_count, out->direct, BYPASS_MAX);
+	free(cidrs);
+	free(direct);
 
 	if (policy_selected) {
 		int w = 0;

@@ -69,9 +69,9 @@ typedef struct session_s {
 	int lan_count;
 	char endpoints[4][64];
 	int endpoint_count;
-	route_rec_t routes[80];
+	route_rec_t routes[BYPASS_MAX + 16];
 	int route_count;
-	char owned[48][64];
+	char owned[BYPASS_MAX][64];
 	int owned_count;
 	char dns_backup[8][64];
 	int dns_backup_count;
@@ -303,7 +303,11 @@ static void copy_result(win_tun_result_t *out) {
 
 	out->owned_count = s_session.owned_count;
 
-	for (i = 0; i < s_session.owned_count && i < 48; i++) {
+	if (out->owned_count > 48) {
+		out->owned_count = 48;
+	}
+
+	for (i = 0; i < out->owned_count; i++) {
 		snprintf(out->owned[i], 64, "%s", s_session.owned[i]);
 	}
 
@@ -945,7 +949,7 @@ static int add_route(const char *cidr_text, int via_tunnel) {
 		}
 	}
 
-	if (s_session.route_count < 80) {
+	if (s_session.route_count < (int)(sizeof(s_session.routes) / sizeof(s_session.routes[0]))) {
 		snprintf(s_session.routes[s_session.route_count].cidr, 64, "%s", cidr_text);
 		s_session.routes[s_session.route_count].via_tunnel = via_tunnel;
 		s_session.route_count++;
@@ -1270,7 +1274,7 @@ static void remember_owned(const char *cidr) {
 		}
 	}
 
-	if (s_session.owned_count < 48) {
+	if (s_session.owned_count < BYPASS_MAX) {
 		snprintf(s_session.owned[s_session.owned_count], 64, "%s", cidr);
 		s_session.owned_count++;
 	}
@@ -1283,9 +1287,11 @@ Install the bypass plan on top of the current routes.
 ===============
 */
 static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int selected) {
-	bypass_t	plan;
+	bypass_t	*plan;
 	const char	*eps[4];
 	const char	*lan[8];
+	char		(*desired_tunnel)[64];
+	char		(*desired_direct)[64];
 	int			i;
 	int			lan_count;
 	int			nt;
@@ -1293,10 +1299,17 @@ static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int 
 	int			k;
 	int			keep;
 
-	char desired_tunnel[48][64];
-	char desired_direct[48][64];
 	nt = 0;
 	nd = 0;
+	desired_tunnel = NULL;
+	desired_direct = NULL;
+	plan = (bypass_t *)calloc(1, sizeof(*plan));
+
+	if (!plan) {
+		snprintf(s_session.warnings[0], 256, "%s", "Not enough memory for the route plan.");
+		s_session.warning_count = 1;
+		return;
+	}
 
 	for (i = 0; i < s_session.endpoint_count && i < 4; i++) {
 		eps[i] = s_session.endpoints[i];
@@ -1313,35 +1326,25 @@ static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int 
 		lan[i] = s_session.lan[i];
 	}
 
-	bypass_plan(selected, cidrs, cidr_count, NULL, 0, lan, lan_count, exclude_lan, eps, s_session.endpoint_count, &plan);
-	s_session.warning_count = plan.warning_count;
+	bypass_plan(selected, cidrs, cidr_count, NULL, 0, lan, lan_count, exclude_lan, eps, s_session.endpoint_count, plan);
+	s_session.warning_count = plan->warning_count;
 
 	if (s_session.warning_count > 12) {
 		s_session.warning_count = 12;
 	}
 
 	for (i = 0; i < s_session.warning_count; i++) {
-		snprintf(s_session.warnings[i], 256, "%s", plan.warnings[i]);
+		snprintf(s_session.warnings[i], 256, "%s", plan->warnings[i]);
 	}
 
 	if (selected) {
-		nt = plan.route_count;
-
-		for (i = 0; i < nt && i < 48; i++) {
-			snprintf(desired_tunnel[i], 64, "%s", plan.routes[i]);
-		}
-
-		nd = plan.direct_count;
-
-		for (i = 0; i < nd && i < 48; i++) {
-			snprintf(desired_direct[i], 64, "%s", plan.direct[i]);
-		}
+		nt = plan->route_count;
+		desired_tunnel = plan->routes;
+		nd = plan->direct_count;
+		desired_direct = plan->direct;
 	} else {
-		nd = plan.route_count;
-
-		for (i = 0; i < nd && i < 48; i++) {
-			snprintf(desired_direct[i], 64, "%s", plan.routes[i]);
-		}
+		nd = plan->route_count;
+		desired_direct = plan->routes;
 	}
 
 	for (i = 0; i < s_session.owned_count; ) {
@@ -1380,6 +1383,8 @@ static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int 
 			remember_owned(desired_direct[i]);
 		}
 	}
+
+	free(plan);
 }
 
 /*
@@ -1490,13 +1495,14 @@ void win_tun_reconcile(void) {
 	int				have_guid;
 	int				dns;
 	int				backup_count;
-	int				via[80];
+	int				*via;
 	int				route_count;
+	int				route_cap;
 	WSADATA			wsa;
 	int				flag;
 	char			cidr[64];
 	char			backups[8][64];
-	char			routes[80][64];
+	char			(*routes)[64];
 	int				i;
 	HANDLE			proc;
 	char			image[MAX_PATH];
@@ -1507,17 +1513,30 @@ void win_tun_reconcile(void) {
 	dns = 0;
 	backup_count = 0;
 	route_count = 0;
+	route_cap = BYPASS_MAX + 16;
+	via = (int *)calloc((size_t)route_cap, sizeof(int));
+	routes = (char (*)[64])calloc((size_t)route_cap, 64);
+
+	if (!via || !routes) {
+		free(via);
+		free(routes);
+		return;
+	}
 
 	iface[0] = '\0';
 	memset(&guid, 0, sizeof(guid));
 
 	if (!data_path(path, MAX_PATH, "session.txt")) {
+		free(via);
+		free(routes);
 		return;
 	}
 
 	f = fopen(path, "rb");
 
 	if (!f) {
+		free(via);
+		free(routes);
 		return;
 	}
 
@@ -1537,7 +1556,7 @@ void win_tun_reconcile(void) {
 		} else if (strncmp(line, "backup ", 7) == 0 && backup_count < 8) {
 			snprintf(backups[backup_count], 64, "%s", line + 7);
 			backup_count++;
-		} else if (route_count < 80 && strncmp(line, "route ", 6) == 0) {
+		} else if (route_count < route_cap && strncmp(line, "route ", 6) == 0) {
 			flag = 0;
 
 			if (sscanf(line + 6, "%d %63s", &flag, cidr) == 2) {
@@ -1623,6 +1642,8 @@ void win_tun_reconcile(void) {
 	}
 
 	clear_session_file();
+	free(via);
+	free(routes);
 }
 
 /*

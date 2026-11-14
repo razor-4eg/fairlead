@@ -102,7 +102,7 @@ int main(void) {
 	const char			*learned[] = {"203.0.113.10", "192.0.2.5"};
 	const char			*lan[] = {"192.168.31.0/24"};
 	const char			*eps[] = {"203.0.113.10"};
-	bypass_t			plan;
+	bypass_t			*plan;
 	char				host[128];
 	int					nnets;
 	device_status_t	devices[2];
@@ -268,25 +268,29 @@ int main(void) {
 	expect_str(value, "::1/128", "v6");
 	expect(!cidr_parse("nope", &cidr), "bad cidr");
 
-	bypass_plan(0, rules, 3, learned, 2, lan, 1, 1, eps, 1, &plan);
-	expect(!contains_list(&plan, "0.0.0.0/0"), "no default");
-	expect(list_has(plan.routes, plan.route_count, "192.0.2.5/32"), "learned");
-	expect(list_has(plan.routes, plan.route_count, "198.51.100.0/24"), "rule");
-	expect(list_has(plan.routes, plan.route_count, "192.168.31.0/24"), "lan");
-	expect(!list_has(plan.routes, plan.route_count, "203.0.113.10/32"), "skip endpoint");
-	expect(plan.direct_count == 0, "exceptions have no separate direct list");
-	expect(plan.warning_count > 0, "warnings");
+	plan = (bypass_t *)calloc(1, sizeof(*plan));
+	expect(plan != NULL, "plan alloc");
+	bypass_plan(0, rules, 3, learned, 2, lan, 1, 1, eps, 1, plan);
+	expect(!contains_list(plan, "0.0.0.0/0"), "no default");
+	expect(list_has(plan->routes, plan->route_count, "192.0.2.5/32"), "learned");
+	expect(list_has(plan->routes, plan->route_count, "198.51.100.0/24"), "rule");
+	expect(list_has(plan->routes, plan->route_count, "192.168.31.0/24"), "lan");
+	expect(!list_has(plan->routes, plan->route_count, "203.0.113.10/32"), "skip endpoint");
+	expect(plan->direct_count == 0, "exceptions have no separate direct list");
+	expect(plan->warning_count > 0, "warnings");
 
 	{
-		bypass_plan(1, srules, 4, slearned, 1, lan, 1, 1, eps, 1, &plan);
-		expect(list_has(plan.routes, plan.route_count, "198.51.100.0/24"), "selected rule");
-		expect(list_has(plan.routes, plan.route_count, "192.0.2.5/32"), "selected learned");
-		expect(!list_has(plan.routes, plan.route_count, "203.0.113.10/32"), "selected skips endpoint");
-		expect(!list_has(plan.routes, plan.route_count, "0.0.0.0/0"), "selected no default");
-		expect(!list_has(plan.routes, plan.route_count, "192.168.31.0/24"), "selected lan stays off the tunnel");
-		expect(list_has(plan.direct, plan.direct_count, "192.168.31.0/24"), "selected lan direct");
-		expect(plan.warning_count > 0, "selected warnings");
+		bypass_plan(1, srules, 4, slearned, 1, lan, 1, 1, eps, 1, plan);
+		expect(list_has(plan->routes, plan->route_count, "198.51.100.0/24"), "selected rule");
+		expect(list_has(plan->routes, plan->route_count, "192.0.2.5/32"), "selected learned");
+		expect(!list_has(plan->routes, plan->route_count, "203.0.113.10/32"), "selected skips endpoint");
+		expect(!list_has(plan->routes, plan->route_count, "0.0.0.0/0"), "selected no default");
+		expect(!list_has(plan->routes, plan->route_count, "192.168.31.0/24"), "selected lan stays off the tunnel");
+		expect(list_has(plan->direct, plan->direct_count, "192.168.31.0/24"), "selected lan direct");
+		expect(plan->warning_count > 0, "selected warnings");
 	}
+
+	free(plan);
 
 	expect(endpoint_host("vpn.example.com:51820", host, (int)sizeof(host)), "host ok");
 	expect_str(host, "vpn.example.com", "host");
