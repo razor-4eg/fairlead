@@ -79,6 +79,9 @@ private:
 	bool direct_drawn = true;
 	int sheet_epoch = 0;
 	int app_epoch = 0;
+	int app_icon_epoch = 0;
+	bool apps_ready = false;
+	bool apps_warming = false;
 	std::string header_key;
 	std::string route_auto_name;
 	std::string list_sig;
@@ -89,6 +92,7 @@ private:
 	std::shared_ptr<std::atomic<bool>> list_cancel;
 	std::vector<SecretField> secrets;
 	std::vector<InstalledApp> installed;
+	std::vector<std::pair<winrt::Microsoft::UI::Xaml::Controls::Image, std::wstring>> app_icon_jobs;
 	std::vector<std::pair<std::wstring, Microsoft::UI::Xaml::Media::ImageSource>> icons;
 	std::vector<Microsoft::UI::Xaml::Media::Animation::Storyboard> boards;
 	Microsoft::UI::Xaml::Media::Animation::Storyboard sheet_board{ nullptr };
@@ -120,7 +124,9 @@ private:
 	winrt::fire_and_forget ExportAsync(Tunnel* tunnel);
 	winrt::fire_and_forget DropAsync(Microsoft::UI::Xaml::DragEventArgs args);
 	winrt::fire_and_forget BrowseAsync();
+	winrt::fire_and_forget WarmAppsAsync();
 	winrt::fire_and_forget LoadAppsAsync(int epoch);
+	winrt::fire_and_forget PaintAppIconsAsync(int epoch);
 	winrt::fire_and_forget HelperAsync(bool interactive);
 	winrt::fire_and_forget QuitAsync();
 	winrt::fire_and_forget ConfirmDeleteAsync();

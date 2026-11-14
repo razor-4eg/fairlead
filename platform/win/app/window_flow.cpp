@@ -669,6 +669,7 @@ winrt::fire_and_forget MainWindow::BrowseAsync() {
 winrt::fire_and_forget MainWindow::LoadAppsAsync(int epoch) {
 	auto life = get_strong();
 	auto queue = DispatcherQueue();
+	apps_warming = true;
 	co_await winrt::resume_background();
 	std::vector<InstalledApp> found;
 	try {
@@ -679,10 +680,13 @@ winrt::fire_and_forget MainWindow::LoadAppsAsync(int epoch) {
 
 	co_await resume_ui{ queue };
 	if (epoch != app_epoch) {
+		apps_warming = false;
 		co_return;
 	}
 
 	installed = std::move(found);
+	apps_ready = true;
+	apps_warming = false;
 	FillAppList();
 }
 

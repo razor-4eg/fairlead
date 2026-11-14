@@ -105,6 +105,16 @@ anim::Storyboard pop_in(mux::UIElement const& el) {
 	return board;
 }
 
+anim::Storyboard slide_in_x(mux::UIElement const& el, double from_x, int ms) {
+	auto shift = translate_of(el);
+	shift.X(from_x);
+	el.Opacity(0);
+	auto board = board_of(ms);
+	board.Children().Append(scalar(el, L"Opacity", 0, 1, ms));
+	board.Children().Append(scalar(shift, L"X", from_x, 0, ms));
+	return board;
+}
+
 void press(mux::UIElement const& el, bool down) {
 	if (el.ActualSize().x <= 0 || el.ActualSize().y <= 0) {
 		return;

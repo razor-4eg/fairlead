@@ -28,6 +28,147 @@ namespace {
 
 constexpr UINT tray_message = WM_APP + 7;
 
+std::wstring module_dir_w() {
+	wchar_t self[MAX_PATH];
+	if (!GetModuleFileNameW(nullptr, self, MAX_PATH)) {
+		return L".";
+	}
+
+	std::wstring path = self;
+	auto slash = path.find_last_of(L"\\/");
+	if (slash == std::wstring::npos) {
+		return L".";
+	}
+
+	path.resize(slash);
+	return path;
+}
+
+std::wstring icon_file_path(Session const& session) {
+	std::wstring local = module_dir_w() + L"\\Assets\\Fairlead.ico";
+	if (std::filesystem::exists(std::filesystem::path(local))) {
+		return local;
+	}
+
+	std::wstring tools = widen(session.exe_dir) + L"\\Assets\\Fairlead.ico";
+	if (std::filesystem::exists(std::filesystem::path(tools))) {
+		return tools;
+	}
+
+	tools = widen(session.exe_dir) + L"\\bin\\Assets\\Fairlead.ico";
+	if (std::filesystem::exists(std::filesystem::path(tools))) {
+		return tools;
+	}
+
+	return {};
+}
+
+HICON load_app_icon() {
+	int cx = GetSystemMetrics(SM_CXSMICON);
+	int cy = GetSystemMetrics(SM_CYSMICON);
+	if (HICON icon = reinterpret_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR))) {
+		return icon;
+	}
+
+	if (HICON icon = reinterpret_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_DEFAULTCOLOR))) {
+		return icon;
+	}
+
+	return LoadIconW(nullptr, IDI_APPLICATION);
+}
+
+winrt::Windows::Graphics::Imaging::SoftwareBitmap icon_bitmap(std::wstring const& path) {
+	if (path.empty() || !std::filesystem::exists(std::filesystem::path(path))) {
+		return nullptr;
+	}
+
+	SHFILEINFOW info{};
+	if (!SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info), SHGFI_ICON | SHGFI_LARGEICON) || !info.hIcon) {
+		return nullptr;
+	}
+
+	HICON icon = info.hIcon;
+	ICONINFO drawn{};
+	BITMAP bits{};
+	winrt::Windows::Graphics::Imaging::SoftwareBitmap bitmap{ nullptr };
+	HBITMAP dib = nullptr;
+	HDC screen = nullptr;
+	HDC mem = nullptr;
+	HGDIOBJ old = nullptr;
+	if (GetIconInfo(icon, &drawn)) {
+		GetObject(drawn.hbmColor ? drawn.hbmColor : drawn.hbmMask, sizeof(bits), &bits);
+		int w = bits.bmWidth > 0 ? bits.bmWidth : 32;
+		int h = drawn.hbmColor && bits.bmHeight > 0 ? bits.bmHeight : 32;
+		BITMAPINFO header{};
+		header.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		header.bmiHeader.biWidth = w;
+		header.bmiHeader.biHeight = -h;
+		header.bmiHeader.biPlanes = 1;
+		header.bmiHeader.biBitCount = 32;
+		header.bmiHeader.biCompression = BI_RGB;
+		void* pixels = nullptr;
+		screen = GetDC(nullptr);
+		dib = CreateDIBSection(screen, &header, DIB_RGB_COLORS, &pixels, nullptr, 0);
+		mem = CreateCompatibleDC(screen);
+		if (dib && mem && pixels) {
+			old = SelectObject(mem, dib);
+			DrawIconEx(mem, 0, 0, icon, w, h, 0, nullptr, DI_NORMAL);
+			auto* bgra = static_cast<uint8_t*>(pixels);
+			for (int i = 0; i < w * h; i++) {
+				uint8_t a = bgra[i * 4 + 3];
+				bgra[i * 4] = static_cast<uint8_t>(bgra[i * 4] * a / 255);
+				bgra[i * 4 + 1] = static_cast<uint8_t>(bgra[i * 4 + 1] * a / 255);
+				bgra[i * 4 + 2] = static_cast<uint8_t>(bgra[i * 4 + 2] * a / 255);
+			}
+
+			try {
+				winrt::Windows::Storage::Streams::Buffer buffer(w * h * 4);
+				buffer.Length(w * h * 4);
+				winrt::com_ptr<::IBufferByteAccess> access;
+				winrt::check_hresult(winrt::get_unknown(buffer)->QueryInterface(access.put()));
+				uint8_t* dest = nullptr;
+				winrt::check_hresult(access->Buffer(&dest));
+				memcpy(dest, pixels, w * h * 4);
+				bitmap = winrt::Windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(
+					buffer,
+					winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
+					w,
+					h,
+					winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied);
+			} catch (...) {
+				bitmap = nullptr;
+			}
+		}
+
+		if (drawn.hbmColor) {
+			DeleteObject(drawn.hbmColor);
+		}
+
+		if (drawn.hbmMask) {
+			DeleteObject(drawn.hbmMask);
+		}
+	}
+
+	if (old && mem) {
+		SelectObject(mem, old);
+	}
+
+	if (mem) {
+		DeleteDC(mem);
+	}
+
+	if (dib) {
+		DeleteObject(dib);
+	}
+
+	if (screen) {
+		ReleaseDC(nullptr, screen);
+	}
+
+	DestroyIcon(icon);
+	return bitmap;
+}
+
 winrt::Windows::UI::Color rgba(uint8_t a, uint8_t r, uint8_t g, uint8_t b) {
 	return { a, r, g, b };
 }
@@ -133,8 +274,7 @@ MainWindow::MainWindow() {
 	title.ButtonInactiveBackgroundColor(clear);
 	title.ButtonForegroundColor(rgba(255, 147, 160, 150));
 	title.ButtonHoverBackgroundColor(rgba(24, 255, 255, 255));
-	std::wstring icon = widen(session.exe_dir) + L"\\Assets\\Fairlead.ico";
-	if (std::filesystem::exists(std::filesystem::path(icon))) {
+	if (std::wstring icon = icon_file_path(session); !icon.empty()) {
 		AppWindow().SetIcon(icon);
 	}
 
@@ -210,11 +350,16 @@ void MainWindow::ShowMain() {
 }
 
 void MainWindow::ApplyStartHidden() {
+	if (!session.start_hidden) {
+		return;
+	}
+
 	DispatcherQueue().TryEnqueue([this] { AppWindow().Hide(); });
 }
 
 void MainWindow::Start() {
 	BootAsync();
+	WarmAppsAsync();
 }
 
 void MainWindow::HookHwnd() {
@@ -412,30 +557,43 @@ void MainWindow::NoteSelection() {
 	}
 
 	motion::snap(HeaderMeta());
-	motion::snap(PowerRow());
-	motion::snap(StatsRow());
-	motion::snap(PolicyCard());
 	Hold(motion::swap_in(HeaderMeta()));
-	Hold(motion::soft_in(PowerRow()));
-	Hold(motion::soft_in(StatsRow()));
-	Hold(motion::soft_in(PolicyCard()));
 	PaintAwg(true);
 	PaintTitlebar();
 	PaintRules();
 }
 
 void MainWindow::RebuildList() {
-	std::string sig;
+	std::string content;
 	for (auto* tunnel : session.Filtered()) {
-		sig += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\t" + (tunnel->connected ? "1" : "0") + "\n";
+		content += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\t" + (tunnel->connected ? "1" : "0") + "\n";
 	}
 
-	sig += session.selected ? session.selected->id : "";
-	if (sig == list_sig) {
+	std::string select = session.selected ? session.selected->id : "";
+	if (content == list_sig) {
+		bool was = quiet;
+		quiet = true;
+		controls::ListViewItem chosen{ nullptr };
+		for (auto const& item : TunnelList().Items()) {
+			auto row = item.try_as<controls::ListViewItem>();
+			if (!row) {
+				continue;
+			}
+
+			auto tag = row.Tag();
+			std::string id = tag ? narrow(winrt::unbox_value_or<hstring>(tag, L"")) : "";
+			if (id == select) {
+				chosen = row;
+				break;
+			}
+		}
+
+		TunnelList().SelectedItem(chosen);
+		quiet = was;
 		return;
 	}
 
-	list_sig = sig;
+	list_sig = content;
 	bool was = quiet;
 	quiet = true;
 	TunnelList().Items().Clear();
@@ -580,7 +738,7 @@ void MainWindow::PaintAwg(bool animate) {
 
 	AwgBadge().Visibility(mux::Visibility::Visible);
 	if (animate) {
-		Hold(motion::pop_in(AwgBadge()));
+		Hold(motion::slide_in_x(AwgBadge(), 18, 260));
 	} else {
 		motion::snap(AwgBadge());
 	}
@@ -780,91 +938,13 @@ mux::Media::ImageSource MainWindow::IconFor(std::wstring const& path) {
 	}
 
 	imaging::SoftwareBitmapSource source{ nullptr };
-	HICON icon = nullptr;
-	HBITMAP dib = nullptr;
-	HDC screen = nullptr;
-	HDC mem = nullptr;
-	HGDIOBJ old = nullptr;
-	if (std::filesystem::exists(std::filesystem::path(path))) {
-		SHFILEINFOW info{};
-		if (SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info), SHGFI_ICON | SHGFI_LARGEICON)) {
-			icon = info.hIcon;
+	try {
+		if (auto bitmap = icon_bitmap(path)) {
+			source = imaging::SoftwareBitmapSource();
+			source.SetBitmapAsync(bitmap);
 		}
-	}
-
-	if (icon) {
-		ICONINFO drawn{};
-		BITMAP bits{};
-		if (GetIconInfo(icon, &drawn)) {
-			GetObject(drawn.hbmColor ? drawn.hbmColor : drawn.hbmMask, sizeof(bits), &bits);
-			int w = bits.bmWidth > 0 ? bits.bmWidth : 32;
-			int h = drawn.hbmColor && bits.bmHeight > 0 ? bits.bmHeight : 32;
-			BITMAPINFO header{};
-			header.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-			header.bmiHeader.biWidth = w;
-			header.bmiHeader.biHeight = -h;
-			header.bmiHeader.biPlanes = 1;
-			header.bmiHeader.biBitCount = 32;
-			header.bmiHeader.biCompression = BI_RGB;
-			void* pixels = nullptr;
-			screen = GetDC(nullptr);
-			dib = CreateDIBSection(screen, &header, DIB_RGB_COLORS, &pixels, nullptr, 0);
-			mem = CreateCompatibleDC(screen);
-			if (dib && mem && pixels) {
-				old = SelectObject(mem, dib);
-				DrawIconEx(mem, 0, 0, icon, w, h, 0, nullptr, DI_NORMAL);
-				auto* bgra = static_cast<uint8_t*>(pixels);
-				for (int i = 0; i < w * h; i++) {
-					uint8_t a = bgra[i * 4 + 3];
-					bgra[i * 4] = static_cast<uint8_t>(bgra[i * 4] * a / 255);
-					bgra[i * 4 + 1] = static_cast<uint8_t>(bgra[i * 4 + 1] * a / 255);
-					bgra[i * 4 + 2] = static_cast<uint8_t>(bgra[i * 4 + 2] * a / 255);
-				}
-
-				try {
-					winrt::Windows::Storage::Streams::Buffer buffer(w * h * 4);
-					buffer.Length(w * h * 4);
-					winrt::com_ptr<::IBufferByteAccess> access;
-					winrt::check_hresult(winrt::get_unknown(buffer)->QueryInterface(access.put()));
-					uint8_t* dest = nullptr;
-					winrt::check_hresult(access->Buffer(&dest));
-					memcpy(dest, pixels, w * h * 4);
-					auto bitmap = winrt::Windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(buffer, winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8, w, h, winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied);
-					source = imaging::SoftwareBitmapSource();
-					source.SetBitmapAsync(bitmap);
-				} catch (...) {
-					source = nullptr;
-				}
-			}
-
-			if (drawn.hbmColor) {
-				DeleteObject(drawn.hbmColor);
-			}
-
-			if (drawn.hbmMask) {
-				DeleteObject(drawn.hbmMask);
-			}
-		}
-	}
-
-	if (old && mem) {
-		SelectObject(mem, old);
-	}
-
-	if (mem) {
-		DeleteDC(mem);
-	}
-
-	if (dib) {
-		DeleteObject(dib);
-	}
-
-	if (screen) {
-		ReleaseDC(nullptr, screen);
-	}
-
-	if (icon) {
-		DestroyIcon(icon);
+	} catch (...) {
+		source = nullptr;
 	}
 
 	icons.push_back({ path, source });
@@ -1604,10 +1684,20 @@ void MainWindow::ConfirmDelete(IInspectable const&, mux::RoutedEventArgs const&)
 void MainWindow::AddApp(IInspectable const&, mux::RoutedEventArgs const&) {
 	AppSearch().Text(L"");
 	AppList().Items().Clear();
+	ShowSheet(AppPane());
+	if (apps_ready) {
+		AppStatus().Visibility(mux::Visibility::Collapsed);
+		FillAppList();
+		return;
+	}
+
 	AppList().Visibility(mux::Visibility::Collapsed);
 	AppStatus().Text(L"Looking for apps…");
 	AppStatus().Visibility(mux::Visibility::Visible);
-	ShowSheet(AppPane());
+	if (apps_warming) {
+		return;
+	}
+
 	LoadAppsAsync(++app_epoch);
 }
 
@@ -1629,6 +1719,7 @@ void MainWindow::FillAppList() {
 
 	std::wstring query = trim_w(AppSearch().Text().c_str());
 	AppList().Items().Clear();
+	app_icon_jobs.clear();
 	int shown_rows = 0;
 	for (auto const& app : installed) {
 		std::wstring path = widen(app.path);
@@ -1665,8 +1756,17 @@ void MainWindow::FillAppList() {
 		icon.Width(28);
 		icon.Height(28);
 		icon.Stretch(media::Stretch::UniformToFill);
-		if (auto source = IconFor(path)) {
-			icon.Source(source);
+		bool cached = false;
+		for (auto const& one : icons) {
+			if (iequals(one.first, path)) {
+				icon.Source(one.second);
+				cached = true;
+				break;
+			}
+		}
+
+		if (!cached) {
+			app_icon_jobs.push_back({ icon, path });
 		}
 
 		plate.Child(icon);
@@ -1716,6 +1816,88 @@ void MainWindow::FillAppList() {
 		AppStatus().Visibility(mux::Visibility::Collapsed);
 		AppList().Visibility(mux::Visibility::Visible);
 	}
+
+	if (!app_icon_jobs.empty()) {
+		PaintAppIconsAsync(++app_icon_epoch);
+	}
+}
+
+winrt::fire_and_forget MainWindow::WarmAppsAsync() {
+	if (apps_ready || apps_warming) {
+		co_return;
+	}
+
+	auto life = get_strong();
+	auto queue = DispatcherQueue();
+	apps_warming = true;
+	co_await winrt::resume_background();
+	std::vector<InstalledApp> found;
+	try {
+		found = scan_installed();
+	} catch (...) {
+		found.clear();
+	}
+
+	co_await resume_ui{ queue };
+	installed = std::move(found);
+	apps_ready = true;
+	apps_warming = false;
+	if (AppPane().Visibility() == mux::Visibility::Visible) {
+		FillAppList();
+	}
+}
+
+winrt::fire_and_forget MainWindow::PaintAppIconsAsync(int epoch) {
+	auto life = get_strong();
+	auto queue = DispatcherQueue();
+	auto jobs = app_icon_jobs;
+	for (size_t i = 0; i < jobs.size(); i++) {
+		if (epoch != app_icon_epoch) {
+			co_return;
+		}
+
+		std::wstring path = jobs[i].second;
+		mux::Media::ImageSource cached{ nullptr };
+		for (auto const& one : icons) {
+			if (iequals(one.first, path)) {
+				cached = one.second;
+				break;
+			}
+		}
+
+		if (cached) {
+			jobs[i].first.Source(cached);
+			continue;
+		}
+
+		co_await winrt::resume_background();
+		winrt::Windows::Graphics::Imaging::SoftwareBitmap bitmap{ nullptr };
+		try {
+			bitmap = icon_bitmap(path);
+		} catch (...) {
+			bitmap = nullptr;
+		}
+
+		co_await resume_ui{ queue };
+		if (epoch != app_icon_epoch) {
+			co_return;
+		}
+
+		imaging::SoftwareBitmapSource source{ nullptr };
+		if (bitmap) {
+			try {
+				source = imaging::SoftwareBitmapSource();
+				co_await source.SetBitmapAsync(bitmap);
+			} catch (...) {
+				source = nullptr;
+			}
+		}
+
+		icons.push_back({ path, source });
+		if (source) {
+			jobs[i].first.Source(source);
+		}
+	}
 }
 
 void MainWindow::BrowseApp(IInspectable const&, mux::RoutedEventArgs const&) {
@@ -1746,8 +1928,13 @@ void MainWindow::AddTray() {
 	tray.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 	tray.uCallbackMessage = tray_message;
 	wcscpy_s(tray.szTip, L"Fairlead");
-	std::wstring icon = widen(session.exe_dir) + L"\\Assets\\Fairlead.ico";
-	tray.hIcon = reinterpret_cast<HICON>(LoadImageW(nullptr, icon.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
+	tray.hIcon = load_app_icon();
+	if (!tray.hIcon) {
+		if (std::wstring path = icon_file_path(session); !path.empty()) {
+			tray.hIcon = reinterpret_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+		}
+	}
+
 	if (!tray.hIcon) {
 		tray.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
 	}

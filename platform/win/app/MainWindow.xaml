@@ -153,9 +153,9 @@
                             <TextBlock x:Name="AddressText" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <Border x:Name="AwgBadge" Padding="10,4" VerticalAlignment="Center" Visibility="Collapsed" Background="#1F7CDBB6" CornerRadius="12" BorderBrush="#477CDBB6" BorderThickness="1" RenderTransformOrigin="0.5,0.5">
+                            <Border x:Name="AwgBadge" Padding="10,4" VerticalAlignment="Center" Visibility="Collapsed" Background="#1F7CDBB6" CornerRadius="12" BorderBrush="#477CDBB6" BorderThickness="1">
                                 <Border.RenderTransform>
-                                    <ScaleTransform x:Name="AwgBadgeScale" ScaleX="1" ScaleY="1"/>
+                                    <TranslateTransform x:Name="AwgBadgeX"/>
                                 </Border.RenderTransform>
                                 <TextBlock Text="AmneziaWG" FontSize="12" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" TextLineBounds="Tight"/>
                             </Border>
@@ -381,10 +381,12 @@
                                 </Grid>
                             </Grid>
                         </Grid>
-                        <ScrollViewer x:Name="EditorScroll" Grid.Row="1" Margin="0,0,-16,16" Padding="0,0,16,0" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="EditorFields" Spacing="18"/>
-                        </ScrollViewer>
-                        <TextBox x:Name="RawConfig" Grid.Row="1" Margin="0,0,0,16" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Style="{StaticResource QuietBox}" Visibility="Collapsed" MinHeight="420"/>
+                        <Grid Grid.Row="1" MinHeight="420" Margin="0,0,0,16">
+                            <ScrollViewer x:Name="EditorScroll" Margin="0,0,-16,0" Padding="0,0,16,0" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="EditorFields" Spacing="18"/>
+                            </ScrollViewer>
+                            <TextBox x:Name="RawConfig" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Style="{StaticResource QuietBox}" Visibility="Collapsed" VerticalAlignment="Stretch" MinHeight="420"/>
+                        </Grid>
                         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
                             <Button Content="Cancel" Style="{StaticResource PillButton}" HorizontalAlignment="Right" Click="CloseSheet"/>
                             <Button Content="Save" Style="{StaticResource ProminentButton}" HorizontalAlignment="Right" Click="SaveEditor"/>
