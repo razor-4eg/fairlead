@@ -34,7 +34,7 @@ if errorlevel 1 goto done
 MSBuild.exe platform\win\app\Fairlead.vcxproj /restore /p:Configuration=Release /p:Platform=x64 /p:RestoreProjectStyle=PackageReference /p:RestorePackagesPath=%USERPROFILE%\.nuget\packages /m /v:minimal >> "%STAGE%\build.log" 2>&1
 if errorlevel 1 goto done
 if not exist "%OUT%\bin" mkdir "%OUT%\bin"
-powershell -NoProfile -Command "Get-ChildItem -LiteralPath 'dist\win\bin' -File | Where-Object { $_.Name -match '^(Microsoft\.Web\.WebView2\.Core\.Projection\.dll$|onnxruntime|DirectML|Microsoft\.Windows\.AI\.|Microsoft\.Windows\.Widgets|Microsoft\.Graphics\.Imaging|workloads)' -or $_.Extension -match '^\.(pdb|ilk|winmd|iobj|ipdb)$' } | Remove-Item -Force" >> "%STAGE%\build.log" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0clean-win-bin.ps1" >> "%STAGE%\build.log" 2>&1
 call :ship "%STAGE%\fairlead-core.dll" "%OUT%\bin\fairlead-core.dll"
 call :ship "%STAGE%\fairlead-helper.exe" "%OUT%\fairlead-helper.exe"
 if exist "%STAGE%\amneziawg-go.exe" call :ship "%STAGE%\amneziawg-go.exe" "%OUT%\amneziawg-go.exe"
