@@ -598,17 +598,6 @@ void Session::ApplyStatus(std::string const& reply) {
 			uint64_t rx = json_u64(peer, "rx");
 			uint64_t tx = json_u64(peer, "tx");
 			int64_t now = (int64_t)GetTickCount64();
-			if (live->sample_tick != 0 && now > live->sample_tick) {
-				double dt = (now - live->sample_tick) / 1000.0;
-				live->down = rate_of((double)(rx - live->sample_rx) / dt);
-				live->up = rate_of((double)(tx - live->sample_tx) / dt);
-			}
-
-			live->sample_rx = rx;
-			live->sample_tx = tx;
-			live->sample_tick = now;
-			live->rx = bytes_of((double)rx);
-			live->tx = bytes_of((double)tx);
 			live->handshake = json_int(peer, "handshake");
 			std::string endpoint = json_str(peer, "endpoint");
 			if (!endpoint.empty()) {
@@ -616,6 +605,17 @@ void Session::ApplyStatus(std::string const& reply) {
 			}
 
 			if (live->handshake > 0) {
+				if (live->sample_tick != 0 && now > live->sample_tick) {
+					double dt = (now - live->sample_tick) / 1000.0;
+					live->down = rate_of((double)(rx - live->sample_rx) / dt);
+					live->up = rate_of((double)(tx - live->sample_tx) / dt);
+				}
+
+				live->sample_rx = rx;
+				live->sample_tx = tx;
+				live->sample_tick = now;
+				live->rx = bytes_of((double)rx);
+				live->tx = bytes_of((double)tx);
 				live->connected = true;
 				live->phase = "Connected";
 				live->detail = "Handshake " + ago_of(live->handshake);
@@ -623,6 +623,13 @@ void Session::ApplyStatus(std::string const& reply) {
 				live->connected = false;
 				live->phase = "Connecting";
 				live->detail = "Waiting for the handshake";
+				live->down = "0 B/s";
+				live->up = "0 B/s";
+				live->rx = "0 B";
+				live->tx = "0 B";
+				live->sample_rx = 0;
+				live->sample_tx = 0;
+				live->sample_tick = 0;
 			}
 		}
 	}
@@ -657,6 +664,15 @@ void Session::BeginConnect(Tunnel* tunnel) {
 	banner.clear();
 	tunnel->phase = "Connecting";
 	tunnel->detail = "Bringing up the interface and routes";
+	tunnel->connected = false;
+	tunnel->handshake = 0;
+	tunnel->down = "0 B/s";
+	tunnel->up = "0 B/s";
+	tunnel->rx = "0 B";
+	tunnel->tx = "0 B";
+	tunnel->sample_rx = 0;
+	tunnel->sample_tx = 0;
+	tunnel->sample_tick = 0;
 }
 
 bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
@@ -690,8 +706,14 @@ void Session::FinishDisconnect(Tunnel* tunnel) {
 	tunnel->phase = "Off";
 	tunnel->detail = "Traffic is bypassing WireGuard";
 	tunnel->iface.clear();
+	tunnel->handshake = 0;
 	tunnel->down = "0 B/s";
 	tunnel->up = "0 B/s";
+	tunnel->rx = "0 B";
+	tunnel->tx = "0 B";
+	tunnel->sample_rx = 0;
+	tunnel->sample_tx = 0;
+	tunnel->sample_tick = 0;
 }
 
 std::unique_ptr<Tunnel> Session::MakeDraft() {

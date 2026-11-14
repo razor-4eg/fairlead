@@ -13,9 +13,18 @@
     <SolidColorBrush x:Key="AccentBrush" Color="#7CDBB6"/>
     <SolidColorBrush x:Key="InkBrush" Color="#10211A"/>
     <SolidColorBrush x:Key="DangerBrush" Color="#E15A45"/>
-    <SolidColorBrush x:Key="LineBrush" Color="#14FFFFFF"/>
+    <!-- ~10% white: slightly stronger than Mac's 8% so 1px hairlines still read on Win DPI. -->
+    <SolidColorBrush x:Key="LineBrush" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="FieldBrush" Color="#0AFFFFFF"/>
     <SolidColorBrush x:Key="CardBrush" Color="#121816"/>
+    <!-- Soft accent for the system TextBox underline only — not a full-box outline. -->
+    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#667CDBB6"/>
+    <SolidColorBrush x:Key="TextControlElevationBorderFocusedBrush" Color="#667CDBB6"/>
+    <Color x:Key="SystemAccentColorDark1">#6BC9A6</Color>
+    <Color x:Key="SystemAccentColorDark2">#5AB894</Color>
+    <Color x:Key="SystemAccentColorLight1">#8FE3C2</Color>
+    <Color x:Key="SystemAccentColorLight2">#A8ECD2</Color>
+    <Color x:Key="SystemAccentColorLight3">#C5F4E3</Color>
 
     <Style x:Key="IconButton" TargetType="Button">
         <Setter Property="Width" Value="34"/>

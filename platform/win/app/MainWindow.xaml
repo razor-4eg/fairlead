@@ -13,14 +13,36 @@
             <ColumnDefinition Width="280"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
-        <Grid Grid.Column="0" Background="{StaticResource SideBrush}" Padding="14,48,14,14">
+        <Grid Grid.Column="0" Background="{StaticResource SideBrush}" Padding="18,18,18,14">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0">
+            <Grid Grid.Row="0" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="11" VerticalAlignment="Center">
+                    <!-- App mark: ring + offset dot (same geometry as macOS Mark). -->
+                    <Grid Width="18" Height="18" VerticalAlignment="Center">
+                        <Ellipse Stroke="{StaticResource AccentBrush}" StrokeThickness="1.4"/>
+                        <Ellipse Width="4" Height="4" Fill="{StaticResource AccentBrush}" Margin="4,0,0,1" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock Text="FAIRLEAD" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" CharacterSpacing="90" Foreground="{StaticResource TextBrush}" Margin="0,-1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Ellipse x:Name="HelperDot" Width="7" Height="7" Fill="{StaticResource FaintBrush}" VerticalAlignment="Center"
+                             ToolTipService.ToolTip="Helper is not running"/>
+                    <Button Width="28" Height="28" MinWidth="0" MinHeight="0" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="8" Click="OpenSettings" ToolTipService.ToolTip="Settings" VerticalAlignment="Center">
+                        <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,-1,0,0"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+            <Grid Grid.Row="1">
             <TextBox x:Name="Search" PlaceholderText="Search" Style="{StaticResource QuietBox}" Padding="32,8,10,8" TextChanged="SearchChanged">
                 <TextBox.Resources>
                     <SolidColorBrush x:Key="TextControlBackground" Color="#0AFFFFFF"/>
@@ -30,8 +52,8 @@
             </TextBox>
             <FontIcon Glyph="&#xE721;" FontSize="12" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" IsHitTestVisible="False"/>
             </Grid>
-            <TextBlock Grid.Row="1" Text="TUNNELS" Margin="4,18,0,8" FontSize="10" FontWeight="SemiBold" CharacterSpacing="80" Foreground="{StaticResource FaintBrush}"/>
-            <ListView x:Name="TunnelList" Grid.Row="2" SelectionChanged="TunnelChosen" Background="Transparent" BorderThickness="0" Padding="0">
+            <TextBlock Grid.Row="2" Text="TUNNELS" Margin="4,18,0,8" FontSize="10" FontWeight="SemiBold" CharacterSpacing="80" Foreground="{StaticResource FaintBrush}"/>
+            <ListView x:Name="TunnelList" Grid.Row="3" SelectionChanged="TunnelChosen" Background="Transparent" BorderThickness="0" Padding="0" ItemContainerTransitions="{x:Null}">
                     <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="Margin" Value="0,2"/>
@@ -102,7 +124,7 @@
                     </Style>
                 </ListView.ItemContainerStyle>
             </ListView>
-            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+            <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="8">
                 <Button Style="{StaticResource PillButton}" Click="NewTunnel">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE710;" FontSize="12" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
@@ -117,6 +139,7 @@
                 </Button>
             </StackPanel>
         </Grid>
+        <Border Grid.Column="0" Width="1" HorizontalAlignment="Right" Background="{StaticResource LineBrush}" IsHitTestVisible="False"/>
 
         <Grid Grid.Column="1">
             <StackPanel x:Name="Empty" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16" MaxWidth="460">
@@ -126,17 +149,17 @@
                 <Button Content="Create" Style="{StaticResource ProminentButton}" HorizontalAlignment="Center" Click="NewTunnel" Margin="0,6,0,0"/>
             </StackPanel>
             <!-- Header / power / stats stay fixed; only policy+routes scroll. Border padding — Grid.Padding + composition Offset fought each other. -->
-            <Border x:Name="Detail" Padding="34,48,34,20">
+            <Border x:Name="Detail" Padding="34,36,34,20">
                 <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <StackPanel x:Name="DetailHead" Spacing="22" Margin="0,0,0,22">
-                    <Border x:Name="NoticeCard" Visibility="Collapsed" Background="#1A7CDBB6" CornerRadius="10" Padding="13">
+                    <Border x:Name="NoticeCard" Visibility="Collapsed" Background="#1A7CDBB6" BorderBrush="#337CDBB6" BorderThickness="1" CornerRadius="10" Padding="13">
                         <TextBlock x:Name="NoticeText" FontSize="14" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
                     </Border>
-                    <Border x:Name="Banner" Visibility="Collapsed" Background="#1AE15A45" CornerRadius="10" Padding="13">
+                    <Border x:Name="Banner" Visibility="Collapsed" Background="#1AE15A45" BorderBrush="#33E15A45" BorderThickness="1" CornerRadius="10" Padding="13">
                         <TextBlock x:Name="BannerText" FontSize="14" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
                     </Border>
                     <Grid x:Name="HeaderBlock" ColumnSpacing="12">
@@ -153,11 +176,11 @@
                             <TextBlock x:Name="AddressText" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <Border x:Name="AwgBadge" Padding="10,4" VerticalAlignment="Center" Visibility="Collapsed" Background="#1F7CDBB6" CornerRadius="12" BorderBrush="#477CDBB6" BorderThickness="1">
+                            <Border x:Name="AwgBadge" Height="22" Padding="10,0" VerticalAlignment="Center" Visibility="Collapsed" Background="#1F7CDBB6" CornerRadius="11" BorderBrush="#477CDBB6" BorderThickness="1">
                                 <Border.RenderTransform>
                                     <TranslateTransform x:Name="AwgBadgeX"/>
                                 </Border.RenderTransform>
-                                <TextBlock Text="AmneziaWG" FontSize="12" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" TextLineBounds="Tight"/>
+                                <TextBlock Text="AmneziaWG" FontSize="11" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" TextLineBounds="Tight" Margin="0,-1,0,0"/>
                             </Border>
                             <Button Content="Edit" Style="{StaticResource PillButton}" Click="OpenEditor" VerticalAlignment="Center"/>
                             <Button Style="{StaticResource IconButton}" Background="#0DFFFFFF" VerticalAlignment="Center">
@@ -249,7 +272,7 @@
                                     </Grid>
                                 </Grid>
                             </Grid>
-                            <Border Background="#08FFFFFF" CornerRadius="10" Padding="13">
+                            <Border Background="#08FFFFFF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="13">
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -462,29 +485,14 @@
                 </Grid>
             </Border>
         </Grid>
-        <!-- Rune-style custom titlebar: brand + live phase + settings; caption buttons drawn by the system over the trailing edge. -->
-        <Grid x:Name="DragRegion" Grid.ColumnSpan="2" Height="40" VerticalAlignment="Top" Background="{StaticResource BgBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="14,0,0,0">
-                <Grid Width="14" Height="14" VerticalAlignment="Center">
-                    <Ellipse Stroke="{StaticResource AccentBrush}" StrokeThickness="1.3"/>
-                    <Ellipse x:Name="TitlePhaseDot" Width="3.5" Height="3.5" Fill="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Grid>
-                <TextBlock Text="FAIRLEAD" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" CharacterSpacing="80" Foreground="{StaticResource TextBrush}"/>
-                <Border x:Name="TitlePhase" Visibility="Collapsed" Padding="8,3" CornerRadius="10" Background="#1A7CDBB6" VerticalAlignment="Center">
-                    <TextBlock x:Name="TitlePhaseText" FontSize="11" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
-                </Border>
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,140,0">
-                <Ellipse x:Name="HelperDot" Width="7" Height="7" Fill="{StaticResource FaintBrush}" VerticalAlignment="Center"
-                         ToolTipService.ToolTip="Helper is not running"/>
-                <Button Width="34" Height="28" MinWidth="0" MinHeight="0" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="8" Click="OpenSettings" ToolTipService.ToolTip="Settings" VerticalAlignment="Center">
-                    <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                </Button>
-            </StackPanel>
+        <!-- Drag only over the detail column so the sidebar brand/settings stay clickable. -->
+        <Grid x:Name="DragRegion" Grid.Column="1" Height="32" VerticalAlignment="Top" Background="Transparent">
+            <Border x:Name="TitlePhase" Visibility="Collapsed" Height="20" Padding="8,0" CornerRadius="10" Background="#1A7CDBB6" BorderBrush="#337CDBB6" BorderThickness="1" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="18,0,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Ellipse x:Name="TitlePhaseDot" Width="3.5" Height="3.5" Fill="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TitlePhaseText" FontSize="11" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" TextLineBounds="Tight" Margin="0,-1,0,0"/>
+                </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Window>

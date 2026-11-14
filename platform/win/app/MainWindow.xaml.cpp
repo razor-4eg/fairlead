@@ -566,10 +566,22 @@ void MainWindow::NoteSelection() {
 void MainWindow::RebuildList() {
 	std::string content;
 	for (auto* tunnel : session.Filtered()) {
-		content += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\t" + (tunnel->connected ? "1" : "0") + "\n";
+		content += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\n";
 	}
 
 	std::string select = session.selected ? session.selected->id : "";
+	auto paint_dot = [](shapes::Ellipse const& mark, bool on) {
+		mark.Fill(media::SolidColorBrush(on ? rgba(255, 124, 219, 182) : rgba(255, 94, 107, 98)));
+	};
+	auto find_dot = [](controls::ListViewItem const& row) -> shapes::Ellipse {
+		auto grid = row.Content().try_as<controls::Grid>();
+		if (!grid || grid.Children().Size() == 0) {
+			return nullptr;
+		}
+
+		return grid.Children().GetAt(0).try_as<shapes::Ellipse>();
+	};
+
 	if (content == list_sig) {
 		bool was = quiet;
 		quiet = true;
@@ -582,9 +594,20 @@ void MainWindow::RebuildList() {
 
 			auto tag = row.Tag();
 			std::string id = tag ? narrow(winrt::unbox_value_or<hstring>(tag, L"")) : "";
+			Tunnel* match = nullptr;
+			for (auto* tunnel : session.Filtered()) {
+				if (tunnel->id == id) {
+					match = tunnel;
+					break;
+				}
+			}
+
+			if (auto mark = find_dot(row); mark && match) {
+				paint_dot(mark, match->connected);
+			}
+
 			if (id == select) {
 				chosen = row;
-				break;
 			}
 		}
 
@@ -613,7 +636,7 @@ void MainWindow::RebuildList() {
 		mark.Height(7);
 		mark.HorizontalAlignment(mux::HorizontalAlignment::Left);
 		mark.VerticalAlignment(mux::VerticalAlignment::Center);
-		mark.Fill(media::SolidColorBrush(tunnel->connected ? rgba(255, 124, 219, 182) : rgba(255, 94, 107, 98)));
+		paint_dot(mark, tunnel->connected);
 		controls::StackPanel lines;
 		lines.Spacing(2);
 		controls::TextBlock name;
@@ -785,6 +808,8 @@ void MainWindow::PaintRules() {
 		grid.ColumnSpacing(8);
 		grid.CornerRadius({ 10, 10, 10, 10 });
 		grid.Background(media::SolidColorBrush(rgba(8, 255, 255, 255)));
+		grid.BorderBrush(brush(L"LineBrush"));
+		grid.BorderThickness({ 1, 1, 1, 1 });
 		controls::ColumnDefinition c0;
 		c0.Width({ 0, mux::GridUnitType::Auto });
 		controls::ColumnDefinition c1;
