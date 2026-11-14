@@ -39,13 +39,13 @@ public enum QCompress {
 /// The key lists, checks, and UAPI encoding all come from the shared C kernel.
 public enum Amnezia {
     public static func isAmnezia(_ document: WGDocument) -> Bool {
-        document.withC { fl_amnezia_is($0) != 0 }
+        document.withC { amnezia_is($0) != 0 }
     }
 
     public static func presentKeys(in document: WGDocument) -> [String] {
         document.withC { doc in
             var keys = [UnsafePointer<CChar>?](repeating: nil, count: 64)
-            let count = Int(fl_amnezia_present(doc, &keys, Int32(keys.count)))
+            let count = Int(amnezia_present(doc, &keys, Int32(keys.count)))
             return keys.prefix(max(0, min(count, keys.count))).compactMap { $0.map { String(cString: $0) } }
         }
     }
@@ -54,7 +54,7 @@ public enum Amnezia {
     public static func uapiLines(for document: WGDocument) -> [String]? {
         let text: String? = document.withC { doc in
             CBridge.optionalString(capacity: 16384) { buffer, cap in
-                fl_amnezia_uapi(doc, buffer, cap)
+                amnezia_uapi(doc, buffer, cap)
             }
         }
         guard let text else { return nil }
@@ -63,13 +63,13 @@ public enum Amnezia {
 
     /// True for a number, or a range such as `20-30`, no larger than `max`.
     public static func isUintRange(_ text: String, max: UInt64 = UInt64(UInt32.max)) -> Bool {
-        fl_amnezia_uint_range(text.trimmingCharacters(in: .whitespacesAndNewlines), max) != 0
+        amnezia_uint_range(text.trimmingCharacters(in: .whitespacesAndNewlines), max) != 0
     }
 
     public static func issues(in document: WGDocument) -> [ConfigIssue] {
         document.withC { doc in
             let (count, rows) = CBridge.rows(count: 16, width: 192) { raw in
-                CBridge.rebind(raw) { fl_amnezia_issues(doc, $0, 16) }
+                CBridge.rebind(raw) { amnezia_issues(doc, $0, 16) }
             }
             return rows.prefix(Int(count)).map { ConfigIssue(FairleadL10n.text($0)) }
         }
@@ -89,13 +89,13 @@ public enum ConfigImport {
         return CBridge.onLargeStack {
             var config = [CChar](repeating: 0, count: configCap)
             var name = [CChar](repeating: 0, count: nameCap)
-            let code = fl_import_normalize(text, &config, Int32(configCap), &name, Int32(nameCap))
+            let code = import_normalize(text, &config, Int32(configCap), &name, Int32(nameCap))
             switch Int(code) {
-            case Int(FL_IMPORT_WG):
+            case Int(IMPORT_WG):
                 let body = config.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
                 let title = name.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
                 return .wireGuard(body, name: title.isEmpty ? nil : title)
-            case Int(FL_IMPORT_UNSUPPORTED):
+            case Int(IMPORT_UNSUPPORTED):
                 return .unsupported
             default:
                 return .unreadable

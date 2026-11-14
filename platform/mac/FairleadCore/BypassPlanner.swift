@@ -45,14 +45,14 @@ public enum BypassPlanner {
 
     /// `routes` follow the policy. `direct` is the local network kept off the tunnel when only the list uses it.
     public static func routes(_ input: BypassInput) -> (routes: [String], direct: [String], warnings: [String]) {
-        var plan = fl_bypass_t()
+        var plan = bypass_t()
         let selected: Int32 = input.policy == .selected ? 1 : 0
         let excludeLAN: Int32 = input.excludeLAN ? 1 : 0
         CBridge.withCStrings(input.rules) { rules, ruleCount in
             CBridge.withCStrings(input.learned) { learned, learnedCount in
                 CBridge.withCStrings(input.lan) { lan, lanCount in
                     CBridge.withCStrings(input.endpoints) { endpoints, endpointCount in
-                        fl_bypass_plan(
+                        bypass_plan(
                             selected,
                             rules, ruleCount,
                             learned, learnedCount,

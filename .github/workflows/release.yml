@@ -93,10 +93,6 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.ref }}
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64

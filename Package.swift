@@ -17,7 +17,7 @@ let package = Package(
         .target(
             name: "FairleadC",
             path: "core",
-            exclude: ["fl_abi.c"],
+            exclude: ["abi.c"],
             publicHeadersPath: "include",
             cSettings: [.headerSearchPath(".")],
             linkerSettings: [.linkedLibrary("z")]

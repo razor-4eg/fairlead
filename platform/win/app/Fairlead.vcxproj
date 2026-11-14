@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <ProjectGuid>{A7C3E1B2-4D58-4A91-9C0E-6F2B8D1E4A70}</ProjectGuid>
+    <ProjectName>Fairlead</ProjectName>
+    <RootNamespace>Fairlead</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <TargetName>Fairlead</TargetName>
+    <TargetFramework>native</TargetFramework>
+    <TargetFrameworkIdentifier>native</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v0.0</TargetFrameworkVersion>
+    <TargetFrameworkMoniker>native,Version=v0.0</TargetFrameworkMoniker>
+    <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <AppContainerApplication>false</AppContainerApplication>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <AppxPackage>false</AppxPackage>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKBootstrapAutoInitializer>true</WindowsAppSDKBootstrapAutoInitializer>
+    <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)obj\</MSBuildProjectExtensionsPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\</BaseIntermediateOutputPath>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\..\..\dist\win\bin\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <GenerateManifest>true</GenerateManifest>
+    <XamlLanguage>CppWinRT</XamlLanguage>
+    <ManagedAssembly>false</ManagedAssembly>
+    <IsNativeLanguage>true</IsNativeLanguage>
+    <DefaultLanguageSourceExtension>.cpp</DefaultLanguageSourceExtension>
+    <CppWinRTAddXamlMetaDataProviderIdl>true</CppWinRTAddXamlMetaDataProviderIdl>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(IntDir);$(ProjectDir)..\..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>iphlpapi.lib;ws2_32.lib;bcrypt.lib;shell32.lib;ole32.lib;uuid.lib;comctl32.lib;gdi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="text.cpp" />
+    <ClCompile Include="coreabi.cpp" />
+    <ClCompile Include="session.cpp" />
+    <ClCompile Include="apps.cpp" />
+    <ClCompile Include="motion.cpp" />
+    <ClCompile Include="App.xaml.cpp" />
+    <ClCompile Include="MainWindow.xaml.cpp" />
+    <ClCompile Include="window_flow.cpp" />
+    <ClCompile Include="$(IntDir)XamlTypeInfo.g.cpp" />
+    <ClCompile Include="$(IntDir)XamlTypeInfo.Impl.g.cpp" />
+    <ClCompile Include="..\..\..\core\base.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+    <Page Include="MainWindow.xaml" />
+    <Page Include="Theme.xaml" />
+    <Midl Include="App.idl" />
+    <Midl Include="MainWindow.idl" />
+    <Manifest Include="app.manifest" />
+    <ResourceCompile Include="Fairlead.rc" />
+    <Content Include="Assets\Fairlead.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Explicit WASDK pieces only — full Microsoft.WindowsAppSDK also pulls AI/ML/Widgets (~40MB onnx/DirectML). -->
+    <PackageReference Include="Microsoft.Windows.CppWinRT">
+      <Version>[3.0.260818.1]</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI">
+      <Version>1.8.251105000</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation">
+      <Version>1.8.251104000</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences">
+      <Version>1.8.251104001</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime">
+      <Version>1.8.251106002</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Base">
+      <Version>1.8.250831001</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools">
+      <Version>10.0.26100.4654</Version>
+    </PackageReference>
+  </ItemGroup>
+  <!-- WebView2 winmd is required by Microsoft.UI.Xaml; feed it only to cppwinrt platform refs. -->
+  <Target Name="AddWebView2Winmd">
+    <ItemGroup>
+      <ReferencePath Include="$(PkgMicrosoft_Web_WebView2)\lib\Microsoft.Web.WebView2.Core.winmd" Condition="Exists('$(PkgMicrosoft_Web_WebView2)\lib\Microsoft.Web.WebView2.Core.winmd')">
+        <IsSystemReference>true</IsSystemReference>
+        <WinMDFile>true</WinMDFile>
+        <ReferenceSourceTarget>ResolveAssemblyReference</ReferenceSourceTarget>
+      </ReferencePath>
+    </ItemGroup>
+  </Target>
+  <!-- Native XAML Pass1 takes @(ReferencePath) raw; managed Projection.dll there breaks WinRT type universe (WMC1006/WMC1007).
+       Pass2 uses @(WinMDReferenceToCompile), which CppBuild only fills later during ClCompile — seed it here. -->
+  <Target Name="PrepareXamlWinMDReferences" DependsOnTargets="ResolveAssemblyReferences">
+    <PropertyGroup>
+      <_FoundationContractWinmd>$(WindowsSDK_MetadataFoundationPath)\Windows.Foundation.FoundationContract.winmd</_FoundationContractWinmd>
+      <_UniversalApiContractDir>$(WindowsSdkDir)References\$(WindowsTargetPlatformVersion)\Windows.Foundation.UniversalApiContract</_UniversalApiContractDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_XamlManagedReferencePath Include="@(ReferencePath)" Condition="'%(Extension)' != '.winmd'" />
+      <ReferencePath Remove="@(_XamlManagedReferencePath)" />
+      <ReferencePath Include="$(_FoundationContractWinmd)" Condition="Exists('$(_FoundationContractWinmd)')">
+        <WinMDFile>true</WinMDFile>
+        <ReferenceSourceTarget>ResolveAssemblyReference</ReferenceSourceTarget>
+      </ReferencePath>
+      <_UniversalApiContractWinmd Include="$(_UniversalApiContractDir)\**\Windows.Foundation.UniversalApiContract.winmd" />
+      <ReferencePath Include="@(_UniversalApiContractWinmd)" Condition="'@(_UniversalApiContractWinmd)' != ''">
+        <WinMDFile>true</WinMDFile>
+        <ReferenceSourceTarget>ResolveAssemblyReference</ReferenceSourceTarget>
+      </ReferencePath>
+      <WinMDReferenceToCompile Remove="@(WinMDReferenceToCompile)" />
+      <WinMDReferenceToCompile Include="@(ReferencePath)" Condition="'%(Extension)' == '.winmd'" />
+    </ItemGroup>
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <PropertyGroup>
+    <GetCppWinRTPlatformWinMDReferencesDependsOn>$(GetCppWinRTPlatformWinMDReferencesDependsOn);AddWebView2Winmd</GetCppWinRTPlatformWinMDReferencesDependsOn>
+    <MarkupCompilePass1DependsOn>$(MarkupCompilePass1DependsOn);PrepareXamlWinMDReferences</MarkupCompilePass1DependsOn>
+    <MarkupCompilePass2DependsOn>$(MarkupCompilePass2DependsOn);PrepareXamlWinMDReferences</MarkupCompilePass2DependsOn>
+    <ComputeMidlInputsTargets>MarkupCompilePass1;$(ComputeMidlInputsTargets)</ComputeMidlInputsTargets>
+    <BeforeClCompileTargets>$(BeforeClCompileTargets);MarkupCompilePass2</BeforeClCompileTargets>
+  </PropertyGroup>
+</Project>

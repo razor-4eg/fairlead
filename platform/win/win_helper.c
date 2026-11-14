@@ -14,8 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../core/fl.h"
-#include "../../core/fl_json.h"
+#include "../../core/base.h"
 #include "win_tun.h"
 
 static char s_token[80];
@@ -142,15 +141,15 @@ One pipe message in, one JSON reply out. The caller frees it.
 ===============
 */
 static char *handle_request(const char *body) {
-	fl_arena_t			arena;
-	fl_json_t			*root;
+	arena_t			arena;
+	json_t			*root;
 	const char			*op;
 	const char			*token;
 	const char			*id;
 	const char			*name;
 	const char			*config;
 	const char			*policy;
-	const fl_json_t		*cidrs;
+	const json_t		*cidrs;
 	const char			*cidr_list[64];
 	int					cidr_count;
 	int					exclude;
@@ -162,7 +161,7 @@ static char *handle_request(const char *body) {
 	int					i;
 	int					ok;
 	const char			*error;
-	const fl_json_t		*c;
+	const json_t		*c;
 	const char			*s;
 	char				num[64];
 
@@ -175,37 +174,37 @@ static char *handle_request(const char *body) {
 	ok = 0;
 	error = NULL;
 
-	fl_arena_init(&arena, 1 << 20);
-	root = fl_json_parse(&arena, body);
+	arena_init(&arena, 1 << 20);
+	root = json_parse(&arena, body);
 
 	if (!root) {
-		fl_arena_free(&arena);
+		arena_free(&arena);
 		return _strdup("{\"id\":\"\",\"ok\":false,\"error\":\"The config is damaged.\"}");
 	}
 
-	token = fl_json_string(fl_json_get(root, "token"));
+	token = json_string(json_get(root, "token"));
 
 	if (!token || strcmp(token, s_token) != 0) {
-		fl_arena_free(&arena);
+		arena_free(&arena);
 		return _strdup("{\"id\":\"\",\"ok\":false,\"error\":\"The helper is not running.\"}");
 	}
 
-	id = fl_json_string(fl_json_get(root, "id"));
-	op = fl_json_string(fl_json_get(root, "op"));
-	name = fl_json_string(fl_json_get(root, "name"));
-	config = fl_json_string(fl_json_get(root, "config"));
-	policy = fl_json_string(fl_json_get(root, "policy"));
+	id = json_string(json_get(root, "id"));
+	op = json_string(json_get(root, "op"));
+	name = json_string(json_get(root, "name"));
+	config = json_string(json_get(root, "config"));
+	policy = json_string(json_get(root, "policy"));
 
-	if (fl_json_get(root, "excludeLAN") && fl_json_get(root, "excludeLAN")->type == FL_JSON_BOOL) {
-		exclude = fl_json_get(root, "excludeLAN")->boolean;
+	if (json_get(root, "excludeLAN") && json_get(root, "excludeLAN")->type == JSON_BOOL) {
+		exclude = json_get(root, "excludeLAN")->boolean;
 	}
 
 	selected = policy && strcmp(policy, "selected") == 0;
-	cidrs = fl_json_get(root, "cidrs");
+	cidrs = json_get(root, "cidrs");
 
-	if (cidrs && cidrs->type == FL_JSON_ARR) {
+	if (cidrs && cidrs->type == JSON_ARR) {
 		for (c = cidrs->child; c && cidr_count < 64; c = c->next) {
-			s = fl_json_string(c);
+			s = json_string(c);
 
 			if (s) {
 				cidr_list[cidr_count++] = s;
@@ -334,7 +333,7 @@ static char *handle_request(const char *body) {
 	}
 
 	append(&buf, &len, &cap, "]}");
-	fl_arena_free(&arena);
+	arena_free(&arena);
 	return buf;
 }
 

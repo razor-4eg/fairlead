@@ -1,0 +1,11 @@
+namespace Fairlead
+{
+    [default_interface]
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    {
+        MainWindow();
+        void ShowMain();
+        void ApplyStartHidden();
+        void Start();
+    }
+}

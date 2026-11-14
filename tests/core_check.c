@@ -6,14 +6,9 @@
 //
 //===============================================================
 
-#include "fl.h"
-#include "fl_ip.h"
-#include "fl_doc.h"
-#include "fl_keys.h"
-#include "fl_dns.h"
-#include "fl_bypass.h"
-#include "fl_uapi.h"
-#include "fl_amnezia.h"
+#include "base.h"
+#include "net.h"
+#include "tunnel.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +21,7 @@
 static int s_failures = 0;
 
 static int list_has(char list[][64], int n, const char *item);
-static int contains_list(const fl_bypass_t *plan, const char *item);
+static int contains_list(const bypass_t *plan, const char *item);
 static void put16p(unsigned char *p, int *n, unsigned int v);
 static void put32p(unsigned char *p, int *n, unsigned int v);
 size_t fairlead_qcompress(const unsigned char *src, size_t src_len, unsigned char *dst, size_t dst_cap);
@@ -96,34 +91,34 @@ Run the kernel checks.
 ===============
 */
 int main(void) {
-	fl_doc_t			doc;
+	doc_t			doc;
 	char				*rendered;
 	char				value[256];
 	char				priv[128];
 	char				pub[128];
-	fl_cidr_t			cidr;
-	fl_ip_t				ip;
+	cidr_t			cidr;
+	ip_t				ip;
 	const char			*rules[] = {"0.0.0.0/0", "203.0.113.10", "198.51.100.0/24"};
 	const char			*learned[] = {"203.0.113.10", "192.0.2.5"};
 	const char			*lan[] = {"192.168.31.0/24"};
 	const char			*eps[] = {"203.0.113.10"};
-	fl_bypass_t			plan;
+	bypass_t			plan;
 	char				host[128];
 	int					nnets;
-	fl_device_status_t	devices[2];
+	device_status_t	devices[2];
 	char				message[4096];
 	const char			*endpoints[8];
 	int					peers[4];
-	fl_device_status_t	got;
+	device_status_t	got;
 	char				zeros[65];
 	unsigned char		packet[128];
 	int					plen;
-	fl_dns_reply_t		reply;
+	dns_reply_t		reply;
 	unsigned char		query[128];
 	int					qlen;
 	char				domain[256];
 	int					ni;
-	fl_route_snap_t		snap;
+	route_snap_t		snap;
 	char				share_json[4096];
 	unsigned char		packed[8192];
 	size_t				packed_n;
@@ -221,59 +216,59 @@ int main(void) {
 	WSAStartup(MAKEWORD(2, 2), &wsa);
 #endif
 
-	fl_doc_init(&doc);
-	fl_doc_parse(&doc, source);
-	fl_doc_value(&doc, fl_doc_interface(&doc), "Jc", value, (int)sizeof(value));
+	doc_init(&doc);
+	doc_parse(&doc, source);
+	doc_value(&doc, doc_interface(&doc), "Jc", value, (int)sizeof(value));
 	expect_str(value, "4", "jc");
-	rendered = fl_doc_render(&doc);
+	rendered = doc_render(&doc);
 	expect(rendered && contains(rendered, "# home"), "comment");
-	fl_doc_free(&doc);
-	fl_doc_parse(&doc, rendered);
-	fl_doc_value(&doc, fl_doc_interface(&doc), "Jc", value, (int)sizeof(value));
+	doc_free(&doc);
+	doc_parse(&doc, rendered);
+	doc_value(&doc, doc_interface(&doc), "Jc", value, (int)sizeof(value));
 	expect_str(value, "4", "jc roundtrip");
-	fl_doc_peers(&doc, peers, 4);
-	fl_doc_value(&doc, peers[0], "Endpoint", value, (int)sizeof(value));
+	doc_peers(&doc, peers, 4);
+	doc_value(&doc, peers[0], "Endpoint", value, (int)sizeof(value));
 	expect_str(value, "vpn.example.com:51820", "endpoint");
 	free(rendered);
 
-	fl_doc_free(&doc);
-	fl_doc_parse(&doc,
+	doc_free(&doc);
+	doc_parse(&doc,
 		"[Interface]\n"
 		"PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
 		"Address = 10.0.0.2/32\n"
 		"DNS = 1.1.1.1\n");
 	{
-		index = fl_doc_ensure_interface(&doc);
-		fl_doc_set(&doc, index, "Address", "10.8.0.5/32");
-		fl_doc_addresses(&doc, value, (int)sizeof(value));
+		index = doc_ensure_interface(&doc);
+		doc_set(&doc, index, "Address", "10.8.0.5/32");
+		doc_addresses(&doc, value, (int)sizeof(value));
 		expect_str(value, "10.8.0.5/32", "address");
-		fl_doc_dns(&doc, value, (int)sizeof(value));
+		doc_dns(&doc, value, (int)sizeof(value));
 		expect_str(value, "1.1.1.1", "dns");
 	}
 
-	expect(fl_key_generate(priv, (int)sizeof(priv), pub, (int)sizeof(pub)), "generate");
-	expect(fl_key_is(priv), "private key");
+	expect(key_generate(priv, (int)sizeof(priv), pub, (int)sizeof(pub)), "generate");
+	expect(key_is(priv), "private key");
 	{
-		expect(fl_key_public(priv, again, (int)sizeof(again)), "public derive");
+		expect(key_public(priv, again, (int)sizeof(again)), "public derive");
 		expect_str(again, pub, "public key");
 	}
 
-	expect(!fl_key_is("not-a-key"), "reject junk key");
+	expect(!key_is("not-a-key"), "reject junk key");
 
-	expect(fl_cidr_parse("1.2.3.4", &cidr), "host parse");
-	fl_cidr_format(&cidr, value, (int)sizeof(value));
+	expect(cidr_parse("1.2.3.4", &cidr), "host parse");
+	cidr_format(&cidr, value, (int)sizeof(value));
 	expect_str(value, "1.2.3.4/32", "host cidr");
-	expect(fl_cidr_parse("192.168.31.50/24", &cidr), "net parse");
-	fl_cidr_format(&cidr, value, (int)sizeof(value));
+	expect(cidr_parse("192.168.31.50/24", &cidr), "net parse");
+	cidr_format(&cidr, value, (int)sizeof(value));
 	expect_str(value, "192.168.31.0/24", "network cidr");
-	expect(fl_ip_parse("192.168.31.1", &ip) && fl_cidr_contains(&cidr, &ip), "contains");
-	expect(fl_ip_parse("10.0.0.1", &ip) && !fl_cidr_contains(&cidr, &ip), "excludes");
-	expect(fl_cidr_parse("::1", &cidr), "v6 parse");
-	fl_cidr_format(&cidr, value, (int)sizeof(value));
+	expect(ip_parse("192.168.31.1", &ip) && cidr_contains(&cidr, &ip), "contains");
+	expect(ip_parse("10.0.0.1", &ip) && !cidr_contains(&cidr, &ip), "excludes");
+	expect(cidr_parse("::1", &cidr), "v6 parse");
+	cidr_format(&cidr, value, (int)sizeof(value));
 	expect_str(value, "::1/128", "v6");
-	expect(!fl_cidr_parse("nope", &cidr), "bad cidr");
+	expect(!cidr_parse("nope", &cidr), "bad cidr");
 
-	fl_bypass_plan(0, rules, 3, learned, 2, lan, 1, 1, eps, 1, &plan);
+	bypass_plan(0, rules, 3, learned, 2, lan, 1, 1, eps, 1, &plan);
 	expect(!contains_list(&plan, "0.0.0.0/0"), "no default");
 	expect(list_has(plan.routes, plan.route_count, "192.0.2.5/32"), "learned");
 	expect(list_has(plan.routes, plan.route_count, "198.51.100.0/24"), "rule");
@@ -283,7 +278,7 @@ int main(void) {
 	expect(plan.warning_count > 0, "warnings");
 
 	{
-		fl_bypass_plan(1, srules, 4, slearned, 1, lan, 1, 1, eps, 1, &plan);
+		bypass_plan(1, srules, 4, slearned, 1, lan, 1, 1, eps, 1, &plan);
 		expect(list_has(plan.routes, plan.route_count, "198.51.100.0/24"), "selected rule");
 		expect(list_has(plan.routes, plan.route_count, "192.0.2.5/32"), "selected learned");
 		expect(!list_has(plan.routes, plan.route_count, "203.0.113.10/32"), "selected skips endpoint");
@@ -293,27 +288,27 @@ int main(void) {
 		expect(plan.warning_count > 0, "selected warnings");
 	}
 
-	expect(fl_endpoint_host("vpn.example.com:51820", host, (int)sizeof(host)), "host ok");
+	expect(endpoint_host("vpn.example.com:51820", host, (int)sizeof(host)), "host ok");
 	expect_str(host, "vpn.example.com", "host");
-	expect(fl_endpoint_host("[2001:db8::1]:51820", host, (int)sizeof(host)), "v6 host ok");
+	expect(endpoint_host("[2001:db8::1]:51820", host, (int)sizeof(host)), "v6 host ok");
 	expect_str(host, "2001:db8::1", "v6 host");
-	expect(!fl_endpoint_host("(none)", host, (int)sizeof(host)), "none");
-	expect(fl_endpoint_valid("vpn.example.com:51820"), "valid endpoint");
-	expect(!fl_endpoint_valid("vpn.example.com"), "invalid endpoint");
+	expect(!endpoint_host("(none)", host, (int)sizeof(host)), "none");
+	expect(endpoint_valid("vpn.example.com:51820"), "valid endpoint");
+	expect(!endpoint_valid("vpn.example.com"), "invalid endpoint");
 
-	expect(fl_cidr_parse("192.168.31.0/24", &cidr), "exact parse");
-	fl_route_snapshot(exact, &snap);
-	expect(fl_route_exact(&cidr, &snap), "exact net");
-	expect(fl_cidr_parse("1.2.3.4/32", &cidr), "broad parse");
-	fl_route_snapshot(broad, &snap);
-	expect(!fl_route_exact(&cidr, &snap), "not default");
-	expect(fl_cidr_parse("192.168.31.1", &cidr), "host route parse");
-	fl_route_snapshot(host_route, &snap);
-	expect(fl_route_exact(&cidr, &snap), "exact host");
-	fl_route_snapshot(exact, &snap);
+	expect(cidr_parse("192.168.31.0/24", &cidr), "exact parse");
+	route_snapshot(exact, &snap);
+	expect(route_exact(&cidr, &snap), "exact net");
+	expect(cidr_parse("1.2.3.4/32", &cidr), "broad parse");
+	route_snapshot(broad, &snap);
+	expect(!route_exact(&cidr, &snap), "not default");
+	expect(cidr_parse("192.168.31.1", &cidr), "host route parse");
+	route_snapshot(host_route, &snap);
+	expect(route_exact(&cidr, &snap), "exact host");
+	route_snapshot(exact, &snap);
 	expect_str(snap.interface_name, "en0", "iface");
 
-	nnets = fl_ifconfig_networks(ifconfig, nets, 8);
+	nnets = ifconfig_networks(ifconfig, nets, 8);
 	expect(nnets >= 1 && list_has(nets, nnets, "192.168.31.0/24"), "lan v4");
 	{
 		found = 0;
@@ -333,21 +328,21 @@ int main(void) {
 		expect(!link, "skip link local");
 	}
 
-	expect(fl_dump_parse(dump, devices, 2) == 1, "devices");
+	expect(dump_parse(dump, devices, 2) == 1, "devices");
 	expect_str(devices[0].public_key, "pub", "pubkey");
 	expect(devices[0].listen_port == 51820, "port");
 	expect(devices[0].peers[0].rx == 100, "rx");
 	expect(devices[0].peers[0].tx == 40, "tx");
 	expect(devices[0].peers[0].handshake == 1700000000, "handshake");
 
-	expect(fl_ip_parse("127.0.0.1", &ip) && !fl_ip_routable(&ip), "loopback");
-	expect(fl_ip_parse("169.254.1.1", &ip) && !fl_ip_routable(&ip), "link local v4");
-	expect(fl_ip_parse("224.0.0.1", &ip) && !fl_ip_routable(&ip), "multicast");
-	expect(fl_ip_parse("1.1.1.1", &ip) && fl_ip_routable(&ip), "public");
-	expect(fl_ip_parse("fe80::1", &ip) && !fl_ip_routable(&ip), "link local v6");
+	expect(ip_parse("127.0.0.1", &ip) && !ip_routable(&ip), "loopback");
+	expect(ip_parse("169.254.1.1", &ip) && !ip_routable(&ip), "link local v4");
+	expect(ip_parse("224.0.0.1", &ip) && !ip_routable(&ip), "multicast");
+	expect(ip_parse("1.1.1.1", &ip) && ip_routable(&ip), "public");
+	expect(ip_parse("fe80::1", &ip) && !ip_routable(&ip), "link local v6");
 
-	fl_doc_free(&doc);
-	fl_doc_parse(&doc,
+	doc_free(&doc);
+	doc_parse(&doc,
 		"[Interface]\n"
 		"PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
 		"Address = 10.8.0.2/32\n"
@@ -360,9 +355,9 @@ int main(void) {
 		"Endpoint = 192.0.2.1:51820\n"
 		"PersistentKeepalive = 25\n");
 	memset(endpoints, 0, sizeof(endpoints));
-	fl_doc_peers(&doc, peers, 4);
+	doc_peers(&doc, peers, 4);
 	endpoints[peers[0]] = "192.0.2.1:51820";
-	expect(fl_uapi_set(&doc, endpoints, message, (int)sizeof(message)), "uapi set");
+	expect(uapi_set(&doc, endpoints, message, (int)sizeof(message)), "uapi set");
 	memset(zeros, '0', 64);
 	zeros[64] = '\0';
 	expect(contains(message, "private_key=") && strstr(message, zeros), "uapi private");
@@ -372,7 +367,7 @@ int main(void) {
 	expect(contains(message, "allowed_ip=0.0.0.0/0"), "uapi v4");
 	expect(contains(message, "allowed_ip=::/0"), "uapi v6");
 	expect(contains(message, "replace_peers=true"), "uapi replace");
-	expect(fl_socket_endpoint("2001:db8::1", "vpn.example:51820", value, (int)sizeof(value)), "socket");
+	expect(socket_endpoint("2001:db8::1", "vpn.example:51820", value, (int)sizeof(value)), "socket");
 	expect_str(value, "[2001:db8::1]:51820", "v6 socket");
 
 	{
@@ -391,7 +386,7 @@ int main(void) {
 			"allowed_ip=0.0.0.0/0\n"
 			"allowed_ip=::/0\n"
 			"errno=0\n", z, o, z);
-		fl_uapi_parse_get(getbuf, "utun8", &got);
+		uapi_parse_get(getbuf, "utun8", &got);
 	}
 
 	expect(got.listen_port == 51820, "uapi port");
@@ -403,13 +398,13 @@ int main(void) {
 	expect(contains(got.peers[0].allowed, "0.0.0.0/0"), "uapi allowed");
 	expect(strcmp(got.public_key, got.peers[0].public_key) != 0, "device key differs");
 
-	expect(fl_domain_normalize("Example.COM.", domain, (int)sizeof(domain)), "domain ok");
+	expect(domain_normalize("Example.COM.", domain, (int)sizeof(domain)), "domain ok");
 	expect_str(domain, "example.com", "domain");
-	expect(!fl_domain_normalize("*.example.com", domain, (int)sizeof(domain)), "wildcard");
-	expect(!fl_domain_normalize("https://example.com", domain, (int)sizeof(domain)), "url");
-	expect(!fl_domain_normalize("192.0.2.1", domain, (int)sizeof(domain)), "domain rejects ip");
-	expect(!fl_domain_normalize("com", domain, (int)sizeof(domain)), "single label");
-	expect(fl_domain_normalize("пример.рф", domain, (int)sizeof(domain)), "idn ok");
+	expect(!domain_normalize("*.example.com", domain, (int)sizeof(domain)), "wildcard");
+	expect(!domain_normalize("https://example.com", domain, (int)sizeof(domain)), "url");
+	expect(!domain_normalize("192.0.2.1", domain, (int)sizeof(domain)), "domain rejects ip");
+	expect(!domain_normalize("com", domain, (int)sizeof(domain)), "single label");
+	expect(domain_normalize("пример.рф", domain, (int)sizeof(domain)), "idn ok");
 	expect_str(domain, "xn--e1afmkfd.xn--p1ai", "idn");
 
 	put16p(packet, &plen, 0x1234);
@@ -438,15 +433,15 @@ int main(void) {
 	put32p(packet, &plen, 60);
 	put16p(packet, &plen, 4);
 	packet[plen++] = 192; packet[plen++] = 0; packet[plen++] = 2; packet[plen++] = 1;
-	expect(fl_dns_parse(packet, plen, 0x1234, &reply), "dns parse");
+	expect(dns_parse(packet, plen, 0x1234, &reply), "dns parse");
 	expect(reply.rcode == 0, "dns rcode");
 	expect(reply.saw_cname, "dns cname");
 	expect(reply.answer_count >= 1, "dns answers");
 	expect_str(reply.answers[0].address, "192.0.2.1", "dns address");
 	expect(reply.answers[0].ttl == 60, "dns ttl");
-	expect(!fl_dns_parse(packet, plen, 1, &reply), "dns id");
-	expect(fl_dns_query(1, "*.example.com", FL_DNS_A, 1, query, (int)sizeof(query)) == 0, "dns query wildcard");
-	qlen = fl_dns_query(7, "Example.com", FL_DNS_A, 1, query, (int)sizeof(query));
+	expect(!dns_parse(packet, plen, 1, &reply), "dns id");
+	expect(dns_query(1, "*.example.com", DNS_A, 1, query, (int)sizeof(query)) == 0, "dns query wildcard");
+	qlen = dns_query(7, "Example.com", DNS_A, 1, query, (int)sizeof(query));
 	expect(qlen > 0, "dns query");
 	{
 		saw = 0;
@@ -460,16 +455,16 @@ int main(void) {
 		expect(saw, "dns edns");
 	}
 
-	fl_doc_free(&doc);
-	fl_doc_parse(&doc, awg_src);
-	expect(fl_amnezia_is(&doc), "detect awg");
-	ni = fl_config_issues(&doc, issues, 16);
+	doc_free(&doc);
+	doc_parse(&doc, awg_src);
+	expect(amnezia_is(&doc), "detect awg");
+	ni = config_issues(&doc, issues, 16);
 	expect(issue_has(issues, ni, "Header protection"), "header protection needs padding");
 	{
-		iface = fl_doc_ensure_interface(&doc);
-		fl_doc_set(&doc, iface, "S3", "12");
-		fl_doc_set(&doc, iface, "S4", "12");
-		ni = fl_config_issues(&doc, issues, 16);
+		iface = doc_ensure_interface(&doc);
+		doc_set(&doc, iface, "S3", "12");
+		doc_set(&doc, iface, "S4", "12");
+		ni = config_issues(&doc, issues, 16);
 		expect(ni == 0, "awg config");
 
 		if (ni) {
@@ -479,9 +474,9 @@ int main(void) {
 		}
 
 		memset(endpoints, 0, sizeof(endpoints));
-		fl_doc_peers(&doc, peers, 4);
+		doc_peers(&doc, peers, 4);
 		endpoints[peers[0]] = "203.0.113.10:39743";
-		expect(fl_uapi_set(&doc, endpoints, message, (int)sizeof(message)), "awg uapi");
+		expect(uapi_set(&doc, endpoints, message, (int)sizeof(message)), "awg uapi");
 		expect(contains(message, "jc=4"), "uapi jc");
 		expect(contains(message, "jmin=40"), "uapi jmin");
 		expect(contains(message, "h1=100-200"), "uapi h1");
@@ -490,15 +485,15 @@ int main(void) {
 		expect(contains(message, "random_trailers=true"), "uapi trailers");
 		expect(contains(message, "persistent_keepalive_interval=20-30"), "uapi keepalive range");
 		expect(strstr(message, "jc=") < strstr(message, "public_key="), "awg before peer");
-		fl_doc_set(&doc, iface, "Jmin", "80");
-		ni = fl_config_issues(&doc, issues, 16);
+		doc_set(&doc, iface, "Jmin", "80");
+		ni = config_issues(&doc, issues, 16);
 		expect(issue_has(issues, ni, "Jmin"), "jmin above jmax");
-		fl_doc_set(&doc, iface, "Jmin", "40");
-		fl_doc_set(&doc, iface, "H2", "");
-		fl_doc_set(&doc, iface, "H3", "");
-		fl_doc_set(&doc, iface, "H4", "");
-		fl_doc_set(&doc, iface, "H1", "1-4");
-		ni = fl_config_issues(&doc, issues, 16);
+		doc_set(&doc, iface, "Jmin", "40");
+		doc_set(&doc, iface, "H2", "");
+		doc_set(&doc, iface, "H3", "");
+		doc_set(&doc, iface, "H4", "");
+		doc_set(&doc, iface, "H1", "1-4");
+		ni = config_issues(&doc, issues, 16);
 		expect(issue_has(issues, ni, "must not overlap"), "header overlap");
 	}
 
@@ -555,8 +550,8 @@ int main(void) {
 		}
 
 		snprintf(wrapped, sizeof(wrapped), "vpn://\n%s", token);
-		irc = fl_import_normalize(wrapped, imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
-		expect(irc == FL_IMPORT_WG, "vpn share");
+		irc = import_normalize(wrapped, imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
+		expect(irc == IMPORT_WG, "vpn share");
 		expect_str(imported_name, "Office", "share name");
 		expect(contains(imported, "Jc = 4"), "share jc");
 		expect(contains(imported, "I1 = <b 0x0102><r 4>"), "share i1");
@@ -564,9 +559,9 @@ int main(void) {
 		expect(contains(imported, "Endpoint = 203.0.113.10:39743"), "share endpoint");
 		expect(contains(imported, "DNS = 1.1.1.1, 1.0.0.1"), "share dns");
 		expect(!contains(imported, "should-not-leak"), "share drops password");
-		fl_doc_free(&doc);
-		fl_doc_parse(&doc, imported);
-		ni = fl_config_issues(&doc, issues, 16);
+		doc_free(&doc);
+		doc_parse(&doc, imported);
+		ni = config_issues(&doc, issues, 16);
 		expect(ni == 0, "share config");
 
 		if (ni) {
@@ -578,13 +573,13 @@ int main(void) {
 		}
 	}
 
-	irc = fl_import_normalize(xray, imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
-	expect(irc == FL_IMPORT_UNSUPPORTED, "xray share");
-	irc = fl_import_normalize("not a share", imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
-	expect(irc == FL_IMPORT_WG, "plain kind");
+	irc = import_normalize(xray, imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
+	expect(irc == IMPORT_UNSUPPORTED, "xray share");
+	irc = import_normalize("not a share", imported, (int)sizeof(imported), imported_name, (int)sizeof(imported_name));
+	expect(irc == IMPORT_WG, "plain kind");
 	expect_str(imported, "not a share", "plain text stays");
 
-	fl_doc_free(&doc);
+	doc_free(&doc);
 
 	if (s_failures == 0) {
 		printf("ok\n");
@@ -619,7 +614,7 @@ contains_list
 True when every needle is in the list.
 ===============
 */
-static int contains_list(const fl_bypass_t *plan, const char *item) {
+static int contains_list(const bypass_t *plan, const char *item) {
 	return list_has((char (*)[64])plan->routes, plan->route_count, item);
 }
 

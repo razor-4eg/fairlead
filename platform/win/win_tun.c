@@ -8,13 +8,9 @@
 
 #include "win_tun.h"
 
-#include "../../core/fl.h"
-#include "../../core/fl_doc.h"
-#include "../../core/fl_ip.h"
-#include "../../core/fl_uapi.h"
-#include "../../core/fl_amnezia.h"
-#include "../../core/fl_bypass.h"
-#include "../../core/fl_keys.h"
+#include "../../core/base.h"
+#include "../../core/net.h"
+#include "../../core/tunnel.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -413,8 +409,8 @@ static int find_default(NET_LUID *luid, char *gw, int gw_cap, char *name, int na
 
 						for (u = a->FirstUnicastAddress; u && s_session.lan_count < 8; u = u->Next) {
 							sin = (struct sockaddr_in *)u->Address.lpSockaddr;
-							fl_ip_t ip;
-							fl_cidr_t cidr;
+							ip_t ip;
+							cidr_t cidr;
 							char text[64];
 							prefix = u->OnLinkPrefixLength;
 
@@ -424,7 +420,7 @@ static int find_default(NET_LUID *luid, char *gw, int gw_cap, char *name, int na
 
 							inet_ntop(AF_INET, &sin->sin_addr, text, sizeof(text));
 
-							if (!fl_ip_parse(text, &ip)) {
+							if (!ip_parse(text, &ip)) {
 								continue;
 							}
 
@@ -432,10 +428,10 @@ static int find_default(NET_LUID *luid, char *gw, int gw_cap, char *name, int na
 								continue;
 							}
 
-							fl_ip_mask(&ip, (int)prefix);
+							ip_mask(&ip, (int)prefix);
 							cidr.ip = ip;
 							cidr.prefix = (int)prefix;
-							fl_cidr_format(&cidr, text, (int)sizeof(text));
+							cidr_format(&cidr, text, (int)sizeof(text));
 							snprintf(s_session.lan[s_session.lan_count], 64, "%s", text);
 							s_session.lan_count++;
 						}
@@ -463,14 +459,14 @@ static int resolve_host(const char *host, char *out, int cap) {
 	struct addrinfo			*it;
 	char					v4[64];
 	char					v6[64];
-	fl_ip_t					ip;
+	ip_t					ip;
 	struct sockaddr_in		*sin4;
 	struct sockaddr_in6		*sin6;
 
 	info = NULL;
 
-	if (fl_ip_parse(host, &ip)) {
-		fl_ip_format(&ip, out, cap);
+	if (ip_parse(host, &ip)) {
+		ip_format(&ip, out, cap);
 		return 1;
 	}
 
@@ -735,7 +731,7 @@ Assign a CIDR on the adapter. The host bits are kept. The LUID is read again eac
 ===============
 */
 static int add_address(const char *iface, const char *cidr_text) {
-	fl_cidr_t					cidr;
+	cidr_t					cidr;
 	MIB_UNICASTIPADDRESS_ROW	row;
 	char						ip[64];
 	char						raw[128];
@@ -744,14 +740,14 @@ static int add_address(const char *iface, const char *cidr_text) {
 	DWORD						err;
 	char						msg[192];
 
-	if (!fl_cidr_parse(cidr_text, &cidr)) {
+	if (!cidr_parse(cidr_text, &cidr)) {
 		return 0;
 	}
 
 	/* The adapter address is the host, not the masked network. */
 	{
 		snprintf(raw, sizeof(raw), "%s", cidr_text);
-		fl_trim(raw);
+		str_trim(raw);
 		slash = strchr(raw, '/');
 
 		if (slash) {
@@ -871,14 +867,14 @@ Fill a route row for cidr via gateway, or on-link.
 ===============
 */
 static int route_row(NET_LUID luid, const char *cidr_text, const char *gateway, MIB_IPFORWARD_ROW2 *row) {
-	fl_cidr_t	cidr;
+	cidr_t	cidr;
 	char		dest[64];
 
-	if (!fl_cidr_parse(cidr_text, &cidr) || cidr.ip.v6) {
+	if (!cidr_parse(cidr_text, &cidr) || cidr.ip.v6) {
 		return 0;
 	}
 
-	fl_ip_format(&cidr.ip, dest, (int)sizeof(dest));
+	ip_format(&cidr.ip, dest, (int)sizeof(dest));
 	InitializeIpForwardEntry(row);
 	row->InterfaceLuid = luid;
 	row->DestinationPrefix.Prefix.si_family = AF_INET;
@@ -1015,13 +1011,13 @@ sync_capture
 Capture-all installs the /1 halves. The other mode routes only the tunnel DNS.
 ===============
 */
-static void sync_capture(const fl_doc_t *doc, int capture) {
+static void sync_capture(const doc_t *doc, int capture) {
 	int		n;
 	int		i;
 
 	char families[16][8];
 	char dests[16][64];
-	n = fl_tunnel_destinations(doc, families, dests, 16);
+	n = tunnel_destinations(doc, families, dests, 16);
 	s_session.capture = capture;
 
 	if (capture) {
@@ -1206,19 +1202,19 @@ mtu_of
 MTU from the config, or 1420.
 ===============
 */
-static int mtu_of(const fl_doc_t *doc) {
+static int mtu_of(const doc_t *doc) {
 	int		iface;
 	char	value[32];
 	int		mtu;
 
-	iface = fl_doc_interface(doc);
+	iface = doc_interface(doc);
 	mtu = 0;
 
 	if (iface < 0) {
 		return 1420;
 	}
 
-	fl_doc_value(doc, iface, "MTU", value, (int)sizeof(value));
+	doc_value(doc, iface, "MTU", value, (int)sizeof(value));
 
 	if (value[0]) {
 		mtu = atoi(value);
@@ -1237,24 +1233,24 @@ fill_dns
 DNS servers from the Interface section.
 ===============
 */
-static void fill_dns(const fl_doc_t *doc) {
+static void fill_dns(const doc_t *doc) {
 	char	dns[512];
 	int		n;
 	int		i;
 
 	char items[8][256];
 	s_session.dns_server_count = 0;
-	fl_doc_dns(doc, dns, (int)sizeof(dns));
-	n = fl_split_commas(dns, items, 8);
+	doc_dns(doc, dns, (int)sizeof(dns));
+	n = split_commas(dns, items, 8);
 
 	for (i = 0; i < n && s_session.dns_server_count < 4; i++) {
-		fl_ip_t ip;
+		ip_t ip;
 
-		if (!fl_ip_parse(items[i], &ip)) {
+		if (!ip_parse(items[i], &ip)) {
 			continue;
 		}
 
-		fl_ip_format(&ip, s_session.dns_servers[s_session.dns_server_count], 64);
+		ip_format(&ip, s_session.dns_servers[s_session.dns_server_count], 64);
 		s_session.dns_server_count++;
 	}
 }
@@ -1287,7 +1283,7 @@ Install the bypass plan on top of the current routes.
 ===============
 */
 static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int selected) {
-	fl_bypass_t	plan;
+	bypass_t	plan;
 	const char	*eps[4];
 	const char	*lan[8];
 	int			i;
@@ -1317,7 +1313,7 @@ static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int 
 		lan[i] = s_session.lan[i];
 	}
 
-	fl_bypass_plan(selected, cidrs, cidr_count, NULL, 0, lan, lan_count, exclude_lan, eps, s_session.endpoint_count, &plan);
+	bypass_plan(selected, cidrs, cidr_count, NULL, 0, lan, lan_count, exclude_lan, eps, s_session.endpoint_count, &plan);
 	s_session.warning_count = plan.warning_count;
 
 	if (s_session.warning_count > 12) {
@@ -1394,7 +1390,7 @@ Handshake and byte counters from the userspace daemon.
 */
 static void read_stats(win_tun_result_t *out) {
 	char				reply[4096];
-	fl_device_status_t	dev;
+	device_status_t	dev;
 	char				msg[] = "get=1\n\n";
 
 	if (!s_session.active) {
@@ -1405,7 +1401,7 @@ static void read_stats(win_tun_result_t *out) {
 		return;
 	}
 
-	fl_uapi_parse_get(reply, s_session.iface, &dev);
+	uapi_parse_get(reply, s_session.iface, &dev);
 
 	if (dev.peer_count > 0) {
 		out->rx = dev.peers[0].rx;
@@ -1526,7 +1522,7 @@ void win_tun_reconcile(void) {
 	}
 
 	while (fgets(line, (int)sizeof(line), f)) {
-		fl_trim(line);
+		str_trim(line);
 
 		if (sscanf(line, "pid %lu", &pid) == 1) {
 			continue;
@@ -1636,7 +1632,7 @@ Replace the route plan on the running tunnel.
 ===============
 */
 int win_tun_bypass(const char **cidrs, int cidr_count, int exclude_lan, int selected, win_tun_result_t *out) {
-	fl_doc_t	doc;
+	doc_t	doc;
 	char		*text;
 	FILE		*f;
 	long		n;
@@ -1675,15 +1671,15 @@ int win_tun_bypass(const char **cidrs, int cidr_count, int exclude_lan, int sele
 		fclose(f);
 	}
 
-	fl_doc_init(&doc);
+	doc_init(&doc);
 
 	if (text) {
-		fl_doc_parse(&doc, text);
+		doc_parse(&doc, text);
 	}
 
 	sync_capture(&doc, !selected);
 	apply_plan(cidrs, cidr_count, exclude_lan, selected);
-	fl_doc_free(&doc);
+	doc_free(&doc);
 	free(text);
 
 	if (out) {
@@ -1704,7 +1700,7 @@ Bring a tunnel up from a config and a CIDR list.
 ===============
 */
 int win_tun_up(const char *slug, const char *config, const char **cidrs, int cidr_count, int exclude_lan, int selected, const char *exe_dir, win_tun_result_t *out) {
-	fl_doc_t	doc;
+	doc_t	doc;
 	int			ni;
 	char		path[MAX_PATH];
 	FILE		*f;
@@ -1735,13 +1731,13 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	}
 
 	memset(&s_session, 0, sizeof(s_session));
-	fl_doc_init(&doc);
-	fl_doc_parse(&doc, config);
-	ni = fl_config_issues(&doc, issues, 8);
+	doc_init(&doc);
+	doc_parse(&doc, config);
+	ni = config_issues(&doc, issues, 8);
 
 	if (ni > 0) {
 		snprintf(out->error, sizeof(out->error), "%s", issues[0]);
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1753,7 +1749,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 
 		if (!file_exists(full)) {
 			snprintf(out->error, sizeof(out->error), "%s is not included in this copy of Fairlead.", binary);
-			fl_doc_free(&doc);
+			doc_free(&doc);
 			unlock();
 			return 0;
 		}
@@ -1761,7 +1757,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 
 	if (!find_default(&s_session.phys_luid, s_session.gateway_v4, (int)sizeof(s_session.gateway_v4), s_session.gateway_iface, (int)sizeof(s_session.gateway_iface), s_session.phys_ip, (int)sizeof(s_session.phys_ip), &s_session.phys_guid)) {
 		snprintf(out->error, sizeof(out->error), "No gateway for the endpoint.");
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1773,7 +1769,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	strncat(path, "\\Fairlead", sizeof(path) - strlen(path) - 1);
 	CreateDirectoryA(path, NULL);
 	snprintf(s_session.config_path, sizeof(s_session.config_path), "%s\\%s.conf", path, slug);
-	rendered = fl_doc_render(&doc);
+	rendered = doc_render(&doc);
 	f = fopen(s_session.config_path, "wb");
 
 	if (!f || !rendered) {
@@ -1784,7 +1780,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 			fclose(f);
 		}
 
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1794,7 +1790,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	free(rendered);
 
 	memset(endpoints, 0, sizeof(endpoints));
-	peer_count = fl_doc_peers(&doc, peers, 8);
+	peer_count = doc_peers(&doc, peers, 8);
 	s_session.endpoint_count = 0;
 
 	for (i = 0; i < peer_count; i++) {
@@ -1803,22 +1799,22 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 		char ip[64];
 		char socket[128];
 
-		fl_doc_value(&doc, peers[i], "Endpoint", endpoint, (int)sizeof(endpoint));
+		doc_value(&doc, peers[i], "Endpoint", endpoint, (int)sizeof(endpoint));
 
-		if (!fl_endpoint_host(endpoint, host, (int)sizeof(host))) {
+		if (!endpoint_host(endpoint, host, (int)sizeof(host))) {
 			continue;
 		}
 
 		if (!resolve_host(host, ip, (int)sizeof(ip))) {
 			snprintf(out->error, sizeof(out->error), "Could not resolve the endpoint.");
-			fl_doc_free(&doc);
+			doc_free(&doc);
 			unlock();
 			return 0;
 		}
 
-		if (!fl_socket_endpoint(ip, endpoint, socket, (int)sizeof(socket))) {
+		if (!socket_endpoint(ip, endpoint, socket, (int)sizeof(socket))) {
 			snprintf(out->error, sizeof(out->error), "Could not resolve the endpoint.");
-			fl_doc_free(&doc);
+			doc_free(&doc);
 			unlock();
 			return 0;
 		}
@@ -1831,14 +1827,14 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 		}
 	}
 
-	if (!fl_uapi_set(&doc, endpoints, uapi, (int)sizeof(uapi))) {
+	if (!uapi_set(&doc, endpoints, uapi, (int)sizeof(uapi))) {
 		snprintf(out->error, sizeof(out->error), "The config is damaged.");
 
 		for (i = 0; i < 32; i++) {
 			free((void *)endpoints[i]);
 		}
 
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1850,7 +1846,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 			free((void *)endpoints[i]);
 		}
 
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1865,7 +1861,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 			free((void *)endpoints[i]);
 		}
 
-		fl_doc_free(&doc);
+		doc_free(&doc);
 		unlock();
 		return 0;
 	}
@@ -1893,14 +1889,14 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 				free((void *)endpoints[i]);
 			}
 
-			fl_doc_free(&doc);
+			doc_free(&doc);
 			unlock();
 			return 0;
 		}
 	}
 
-	fl_doc_addresses(&doc, addrs, (int)sizeof(addrs));
-	naddr = fl_split_commas(addrs, items, 8);
+	doc_addresses(&doc, addrs, (int)sizeof(addrs));
+	naddr = split_commas(addrs, items, 8);
 
 	for (i = 0; i < naddr; i++) {
 		if (!add_address(s_session.iface, items[i])) {
@@ -1911,7 +1907,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 				free((void *)endpoints[i]);
 			}
 
-			fl_doc_free(&doc);
+			doc_free(&doc);
 			unlock();
 			return 0;
 		}
@@ -1940,7 +1936,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 		free((void *)endpoints[i]);
 	}
 
-	fl_doc_free(&doc);
+	doc_free(&doc);
 	unlock();
 	log_line("fairlead: tunnel up");
 	return 1;

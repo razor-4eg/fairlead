@@ -34,16 +34,16 @@ public enum DNSCodec {
 
     public static func query(id: UInt16, name: String, type: UInt16, edns: Bool = true) -> Data? {
         var buffer = [UInt8](repeating: 0, count: 512)
-        let size = fl_dns_query(id, name, type, edns ? 1 : 0, &buffer, Int32(buffer.count))
+        let size = dns_query(id, name, type, edns ? 1 : 0, &buffer, Int32(buffer.count))
         guard size > 0 else { return nil }
         return Data(buffer.prefix(Int(size)))
     }
 
     public static func parse(_ data: Data, id: UInt16) -> Reply? {
-        var reply = fl_dns_reply_t()
+        var reply = dns_reply_t()
         let ok = data.withUnsafeBytes { raw -> Int32 in
             let base = raw.bindMemory(to: UInt8.self).baseAddress
-            return fl_dns_parse(base, Int32(raw.count), id, &reply)
+            return dns_parse(base, Int32(raw.count), id, &reply)
         }
         guard ok != 0 else { return nil }
         return Reply(
@@ -56,7 +56,7 @@ public enum DNSCodec {
     }
 
     private static func records<T>(_ field: T, count: Int) -> [Record] {
-        CBridge.elements(field, as: fl_dns_rec_t.self, count: min(count, 32)).map {
+        CBridge.elements(field, as: dns_rec_t.self, count: min(count, 32)).map {
             Record(address: CBridge.text($0.address), ttl: $0.ttl)
         }
     }

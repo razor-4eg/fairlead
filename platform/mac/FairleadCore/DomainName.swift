@@ -5,7 +5,7 @@ import Foundation
 public enum DomainName {
     public static func normalize(_ raw: String) -> String? {
         CBridge.optionalString(capacity: 512) { buffer, cap in
-            fl_domain_normalize(raw, buffer, cap)
+            domain_normalize(raw, buffer, cap)
         }
     }
 }

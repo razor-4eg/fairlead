@@ -34,22 +34,22 @@ public struct WGDocument: Equatable {
     }
 
     public static func parse(_ text: String) -> WGDocument {
-        var doc = fl_doc_t()
-        fl_doc_init(&doc)
-        defer { fl_doc_free(&doc) }
-        fl_doc_parse(&doc, text)
+        var doc = doc_t()
+        doc_init(&doc)
+        defer { doc_free(&doc) }
+        doc_parse(&doc, text)
         return WGDocument(copying: doc)
     }
 
     public func render() -> String {
         withC { doc in
-            CBridge.take(fl_doc_render(doc)) ?? ""
+            CBridge.take(doc_render(doc)) ?? ""
         }
     }
 
     public var interfaceIndex: Int? {
         withC { doc in
-            let index = Int(fl_doc_interface(doc))
+            let index = Int(doc_interface(doc))
             return index >= 0 ? index : nil
         }
     }
@@ -57,7 +57,7 @@ public struct WGDocument: Equatable {
     public var peerIndexes: [Int] {
         withC { doc in
             var found = [Int32](repeating: 0, count: max(sections.count, 1))
-            let count = Int(fl_doc_peers(doc, &found, Int32(found.count)))
+            let count = Int(doc_peers(doc, &found, Int32(found.count)))
             return found.prefix(max(0, min(count, found.count))).map(Int.init)
         }
     }
@@ -75,7 +75,7 @@ public struct WGDocument: Equatable {
     public func value(section: Int, key: String) -> String {
         withC { doc in
             CBridge.string(capacity: 16384) { buffer, cap in
-                fl_doc_value(doc, Int32(section), key, buffer, cap)
+                doc_value(doc, Int32(section), key, buffer, cap)
             }
         }
     }
@@ -83,21 +83,21 @@ public struct WGDocument: Equatable {
     public mutating func setValues(section: Int, key: String, values: [String]) {
         let cleaned = values.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         edit { doc in
-            fl_doc_set(doc, Int32(section), key, cleaned.joined(separator: ", "))
+            doc_set(doc, Int32(section), key, cleaned.joined(separator: ", "))
         }
     }
 
     public mutating func setValue(section: Int, key: String, value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         edit { doc in
-            fl_doc_set(doc, Int32(section), key, trimmed)
+            doc_set(doc, Int32(section), key, trimmed)
         }
     }
 
     public mutating func ensureInterface() -> Int {
         var index = 0
         edit { doc in
-            index = Int(fl_doc_ensure_interface(doc))
+            index = Int(doc_ensure_interface(doc))
         }
         return index
     }
@@ -105,7 +105,7 @@ public struct WGDocument: Equatable {
     public mutating func addPeer() -> Int {
         var index = 0
         edit { doc in
-            index = Int(fl_doc_add_peer(doc))
+            index = Int(doc_add_peer(doc))
         }
         return index
     }
@@ -126,7 +126,7 @@ public struct WGDocument: Equatable {
     public var interfaceAddresses: String {
         withC { doc in
             CBridge.string(capacity: 16384) { buffer, cap in
-                fl_doc_addresses(doc, buffer, cap)
+                doc_addresses(doc, buffer, cap)
             }
         }
     }
@@ -134,7 +134,7 @@ public struct WGDocument: Equatable {
     public var interfaceDNS: String {
         withC { doc in
             CBridge.string(capacity: 16384) { buffer, cap in
-                fl_doc_dns(doc, buffer, cap)
+                doc_dns(doc, buffer, cap)
             }
         }
     }
@@ -155,7 +155,7 @@ public struct WGDocument: Equatable {
     public func peerAllowedIPs(_ index: Int) -> String {
         withC { doc in
             CBridge.string(capacity: 16384) { buffer, cap in
-                fl_doc_peer_allowed(doc, Int32(index), buffer, cap)
+                doc_peer_allowed(doc, Int32(index), buffer, cap)
             }
         }
     }
@@ -166,23 +166,23 @@ public struct WGDocument: Equatable {
     }
 
     public static func blank(privateKey: String) -> WGDocument {
-        var doc = fl_doc_t()
-        fl_doc_init(&doc)
-        defer { fl_doc_free(&doc) }
-        fl_doc_blank(&doc, privateKey)
+        var doc = doc_t()
+        doc_init(&doc)
+        defer { doc_free(&doc) }
+        doc_blank(&doc, privateKey)
         return WGDocument(copying: doc)
     }
 }
 
-// MARK: - Crossing into fl_doc_t
+// MARK: - Crossing into doc_t
 
 extension WGDocument {
-    /// Builds a C document for the length of `body`. `fl_doc_free` releases it, so every
+    /// Builds a C document for the length of `body`. `doc_free` releases it, so every
     /// string and array is allocated with malloc.
-    func withC<R>(_ body: (UnsafeMutablePointer<fl_doc_t>) -> R) -> R {
-        var doc = fl_doc_t()
-        fl_doc_init(&doc)
-        defer { fl_doc_free(&doc) }
+    func withC<R>(_ body: (UnsafeMutablePointer<doc_t>) -> R) -> R {
+        var doc = doc_t()
+        doc_init(&doc)
+        defer { doc_free(&doc) }
 
         if !preamble.isEmpty {
             let lines = malloc(preamble.count * MemoryLayout<UnsafeMutablePointer<CChar>?>.stride)!
@@ -196,16 +196,16 @@ extension WGDocument {
         }
 
         if !sections.isEmpty {
-            let list = malloc(sections.count * MemoryLayout<fl_section_t>.stride)!
-                .bindMemory(to: fl_section_t.self, capacity: sections.count)
+            let list = malloc(sections.count * MemoryLayout<section_t>.stride)!
+                .bindMemory(to: section_t.self, capacity: sections.count)
             for (offset, section) in sections.enumerated() {
-                var c = fl_section_t()
+                var c = section_t()
                 c.name = strdup(section.name)
                 if !section.entries.isEmpty {
-                    let entries = malloc(section.entries.count * MemoryLayout<fl_entry_t>.stride)!
-                        .bindMemory(to: fl_entry_t.self, capacity: section.entries.count)
+                    let entries = malloc(section.entries.count * MemoryLayout<entry_t>.stride)!
+                        .bindMemory(to: entry_t.self, capacity: section.entries.count)
                     for (position, entry) in section.entries.enumerated() {
-                        var e = fl_entry_t()
+                        var e = entry_t()
                         if let key = entry.key {
                             e.is_field = 1
                             e.key = strdup(key)
@@ -230,7 +230,7 @@ extension WGDocument {
     }
 
     /// Runs a C edit against this document and keeps the result.
-    private mutating func edit(_ change: (UnsafeMutablePointer<fl_doc_t>) -> Void) {
+    private mutating func edit(_ change: (UnsafeMutablePointer<doc_t>) -> Void) {
         let updated: WGDocument = withC { doc in
             change(doc)
             return WGDocument(copying: doc.pointee)
@@ -238,7 +238,7 @@ extension WGDocument {
         self = updated
     }
 
-    init(copying doc: fl_doc_t) {
+    init(copying doc: doc_t) {
         var preamble: [String] = []
         for index in 0..<Int(doc.preamble_count) {
             preamble.append(doc.preamble[index].map { String(cString: $0) } ?? "")
@@ -282,7 +282,7 @@ public enum ConfigCheck {
     public static func issues(in document: WGDocument) -> [ConfigIssue] {
         document.withC { doc in
             let (count, rows) = CBridge.rows(count: 64, width: 192) { raw in
-                CBridge.rebind(raw) { fl_config_issues(doc, $0, 64) }
+                CBridge.rebind(raw) { config_issues(doc, $0, 64) }
             }
             return rows.prefix(Int(count)).map { ConfigIssue(FairleadL10n.text($0)) }
         }

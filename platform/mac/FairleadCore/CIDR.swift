@@ -19,33 +19,33 @@ public struct IPAddress: Equatable, Hashable {
     public var string: String {
         var ip = cValue
         return CBridge.string(capacity: 64) { buffer, cap in
-            fl_ip_format(&ip, buffer, cap)
+            ip_format(&ip, buffer, cap)
         }
     }
 
     public static func parse(_ text: String) -> IPAddress? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        var ip = fl_ip_t()
-        guard fl_ip_parse(trimmed, &ip) != 0 else { return nil }
+        var ip = ip_t()
+        guard ip_parse(trimmed, &ip) != 0 else { return nil }
         return IPAddress(cValue: ip)
     }
 
-    public var isUnspecified: Bool { check(fl_ip_unspecified) }
-    public var isLoopback: Bool { check(fl_ip_loopback) }
-    public var isMulticast: Bool { check(fl_ip_multicast) }
-    public var isLinkLocal: Bool { check(fl_ip_link_local) }
-    public var isBroadcast: Bool { check(fl_ip_broadcast) }
+    public var isUnspecified: Bool { check(ip_unspecified) }
+    public var isLoopback: Bool { check(ip_loopback) }
+    public var isMulticast: Bool { check(ip_multicast) }
+    public var isLinkLocal: Bool { check(ip_link_local) }
+    public var isBroadcast: Bool { check(ip_broadcast) }
 
     /// An address worth a bypass route: a real remote host, not loopback or multicast.
-    public var isRoutableDestination: Bool { check(fl_ip_routable) }
+    public var isRoutableDestination: Bool { check(ip_routable) }
 
-    private func check(_ test: (UnsafePointer<fl_ip_t>?) -> Int32) -> Bool {
+    private func check(_ test: (UnsafePointer<ip_t>?) -> Int32) -> Bool {
         var ip = cValue
         return test(&ip) != 0
     }
 
-    init(cValue ip: fl_ip_t) {
+    init(cValue ip: ip_t) {
         var copy = ip
         let family: IPFamily = ip.v6 != 0 ? .v6 : .v4
         let length = family == .v4 ? 4 : 16
@@ -53,8 +53,8 @@ public struct IPAddress: Equatable, Hashable {
         self.bytes = withUnsafeBytes(of: &copy.bytes) { Array($0.prefix(length)) }
     }
 
-    var cValue: fl_ip_t {
-        var ip = fl_ip_t()
+    var cValue: ip_t {
+        var ip = ip_t()
         ip.v6 = family == .v6 ? 1 : 0
         withUnsafeMutableBytes(of: &ip.bytes) { raw in
             for (index, byte) in bytes.prefix(16).enumerated() {
@@ -66,7 +66,7 @@ public struct IPAddress: Equatable, Hashable {
 
     func masked(prefix: Int) -> IPAddress {
         var ip = cValue
-        fl_ip_mask(&ip, Int32(prefix))
+        ip_mask(&ip, Int32(prefix))
         return IPAddress(cValue: ip)
     }
 }
@@ -83,7 +83,7 @@ public struct CIDR: Equatable, Hashable {
     public var string: String {
         var cidr = cValue
         return CBridge.string(capacity: 96) { buffer, cap in
-            fl_cidr_format(&cidr, buffer, cap)
+            cidr_format(&cidr, buffer, cap)
         }
     }
 
@@ -91,30 +91,30 @@ public struct CIDR: Equatable, Hashable {
 
     public var maxPrefix: Int {
         var cidr = cValue
-        return Int(fl_cidr_max_prefix(&cidr))
+        return Int(cidr_max_prefix(&cidr))
     }
 
     public static func parse(_ text: String) -> CIDR? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        var cidr = fl_cidr_t()
-        guard fl_cidr_parse(trimmed, &cidr) != 0 else { return nil }
+        var cidr = cidr_t()
+        guard cidr_parse(trimmed, &cidr) != 0 else { return nil }
         return CIDR(cValue: cidr)
     }
 
     public func contains(_ ip: IPAddress) -> Bool {
         var cidr = cValue
         var other = ip.cValue
-        return fl_cidr_contains(&cidr, &other) != 0
+        return cidr_contains(&cidr, &other) != 0
     }
 
-    init(cValue cidr: fl_cidr_t) {
+    init(cValue cidr: cidr_t) {
         self.address = IPAddress(cValue: cidr.ip)
         self.prefix = Int(cidr.prefix)
     }
 
-    var cValue: fl_cidr_t {
-        var cidr = fl_cidr_t()
+    var cValue: cidr_t {
+        var cidr = cidr_t()
         cidr.ip = address.cValue
         cidr.prefix = Int32(prefix)
         return cidr
@@ -126,19 +126,19 @@ public enum EndpointParse {
     public static func host(from endpoint: String) -> String? {
         let value = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         return CBridge.optionalString(capacity: 512) { buffer, cap in
-            fl_endpoint_host(value, buffer, cap)
+            endpoint_host(value, buffer, cap)
         }
     }
 
     public static func port(from endpoint: String) -> Int? {
         var port: Int32 = 0
         let value = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard fl_endpoint_port(value, &port) != 0 else { return nil }
+        guard endpoint_port(value, &port) != 0 else { return nil }
         return Int(port)
     }
 
     public static func isValid(_ endpoint: String) -> Bool {
-        fl_endpoint_valid(endpoint.trimmingCharacters(in: .whitespaces)) != 0
+        endpoint_valid(endpoint.trimmingCharacters(in: .whitespaces)) != 0
     }
 }
 
@@ -156,8 +156,8 @@ public enum RouteText {
     }
 
     public static func snapshot(from text: String) -> RouteSnapshot {
-        var snap = fl_route_snap_t()
-        fl_route_snapshot(text, &snap)
+        var snap = route_snap_t()
+        route_snapshot(text, &snap)
         return RouteSnapshot(
             destination: snap.has_destination != 0 ? CBridge.text(snap.destination) : nil,
             mask: snap.has_mask != 0 ? CBridge.text(snap.mask) : nil,
@@ -168,7 +168,7 @@ public enum RouteText {
 
     /// True when `route get` is describing this prefix itself, not a less-specific match.
     public static func isExact(_ cidr: CIDR, snapshot: RouteSnapshot) -> Bool {
-        var snap = fl_route_snap_t()
+        var snap = route_snap_t()
         if let destination = snapshot.destination {
             CBridge.fill(&snap.destination, destination)
             snap.has_destination = 1
@@ -186,14 +186,14 @@ public enum RouteText {
             snap.has_interface = 1
         }
         var value = cidr.cValue
-        return fl_route_exact(&value, &snap) != 0
+        return route_exact(&value, &snap) != 0
     }
 
     /// Pulls on-link networks from `ifconfig` output for one interface.
     public static func networks(fromIfconfig text: String) -> [String] {
         let cap = 64
         let (count, rows) = CBridge.rows(count: cap, width: 64) { raw in
-            CBridge.rebind(raw) { fl_ifconfig_networks(text, $0, Int32(cap)) }
+            CBridge.rebind(raw) { ifconfig_networks(text, $0, Int32(cap)) }
         }
         return unique(Array(rows.prefix(Int(count))))
     }
