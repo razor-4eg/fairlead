@@ -181,7 +181,6 @@
 "Add route" = "添加路由";
 "One address or domain per line." = "每行一个地址或域名。";
 "example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
-"View" = "查看";
 "List" = "列表";
 "Adding the list" = "正在添加列表";
 "A list can hold 4096 entries." = "一个列表最多 4096 条。";

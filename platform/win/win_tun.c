@@ -57,7 +57,7 @@ typedef struct session_s {
 	time_t last_ok;
 	time_t last_ping_at;
 	time_t recover_until;	/* Grace after a respawn — don't burn fails while TUN is coming up. */
-	ULONGLONG traffic_tick;	/* GetTickCount64 — last /traffic sample. */
+	ULONGLONG traffic_tick;	/* GetTickCount64 — last counter sample. */
 	unsigned long long traffic_rx;
 	unsigned long long traffic_tx;
 	unsigned long long down_bps;
@@ -965,15 +965,21 @@ static void refresh_traffic(win_tun_result_t *out) {
 	unsigned long long	tx;
 	ULONGLONG			now;
 
+	now = GetTickCount64();
+
 	if (!read_totals(&rx, &tx)) {
 		out->rx = s_session.traffic_rx;
 		out->tx = s_session.traffic_tx;
+		/* Don't freeze a stale rate when the controller is busy. */
+		if (s_session.traffic_tick == 0 || now < s_session.traffic_tick ||
+			(now - s_session.traffic_tick) > 2000) {
+			s_session.down_bps = 0;
+			s_session.up_bps = 0;
+		}
 		out->down_bps = s_session.down_bps;
 		out->up_bps = s_session.up_bps;
 		return;
 	}
-
-	now = GetTickCount64();
 
 	if (s_session.traffic_tick != 0 && now > s_session.traffic_tick &&
 		rx >= s_session.traffic_rx && tx >= s_session.traffic_tx) {
@@ -981,7 +987,7 @@ static void refresh_traffic(win_tun_result_t *out) {
 
 		dt = (double)(now - s_session.traffic_tick) / 1000.0;
 
-		if (dt >= 0.2) {
+		if (dt >= 0.2 && dt < 8.0) {
 			s_session.down_bps = (unsigned long long)((rx - s_session.traffic_rx) / dt);
 			s_session.up_bps = (unsigned long long)((tx - s_session.traffic_tx) / dt);
 		}
@@ -1131,7 +1137,6 @@ static void fill_result(win_tun_result_t *out) {
 		}
 
 		out->ping_ms = s_session.last_ping_ms;
-		/* Real B/s from mihomo — only once Connected so Connecting stays snappy. */
 		refresh_traffic(out);
 	} else {
 		s_session.last_ok = 0;

@@ -181,7 +181,6 @@
 "Add route" = "Ajouter une route";
 "One address or domain per line." = "Une adresse ou un domaine par ligne.";
 "example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
-"View" = "Voir";
 "List" = "Liste";
 "Adding the list" = "Ajout de la liste";
 "A list can hold 4096 entries." = "Une liste peut contenir 4096 entrées.";

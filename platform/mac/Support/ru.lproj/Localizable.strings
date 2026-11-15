@@ -181,7 +181,6 @@
 "Add route" = "Добавить маршрут";
 "One address or domain per line." = "Один адрес или домен на строку.";
 "example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
-"View" = "Смотреть";
 "List" = "Список";
 "Adding the list" = "Добавляем список";
 "A list can hold 4096 entries." = "В списке может быть не больше 4096 записей.";
