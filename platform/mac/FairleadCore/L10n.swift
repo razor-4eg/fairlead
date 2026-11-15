@@ -3,8 +3,37 @@ import Foundation
 /// Looks up Fairlead strings in the app bundle, or in the helper's localization bundle.
 public enum FairleadL10n {
     public static var bundle: Bundle = .main
-    /// When set, overrides the process language. The helper uses the signed-in user's language.
+    /// When set, overrides the process / system language. `nil` means Auto.
     public static var languageOverride: String?
+
+    /// Codes Fairlead ships. `auto` is a settings sentinel, not a catalog.
+    public static let languageCodes = ["en", "ru", "de", "es", "fr", "pt", "zh-Hans"]
+
+    /// Native display names for the language picker (not translated).
+    public static func languageTitle(_ code: String) -> String {
+        switch code {
+        case "auto": return text("Auto")
+        case "en": return "English"
+        case "ru": return "Русский"
+        case "de": return "Deutsch"
+        case "es": return "Español"
+        case "fr": return "Français"
+        case "pt": return "Português"
+        case "zh-Hans": return "简体中文"
+        default: return code
+        }
+    }
+
+    /// Apply a settings value: `auto` / empty → system language; otherwise a shipped code.
+    public static func applyPreference(_ preference: String?) {
+        let raw = preference?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if raw.isEmpty || raw == "auto" {
+            languageOverride = nil
+        } else {
+            languageOverride = canonical(raw)
+        }
+        catalogCache = nil
+    }
 
     public static func text(_ key: String) -> String {
         localizedBundle().localizedString(forKey: key, value: key, table: nil)
@@ -98,7 +127,7 @@ public enum FairleadL10n {
     private static func loadCatalogs() -> [[String: [String]]] {
         if let catalogCache { return catalogCache }
         var catalogs: [[String: [String]]] = []
-        for code in Self.languages {
+        for code in Self.languageCodes {
             guard let path = bundle.path(forResource: code, ofType: "lproj")
                 ?? Bundle.main.path(forResource: code, ofType: "lproj"),
                   let loc = Bundle(path: path),
@@ -138,8 +167,6 @@ public enum FairleadL10n {
         return nil
     }
 
-    private static let languages = ["en", "ru", "de", "es", "fr", "pt", "zh-Hans"]
-
     private static var activeLocale: Locale {
         Locale(identifier: resolvedLanguage())
     }
@@ -157,7 +184,7 @@ public enum FairleadL10n {
         let lower = raw.replacingOccurrences(of: "_", with: "-").lowercased()
         if lower.hasPrefix("zh") { return "zh-Hans" }
         let code = lower.split(separator: "-").first.map(String.init) ?? lower
-        return languages.contains(code) ? code : "en"
+        return languageCodes.contains(code) ? code : "en"
     }
 
     private static func localizedBundle() -> Bundle {

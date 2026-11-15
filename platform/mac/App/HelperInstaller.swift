@@ -196,7 +196,7 @@ so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
           cp "$MIHOMO_SRC" /usr/local/libexec/fairlead-mihomo
           chmod 755 /usr/local/libexec/fairlead-mihomo
         else
-          echo \(shellQuote(FairleadL10n.text("mihomo is not included in this copy of Fairlead."))) >&2
+          echo \(shellQuote(FairleadL10n.text("This copy of Fairlead is missing the tunnel engine."))) >&2
           exit 1
         fi
         printf '%s\n' \(shellQuote(fingerprint)) > \(shellQuote(stampPath))

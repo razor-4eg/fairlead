@@ -274,7 +274,7 @@ static char *handle_request(const char *body) {
 			snprintf(s_slug, sizeof(s_slug), "%s", name);
 			ok = 1;
 		} else {
-			error = tun.error[0] ? tun.error : "mihomo did not start.";
+			error = tun.error[0] ? tun.error : "The tunnel did not start.";
 		}
 	} else if (strcmp(op, "down") == 0) {
 		win_tun_down(&tun);
@@ -357,8 +357,11 @@ static char *handle_request(const char *body) {
 		append_escaped(&buf, &len, &cap, tun.public_key);
 		append(&buf, &len, &cap, ",\"peers\":[{\"endpoint\":");
 		append_escaped(&buf, &len, &cap, tun.live_endpoint);
-		snprintf(num, sizeof(num), ",\"handshake\":%d,\"delay\":%d,\"ping\":%d,\"rx\":%llu,\"tx\":%llu",
-			tun.handshake, tun.delay_ms, tun.ping_ms, (unsigned long long)tun.rx, (unsigned long long)tun.tx);
+		snprintf(num, sizeof(num),
+			",\"handshake\":%d,\"delay\":%d,\"ping\":%d,\"rx\":%llu,\"tx\":%llu,\"downRate\":%llu,\"upRate\":%llu",
+			tun.handshake, tun.delay_ms, tun.ping_ms,
+			(unsigned long long)tun.rx, (unsigned long long)tun.tx,
+			(unsigned long long)tun.down_bps, (unsigned long long)tun.up_bps);
 		append(&buf, &len, &cap, num);
 
 		if (tun.stage[0]) {

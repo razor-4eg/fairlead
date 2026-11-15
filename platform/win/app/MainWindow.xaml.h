@@ -49,6 +49,7 @@ struct MainWindow : MainWindowT<MainWindow> {
 	void LoginToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void HiddenToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void DefaultChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+	void LanguageChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
 	void OpenFolder(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void StartHelper(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void CloseSheet(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -75,6 +76,7 @@ private:
 	bool sized = false;
 	bool ready = false;
 	bool ticking = false;
+	bool rpc_busy = false;	/* up/down owns the helper pipe — status ticks must wait. */
 	bool painting = false;
 	bool direct_drawn = true;
 	int sheet_epoch = 0;
@@ -83,6 +85,7 @@ private:
 	bool apps_ready = false;
 	bool apps_warming = false;
 	std::string header_key;
+	std::string chrome_language;
 	std::string route_auto_name;
 	std::string list_sig;
 	std::unique_ptr<Tunnel> draft;
@@ -130,6 +133,7 @@ private:
 	winrt::fire_and_forget ConfirmDeleteAsync();
 
 	void Paint();
+	void PaintChrome();
 	void PaintRules();
 	void PaintPolicy();
 	void PaintPower();
@@ -140,6 +144,7 @@ private:
 	void NoteSelection();
 	void RebuildList();
 	void FillDefaults();
+	void FillLanguages();
 	void ShowSettings();
 	void ShowEditor();
 	void ShowSheet(Microsoft::UI::Xaml::UIElement const& pane);

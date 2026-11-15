@@ -145,7 +145,6 @@
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "登录后 Fairlead 会启动。默认隧道会自行连接。";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "只显示在菜单栏。点击 Fairlead 图标可打开窗口。";
 "Default tunnel" = "默认隧道";
-"None" = "无";
 "Last active" = "上次使用";
 "Fairlead selects this tunnel when it opens and connects it." = "Fairlead 打开时会选中这条隧道并连接它。";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS 还需要你的允许。请打开“系统设置”→“通用”→“登录项”，并允许 Fairlead。";
@@ -153,8 +152,8 @@
 "Enter a domain, for example example.com." = "输入域名，例如 example.com。";
 "Wildcards such as *.example.com are not supported." = "不支持 *.example.com 这类通配符。";
 "That domain is already listed." = "该域名已在列表中。";
-"mihomo is not included in this copy of Fairlead." = "此 Fairlead 副本未包含 mihomo。";
-"mihomo could not be started." = "无法启动 mihomo。";
+"This copy of Fairlead is missing the tunnel engine." = "此 Fairlead 副本缺少隧道引擎。";
+"The tunnel could not be started." = "无法启动隧道。";
 "This Amnezia share is not AmneziaWG or WireGuard." = "这个 Amnezia 分享不是 AmneziaWG 或 WireGuard。";
 "The Amnezia share could not be read." = "无法读取这个 Amnezia 分享。";
 "Jc, Jmin, and Jmax must be numbers, and Jmin cannot be greater than Jmax." = "Jc、Jmin 和 Jmax 必须是数字，且 Jmin 不能大于 Jmax。";
@@ -190,17 +189,37 @@
 "%d domains.few" = "%d 个域名";
 "%d domains.many" = "%d 个域名";
 "%d domains.other" = "%d 个域名";
-"mihomo is included and carries WireGuard and AmneziaWG, the TUN, and the routing rules. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "已包含 mihomo，负责 WireGuard 与 AmneziaWG、TUN 和路由规则。助手仅在首次询问管理员密码，之后由 launchd 在重启后保持运行。带密钥的配置只保存在这台 Mac 上。";
 
-"A domain is matched by name. An app is matched by its process path while connected." = "域名按名称匹配。应用在连接期间按其进程路径匹配。";
-"mihomo exited. %@" = "mihomo 已退出。%@";
-"mihomo did not answer on %@." = "mihomo 未在 %@ 上响应。";
-"mihomo could not start the TUN adapter. %@" = "mihomo 无法启动 TUN 适配器。%@";
-"mihomo could not be restarted." = "无法重新启动 mihomo。";
-"Could not build the mihomo config." = "无法生成 mihomo 配置。";
+"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "域名匹配该名称及其子域名。应用在连接期间按其进程路径匹配。";
+"The tunnel exited. %@" = "隧道已退出。%@";
+"The tunnel did not answer on %@." = "隧道未在 %@ 上响应。";
+"The tunnel could not start the network adapter. %@" = "隧道无法启动网络适配器。%@";
+"The tunnel could not be restarted." = "无法重新启动隧道。";
+"Could not build the tunnel config." = "无法生成隧道配置。";
 "Edit list" = "编辑列表";
 "Saving the list" = "正在保存列表";
-"Opening the tunnel…" = "Opening the tunnel…";
-"Stopping mihomo…" = "Stopping mihomo…";
-"Tunnel is off" = "Tunnel is off";
-"Private LAN ranges stay off the tunnel when this is on." = "Private LAN ranges stay off the tunnel when this is on.";
+"Opening the tunnel…" = "正在打开隧道…";
+"Stopping the tunnel…" = "正在停止隧道…";
+"Tunnel is off" = "隧道已关闭";
+"Private LAN ranges stay off the tunnel when this is on." = "开启后，私有局域网地址段不经过隧道。";
+"Auto" = "自动";
+"Language" = "语言";
+"Language of the Fairlead interface. Auto follows the system language." = "Fairlead 界面的语言。“自动”将跟随系统语言。";
+
+/* Windows */
+"Process rule" = "进程规则";
+"Looking for apps…" = "正在查找应用…";
+"Browse…" = "浏览…";
+"No apps found. Use Browse… to pick an .exe." = "未找到应用。请用“浏览…”选择 .exe 文件。";
+"No matches." = "没有匹配项。";
+"Open in the tray only. Click the Fairlead icon to show the window." = "只显示在系统托盘。点击 Fairlead 图标可打开窗口。";
+"Could not update routes on the live tunnel." = "无法更新运行中隧道的路由。";
+"The helper did not start." = "助手未能启动。";
+"fairlead-helper.exe is missing from %@" = "%@ 中缺少 fairlead-helper.exe";
+"The helper start was cancelled." = "已取消启动助手。";
+"fairlead-core.dll is missing from %@" = "%@ 中缺少 fairlead-core.dll";
+"Could not read that file." = "无法读取该文件。";
+"That file is not a WireGuard or AmneziaWG config." = "该文件不是 WireGuard 或 AmneziaWG 配置。";
+"The tunnel did not start." = "隧道未能启动。";
+"The tunnel started without a network adapter." = "隧道已启动但没有网络适配器。";
+"The tunnel could not be reached." = "无法连通隧道。";

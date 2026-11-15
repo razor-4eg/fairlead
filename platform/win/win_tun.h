@@ -22,6 +22,8 @@ typedef struct win_tun_result_s {
 	int warning_count;
 	unsigned long long rx;
 	unsigned long long tx;
+	unsigned long long down_bps;	/* Instant download rate from helper samples. */
+	unsigned long long up_bps;	/* Instant upload rate from helper samples. */
 	int handshake;	/* Unix time of the last successful HTTP probe through the tunnel. 0 when stale/failed. */
 	int delay_ms;	/* Last HTTP probe RTT through the tunnel. Used for liveness only. */
 	int ping_ms;	/* ICMP echo RTT to the WireGuard endpoint. Shown in the UI. */

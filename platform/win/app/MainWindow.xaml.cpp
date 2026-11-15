@@ -3,6 +3,7 @@
 #include "MainWindow.xaml.g.hpp"
 
 #include "coreabi.h"
+#include "l10n.h"
 #include "motion.h"
 #include "text.h"
 #include "base.h"
@@ -507,7 +508,93 @@ void MainWindow::ShowSwitch(controls::Primitives::ToggleButton const& button, bo
 	}
 }
 
+void MainWindow::PaintChrome() {
+	/* Static labels only change with the language, so skip the work unless it did. */
+	std::string language = l10n::resolved();
+	if (language == chrome_language) {
+		return;
+	}
+
+	chrome_language = language;
+	auto words = [](std::string_view key) { return hstring(l10n::wtext(key)); };
+	auto capitals = [](std::string_view key) {
+		std::wstring text = l10n::wtext(key);
+		if (!text.empty()) {
+			CharUpperBuffW(text.data(), static_cast<DWORD>(text.size()));
+		}
+
+		return hstring(text);
+	};
+	auto label = [&](auto const& control, std::string_view key) { control.Text(words(key)); };
+	auto caption = [&](auto const& control, std::string_view key) { control.Content(box_value(words(key))); };
+	mux::Controls::ToolTipService::SetToolTip(SettingsButton(), box_value(words("Settings")));
+	Search().PlaceholderText(words("Search"));
+	AppSearch().PlaceholderText(words("Search"));
+	TunnelsCaption().Text(capitals("Tunnels"));
+	label(NewLabel(), "New");
+	label(ImportLabel(), "Import");
+	label(EmptyTitle(), "No tunnels");
+	label(EmptyBody(), "Import a WireGuard or AmneziaWG config, or create a new one.\nYou can drop a .conf file or an Amnezia share on the window.");
+	caption(EmptyCreate(), "Create");
+	caption(EditButton(), "Edit");
+	controls::MenuFlyout more;
+	controls::MenuFlyoutItem export_item;
+	export_item.Text(words("Export…"));
+	export_item.Click([this](auto&&, auto&&) { ExportAsync(session.selected); });
+	controls::MenuFlyoutItem delete_item;
+	delete_item.Text(words("Delete"));
+	delete_item.Click([this](auto&&, auto&&) { AskDeleteTunnel(session.selected); });
+	more.Items().Append(export_item);
+	more.Items().Append(delete_item);
+	MoreButton().Flyout(more);
+	DownCaption().Text(capitals("Down"));
+	UpCaption().Text(capitals("Up"));
+	RxCaption().Text(capitals("Received"));
+	TxCaption().Text(capitals("Sent"));
+	caption(DirectButton(), "Direct");
+	caption(ThroughButton(), "Through");
+	label(LanTitle(), "Local network directly");
+	label(RulesNote(), "A domain matches that name and its subdomains. An app is matched by its process path while connected.");
+	label(RulesEmpty(), "Nothing here yet. Add an IP, a domain, or an app.");
+	caption(AddRouteButton(), "Add route");
+	caption(AddAppButton(), "Add app");
+	label(SettingsTitle(), "Settings");
+	label(LoginTitle(), "Open at login");
+	label(LoginBody(), "Fairlead starts when you sign in. A default tunnel connects on its own.");
+	label(HiddenTitle(), "Start hidden");
+	label(HiddenBody(), "Open in the tray only. Click the Fairlead icon to show the window.");
+	label(LanguageTitle(), "Language");
+	label(LanguageBody(), "Language of the Fairlead interface. Auto follows the system language.");
+	label(DefaultTitle(), "Default tunnel");
+	label(DefaultBody(), "Fairlead selects this tunnel when it opens and connects it.");
+	caption(ConfigFolderButton(), "Config folder");
+	caption(StartHelperButton(), "Start helper");
+	caption(SettingsClose(), "Close");
+	label(EditorTitle(), "Config");
+	caption(FieldsButton(), "Fields");
+	caption(TextButton(), "Text");
+	caption(EditorCancel(), "Cancel");
+	caption(EditorSave(), "Save");
+	label(RouteTitle(), "Add route");
+	label(RouteNote(), "One address or domain per line.");
+	RouteName().PlaceholderText(words("Name"));
+	label(RouteHint(), "example.com\n203.0.113.10\n10.1.0.0/16");
+	caption(RouteCancel(), "Cancel");
+	caption(RouteAdd(), "Add");
+	ListName().PlaceholderText(words("Name"));
+	label(ListHint(), "One address or domain per line.");
+	caption(ListClose(), "Close");
+	caption(ListCancel(), "Cancel");
+	caption(ListSave(), "Save");
+	caption(ConfirmCancel(), "Cancel");
+	caption(ConfirmDeleteButton(), "Delete");
+	label(AppTitle(), "Add app");
+	caption(BrowseButton(), "Browse…");
+	caption(AppClose(), "Close");
+}
+
 void MainWindow::Paint() {
+	PaintChrome();
 	auto* tunnel = session.selected;
 	bool has = tunnel != nullptr;
 	Empty().Visibility(shown(!has));
@@ -519,16 +606,16 @@ void MainWindow::Paint() {
 	TitleText().Text(H(tunnel ? tunnel->name : ""));
 	EndpointText().Text(H(tunnel ? tunnel->endpoint : ""));
 	AddressText().Text(H(tunnel ? tunnel->address : ""));
-	PhaseText().Text(H(tunnel ? tunnel->phase : ""));
+	PhaseText().Text(H(tunnel ? l10n::text(tunnel->phase) : ""));
 	DetailText().Text(H(tunnel ? tunnel->detail : ""));
 	IfaceText().Text(H(tunnel ? tunnel->iface : ""));
-	DownText().Text(H(tunnel ? tunnel->down : "0 B/s"));
-	UpText().Text(H(tunnel ? tunnel->up : "0 B/s"));
-	RxText().Text(H(tunnel ? tunnel->rx : "0 B"));
-	TxText().Text(H(tunnel ? tunnel->tx : "0 B"));
+	DownText().Text(H(tunnel ? tunnel->down : "0 " + l10n::text("B") + l10n::text("/s")));
+	UpText().Text(H(tunnel ? tunnel->up : "0 " + l10n::text("B") + l10n::text("/s")));
+	RxText().Text(H(tunnel ? tunnel->rx : "0 " + l10n::text("B")));
+	TxText().Text(H(tunnel ? tunnel->tx : "0 " + l10n::text("B")));
 	PolicyTitleText().Text(H(session.PolicyTitle()));
 	PolicyBodyText().Text(H(session.PolicyBody()));
-	LanBody().Text(H(tunnel ? tunnel->lan : "Private LAN ranges stay off the tunnel when this is on."));
+	LanBody().Text(H(tunnel ? tunnel->lan : l10n::text("Private LAN ranges stay off the tunnel when this is on.")));
 	RulesEmpty().Visibility(shown(session.RulesEmpty()));
 	NoteSelection();
 	RebuildList();
@@ -738,7 +825,8 @@ void MainWindow::PaintTitlebar() {
 		return;
 	}
 
-	TitlePhaseText().Text(H(busy ? phase + "…" : phase));
+	std::string shown_phase = l10n::text(phase);
+	TitlePhaseText().Text(H(busy ? shown_phase + "…" : shown_phase));
 	TitlePhaseText().Foreground(brush(L"AccentBrush"));
 }
 
@@ -747,9 +835,6 @@ void MainWindow::PaintHelper() {
 	HelperDot().Fill(fill);
 	HelperDot().Opacity(session.helper_online ? 1 : 0.45);
 	mux::Controls::ToolTipService::SetToolTip(HelperDot(), box_value(H(session.HelperText())));
-	HelperRowDot().Fill(fill);
-	AwgDot().Fill(brush(session.awg_ok ? L"AccentBrush" : L"DangerBrush"));
-	AwgLine().Text(H(session.awg_text));
 }
 
 void MainWindow::PaintAwg(bool animate) {
@@ -793,14 +878,14 @@ void MainWindow::PaintRules() {
 		}
 
 		if (domains > 0 && addresses > 0) {
-			return std::to_string(domains) + (domains == 1 ? " domain, " : " domains, ") + std::to_string(addresses) + (addresses == 1 ? " address" : " addresses");
+			return l10n::domains(domains) + ", " + l10n::addresses(addresses);
 		}
 
 		if (domains > 0) {
-			return std::to_string(domains) + (domains == 1 ? " domain" : " domains");
+			return l10n::domains(domains);
 		}
 
-		return std::to_string(addresses) + (addresses == 1 ? " address" : " addresses");
+		return l10n::addresses(addresses);
 	};
 	auto add = [&](std::string const& kind, std::string const& title, std::string const& sub, bool on, std::wstring const& icon_path, bool missing, std::function<void(bool)> set, std::function<void()> remove, std::function<void()> look) {
 		controls::Grid grid;
@@ -821,7 +906,7 @@ void MainWindow::PaintRules() {
 		grid.ColumnDefinitions().Append(c1);
 		grid.ColumnDefinitions().Append(c2);
 		controls::TextBlock k;
-		k.Text(H(kind));
+		k.Text(H(l10n::text(kind)));
 		k.FontSize(10);
 		k.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
 		k.Foreground(brush(L"MutedBrush"));
@@ -869,11 +954,19 @@ void MainWindow::PaintRules() {
 		actions.Spacing(8);
 		actions.VerticalAlignment(mux::VerticalAlignment::Center);
 		if (look) {
-			controls::Button view;
-			view.Content(box_value(hstring(L"View")));
-			view.Style(style_of(L"LinkButton"));
-			view.Click([look](auto&&, auto&&) { look(); });
-			actions.Children().Append(view);
+			controls::Button edit;
+			edit.Style(style_of(L"MarkButton"));
+			controls::ToolTipService::SetToolTip(edit, box_value(hstring(l10n::wtext("Edit"))));
+			controls::TextBlock pencil;
+			pencil.Text(L"\uE70F");
+			pencil.FontFamily(media::FontFamily(L"Segoe Fluent Icons, Segoe MDL2 Assets"));
+			pencil.FontSize(10);
+			pencil.Foreground(brush(L"FaintBrush"));
+			pencil.VerticalAlignment(mux::VerticalAlignment::Center);
+			pencil.HorizontalAlignment(mux::HorizontalAlignment::Center);
+			edit.Content(pencil);
+			edit.Click([look](auto&&, auto&&) { look(); });
+			actions.Children().Append(edit);
 		}
 
 		controls::Primitives::ToggleButton toggle;
@@ -927,7 +1020,7 @@ void MainWindow::PaintRules() {
 	for (auto const& app : tunnel->apps) {
 		AppRule* item = app.get();
 		bool missing = !std::filesystem::exists(std::filesystem::path(widen(item->path)));
-		std::string sub = missing ? "App not found" : "Process rule";
+		std::string sub = l10n::text(missing ? "App not found" : "Process rule");
 		add("App", item->name, sub, item->enabled, widen(item->path), missing, [item](bool value) { item->enabled = value; }, [tunnel, item] {
 			std::erase_if(tunnel->apps, [&](std::unique_ptr<AppRule> const& one) { return one.get() == item; });
 		}, [this, item] { OpenApp(item); });
@@ -969,8 +1062,8 @@ void MainWindow::FillDefaults() {
 		item.Tag(box_value(H(tag)));
 		DefaultCombo().Items().Append(item);
 	};
-	add(L"None", "");
-	add(L"Last active", Session::last_key);
+	add(l10n::wtext("None").c_str(), "");
+	add(l10n::wtext("Last active").c_str(), Session::last_key);
 	for (auto const& tunnel : session.tunnels) {
 		controls::ComboBoxItem item;
 		item.Content(box_value(H(tunnel->name)));
@@ -990,10 +1083,35 @@ void MainWindow::FillDefaults() {
 	quiet = was;
 }
 
+void MainWindow::FillLanguages() {
+	bool was = quiet;
+	quiet = true;
+	LanguageCombo().Items().Clear();
+	std::vector<std::string> order = { "auto" };
+	for (auto const& code : l10n::codes()) {
+		order.push_back(code);
+	}
+
+	int32_t pick = 0;
+	for (auto const& code : order) {
+		controls::ComboBoxItem item;
+		item.Content(box_value(H(l10n::language_title(code))));
+		item.Tag(box_value(H(code)));
+		if (code == session.language) {
+			pick = static_cast<int32_t>(LanguageCombo().Items().Size());
+		}
+
+		LanguageCombo().Items().Append(item);
+	}
+
+	LanguageCombo().SelectedIndex(pick);
+	quiet = was;
+}
+
 void MainWindow::ShowSettings() {
-	AwgLine().Text(H(session.awg_text));
 	PaintHelper();
 	FillDefaults();
+	FillLanguages();
 	ShowSheet(SettingsPane());
 }
 
@@ -1145,16 +1263,16 @@ void MainWindow::OnTunnelMenu(IInspectable const&, input::RightTappedRoutedEvent
 	Paint();
 	controls::MenuFlyout flyout;
 	controls::MenuFlyoutItem connect;
-	connect.Text(tunnel->connected ? L"Disconnect" : L"Connect");
+	connect.Text(hstring(l10n::wtext(tunnel->connected ? "Disconnect" : "Connect")));
 	connect.Click([this, tunnel](auto&&, auto&&) { ToggleAsync(tunnel); });
 	controls::MenuFlyoutItem edit_item;
-	edit_item.Text(L"Edit");
+	edit_item.Text(hstring(l10n::wtext("Edit")));
 	edit_item.Click([this](auto&&, auto&&) { OpenEditor(nullptr, nullptr); });
 	controls::MenuFlyoutItem exp;
-	exp.Text(L"Export…");
+	exp.Text(hstring(l10n::wtext("Export…")));
 	exp.Click([this, tunnel](auto&&, auto&&) { ExportAsync(tunnel); });
 	controls::MenuFlyoutItem del;
-	del.Text(L"Delete");
+	del.Text(hstring(l10n::wtext("Delete")));
 	del.Click([this, tunnel](auto&&, auto&&) { AskDeleteTunnel(tunnel); });
 	flyout.Items().Append(connect);
 	flyout.Items().Append(edit_item);
@@ -1205,7 +1323,7 @@ void MainWindow::BuildFields() {
 		return;
 	}
 
-	AddField(L"Name", L"Name", edit->name, false);
+	AddField(L"Name", l10n::wtext("Name"), edit->name, false);
 	std::string text = coreabi::inspect(edit->config);
 	arena_t arena;
 	arena_init(&arena, static_cast<int>(std::max<size_t>(text.size() * 4 + 65536, 65536)));
@@ -1277,7 +1395,7 @@ void MainWindow::AddField(std::wstring const& key, std::wstring const& label, st
 	actions.Spacing(8);
 	actions.VerticalAlignment(mux::VerticalAlignment::Center);
 	controls::Button show;
-	show.Content(box_value(hstring(L"Show")));
+	show.Content(box_value(hstring(l10n::wtext("Show"))));
 	show.Style(style_of(L"LinkButton"));
 	show.Click([this, box](auto&&, auto&&) {
 		for (auto& one : secrets) {
@@ -1291,7 +1409,7 @@ void MainWindow::AddField(std::wstring const& key, std::wstring const& label, st
 		}
 	});
 	controls::Button neu;
-	neu.Content(box_value(hstring(L"New key")));
+	neu.Content(box_value(hstring(l10n::wtext("New key"))));
 	neu.Style(style_of(L"LinkButton"));
 	neu.Click([this, box](auto&&, auto&&) {
 		std::string priv, pub;
@@ -1499,7 +1617,7 @@ void MainWindow::ApplyRouteAdd() {
 
 void MainWindow::OpenList(RouteList* list) {
 	editing_list = list;
-	ListTitle().Text(L"Edit list");
+	ListTitle().Text(hstring(l10n::wtext("Edit list")));
 	ListName().Text(H(list->name));
 	ListName().IsReadOnly(false);
 	ListName().Visibility(mux::Visibility::Visible);
@@ -1572,7 +1690,7 @@ void MainWindow::AskDeleteTunnel(Tunnel* tunnel) {
 	pending_delete = tunnel;
 	session.selected = tunnel;
 	Paint();
-	ConfirmText().Text(H("Delete the tunnel \"" + tunnel->name + "\"?"));
+	ConfirmText().Text(H(l10n::format("Delete the tunnel “%@”?", tunnel->name)));
 	ShowSheet(ConfirmPane());
 }
 
@@ -1604,6 +1722,46 @@ void MainWindow::DefaultChanged(IInspectable const&, controls::SelectionChangedE
 
 	auto tag = item.Tag().try_as<hstring>();
 	session.SetDefault(tag ? S(*tag) : "");
+}
+
+void MainWindow::LanguageChanged(IInspectable const&, controls::SelectionChangedEventArgs const&) {
+	if (quiet) {
+		return;
+	}
+
+	auto item = LanguageCombo().SelectedItem().try_as<controls::ComboBoxItem>();
+	if (!item) {
+		return;
+	}
+
+	auto tag = item.Tag().try_as<hstring>();
+	std::string pref = tag ? S(*tag) : "auto";
+	if (pref == session.language) {
+		return;
+	}
+
+	session.SetLanguage(pref);
+	/* Rebuild the dependent text. The language list itself stays put, only the Auto title is renamed. */
+	chrome_language.clear();
+	list_sig.clear();
+	bool was = quiet;
+	quiet = true;
+	if (LanguageCombo().Items().Size() > 0) {
+		if (auto first = LanguageCombo().Items().GetAt(0).try_as<controls::ComboBoxItem>()) {
+			first.Content(box_value(H(l10n::language_title("auto"))));
+		}
+
+		/* The closed box caches its text, so reselect to refresh it. */
+		int32_t at = LanguageCombo().SelectedIndex();
+		LanguageCombo().SelectedIndex(-1);
+		LanguageCombo().SelectedIndex(at);
+	}
+
+	quiet = was;
+	FillDefaults();
+	PaintChrome();
+	Paint();
+	PaintRules();
 }
 
 void MainWindow::OpenFolder(IInspectable const&, mux::RoutedEventArgs const&) {
@@ -1667,7 +1825,7 @@ void MainWindow::AddApp(IInspectable const&, mux::RoutedEventArgs const&) {
 	}
 
 	AppList().Visibility(mux::Visibility::Collapsed);
-	AppStatus().Text(L"Looking for apps…");
+	AppStatus().Text(hstring(l10n::wtext("Looking for apps…")));
 	AppStatus().Visibility(mux::Visibility::Visible);
 	if (apps_warming) {
 		return;
@@ -1785,7 +1943,7 @@ void MainWindow::FillAppList() {
 
 	if (shown_rows == 0) {
 		AppList().Visibility(mux::Visibility::Collapsed);
-		AppStatus().Text(installed.empty() ? L"No apps found. Use Browse… to pick an .exe." : L"No matches.");
+		AppStatus().Text(hstring(l10n::wtext(installed.empty() ? "No apps found. Use Browse… to pick an .exe." : "No matches.")));
 		AppStatus().Visibility(mux::Visibility::Visible);
 	} else {
 		AppStatus().Visibility(mux::Visibility::Collapsed);
@@ -1953,8 +2111,9 @@ void MainWindow::ShowTrayMenu() {
 	HMENU menu = CreatePopupMenu();
 	std::vector<Tunnel*> order;
 	UINT id = 100;
+	std::wstring open_label = l10n::wtext("Open Fairlead");
 	if (session.tunnels.empty()) {
-		AppendMenuW(menu, MF_STRING, 1, L"Open Fairlead");
+		AppendMenuW(menu, MF_STRING, 1, open_label.c_str());
 	} else {
 		for (auto const& tunnel : session.tunnels) {
 			std::wstring label = (tunnel->connected ? L"\u25CF " : L"") + widen(tunnel->name);
@@ -1963,12 +2122,14 @@ void MainWindow::ShowTrayMenu() {
 		}
 
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-		AppendMenuW(menu, MF_STRING, 1, L"Open Fairlead");
+		AppendMenuW(menu, MF_STRING, 1, open_label.c_str());
 	}
 
+	std::wstring settings_label = l10n::wtext("Settings…");
+	std::wstring quit_label = l10n::wtext("Quit Fairlead");
 	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-	AppendMenuW(menu, MF_STRING, 2, L"Settings…");
-	AppendMenuW(menu, MF_STRING, 3, L"Quit Fairlead");
+	AppendMenuW(menu, MF_STRING, 2, settings_label.c_str());
+	AppendMenuW(menu, MF_STRING, 3, quit_label.c_str());
 	POINT pt{};
 	GetCursorPos(&pt);
 	SetForegroundWindow(hwnd);

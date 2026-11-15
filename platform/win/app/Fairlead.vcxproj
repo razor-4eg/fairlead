@@ -88,6 +88,7 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="text.cpp" />
+    <ClCompile Include="l10n.cpp" />
     <ClCompile Include="coreabi.cpp" />
     <ClCompile Include="session.cpp" />
     <ClCompile Include="apps.cpp" />
@@ -111,6 +112,37 @@
     <Manifest Include="app.manifest" />
     <ResourceCompile Include="Fairlead.rc" />
     <Content Include="Assets\Fairlead.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <!-- Same catalogs as macOS; l10n.cpp reads l10n\{code}\Localizable.strings next to Fairlead.exe. -->
+  <ItemGroup>
+    <Content Include="..\..\mac\Support\en.lproj\Localizable.strings">
+      <Link>l10n\en\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\ru.lproj\Localizable.strings">
+      <Link>l10n\ru\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\de.lproj\Localizable.strings">
+      <Link>l10n\de\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\es.lproj\Localizable.strings">
+      <Link>l10n\es\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\fr.lproj\Localizable.strings">
+      <Link>l10n\fr\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\pt.lproj\Localizable.strings">
+      <Link>l10n\pt\Localizable.strings</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\mac\Support\zh-Hans.lproj\Localizable.strings">
+      <Link>l10n\zh-Hans\Localizable.strings</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

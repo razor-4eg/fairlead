@@ -145,7 +145,6 @@
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "Fairlead открывается при входе в систему. Туннель по умолчанию подключается сам.";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "Только в строке меню. Окно откроется по щелчку на значке Fairlead.";
 "Default tunnel" = "Туннель по умолчанию";
-"None" = "Нет";
 "Last active" = "Последний активный";
 "Fairlead selects this tunnel when it opens and connects it." = "Fairlead выбирает этот туннель при запуске и подключает его.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS ждёт разрешения. Откройте Системные настройки → Основные → Объекты входа и разрешите Fairlead.";
@@ -153,8 +152,8 @@
 "Enter a domain, for example example.com." = "Введите домен, например example.com.";
 "Wildcards such as *.example.com are not supported." = "Маски вроде *.example.com не поддерживаются.";
 "That domain is already listed." = "Этот домен уже в списке.";
-"mihomo is not included in this copy of Fairlead." = "В этой копии Fairlead нет mihomo.";
-"mihomo could not be started." = "mihomo не удалось запустить.";
+"This copy of Fairlead is missing the tunnel engine." = "В этой копии Fairlead нет движка туннеля.";
+"The tunnel could not be started." = "Не удалось запустить туннель.";
 "This Amnezia share is not AmneziaWG or WireGuard." = "В этой ссылке Amnezia нет AmneziaWG или WireGuard.";
 "The Amnezia share could not be read." = "Не удалось прочитать ссылку Amnezia.";
 "Jc, Jmin, and Jmax must be numbers, and Jmin cannot be greater than Jmax." = "Jc, Jmin и Jmax должны быть числами, и Jmin не может быть больше Jmax.";
@@ -190,17 +189,37 @@
 "%d domains.few" = "%d домена";
 "%d domains.many" = "%d доменов";
 "%d domains.other" = "%d домена";
-"mihomo is included and carries WireGuard and AmneziaWG, the TUN, and the routing rules. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "mihomo уже в составе приложения и обслуживает WireGuard и AmneziaWG, TUN и правила маршрутов. Хелпер один раз спрашивает пароль администратора, затем launchd держит его после перезагрузки. Конфиги с ключами остаются на этом Mac.";
 
-"A domain is matched by name. An app is matched by its process path while connected." = "Домен сопоставляется по имени. Приложение сопоставляется по пути процесса, пока туннель включён.";
-"mihomo exited. %@" = "mihomo завершился. %@";
-"mihomo did not answer on %@." = "mihomo не ответил на %@.";
-"mihomo could not start the TUN adapter. %@" = "mihomo не смог запустить адаптер TUN. %@";
-"mihomo could not be restarted." = "mihomo не удалось перезапустить.";
-"Could not build the mihomo config." = "Не удалось собрать конфиг mihomo.";
+"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Домен совпадает с этим именем и его поддоменами. Приложение сопоставляется по пути процесса, пока туннель включён.";
+"The tunnel exited. %@" = "Туннель завершился. %@";
+"The tunnel did not answer on %@." = "Туннель не ответил на %@.";
+"The tunnel could not start the network adapter. %@" = "Туннель не смог запустить сетевой адаптер. %@";
+"The tunnel could not be restarted." = "Не удалось перезапустить туннель.";
+"Could not build the tunnel config." = "Не удалось собрать конфиг туннеля.";
 "Edit list" = "Изменить список";
 "Saving the list" = "Сохранение списка";
 "Opening the tunnel…" = "Открываю туннель…";
-"Stopping mihomo…" = "Останавливаю mihomo…";
+"Stopping the tunnel…" = "Останавливаю туннель…";
 "Tunnel is off" = "Туннель выключен";
 "Private LAN ranges stay off the tunnel when this is on." = "Частные LAN-сети остаются вне туннеля, когда это включено.";
+"Auto" = "Авто";
+"Language" = "Язык";
+"Language of the Fairlead interface. Auto follows the system language." = "Язык интерфейса Fairlead. «Авто» следует языку системы.";
+
+/* Windows */
+"Process rule" = "Правило для процесса";
+"Looking for apps…" = "Ищу приложения…";
+"Browse…" = "Обзор…";
+"No apps found. Use Browse… to pick an .exe." = "Приложения не найдены. Выберите .exe через «Обзор…».";
+"No matches." = "Ничего не найдено.";
+"Open in the tray only. Click the Fairlead icon to show the window." = "Только в области уведомлений. Окно откроется по щелчку на значке Fairlead.";
+"Could not update routes on the live tunnel." = "Не удалось обновить маршруты работающего туннеля.";
+"The helper did not start." = "Помощник не запустился.";
+"fairlead-helper.exe is missing from %@" = "fairlead-helper.exe не найден в %@";
+"The helper start was cancelled." = "Запуск помощника отменён.";
+"fairlead-core.dll is missing from %@" = "fairlead-core.dll не найден в %@";
+"Could not read that file." = "Не удалось прочитать этот файл.";
+"That file is not a WireGuard or AmneziaWG config." = "Этот файл не является конфигом WireGuard или AmneziaWG.";
+"The tunnel did not start." = "Туннель не запустился.";
+"The tunnel started without a network adapter." = "Туннель запустился без сетевого адаптера.";
+"The tunnel could not be reached." = "Туннель недоступен.";

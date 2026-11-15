@@ -436,7 +436,8 @@ rate
 ===============
 */
     static func rate(_ bytesPerSecond: Double) -> String {
-        bytes(UInt64(max(0, bytesPerSecond))) + FairleadL10n.text("/s")
+        let capped = min(max(0, bytesPerSecond), 10 * 1024 * 1024 * 1024)
+        return bytes(UInt64(capped)) + FairleadL10n.text("/s")
     }
 
 /*

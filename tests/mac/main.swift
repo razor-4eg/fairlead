@@ -147,6 +147,9 @@ let plain = MihomoConfig.build(
 expect(plain.yaml != nil, "mihomo config builds \(plain.error)")
 expect(plain.yaml?.contains("type: wireguard") == true, "mihomo wireguard")
 expect(plain.yaml?.contains("tun:") == true, "mihomo tun")
+expect(plain.yaml?.contains("respect-rules: true") == true, "mihomo dns respects rules")
+expect(plain.yaml?.contains("enhanced-mode: redir-host") == true, "mihomo redir-host")
+expect(plain.yaml?.contains("1.1.1.1") == true, "mihomo public dns")
 expect(plain.yaml?.contains("PROCESS-PATH") != true, "mihomo no app rules without apps")
 let routed = MihomoConfig.build(
     wg: source, selected: true, excludeLAN: true,
@@ -155,8 +158,14 @@ let routed = MihomoConfig.build(
 expect(routed.yaml?.contains("type: wireguard") == true, "mihomo routed wireguard")
 expect(routed.yaml?.contains("tun:") == true, "mihomo routed tun")
 expect(routed.yaml?.contains("PROCESS-PATH,/usr/bin/curl,PROXY") == true, "mihomo app rule")
-expect(routed.yaml?.contains("DOMAIN,example.com,PROXY") == true, "mihomo domain rule")
+expect(routed.yaml?.contains("DOMAIN-SUFFIX,example.com,PROXY") == true, "mihomo domain rule")
 expect(routed.yaml?.contains("IP-CIDR,198.51.100.0/24,PROXY") == true, "mihomo cidr rule")
+let winApp = MihomoConfig.build(
+    wg: source, selected: false, excludeLAN: true,
+    cidrs: [], domains: [], apps: [#"C:\Program Files\Google\Chrome\Application\chrome.exe"#], secret: "s3cret"
+)
+expect(winApp.yaml?.contains("PROCESS-PATH,") == true && winApp.yaml?.contains("chrome.exe,DIRECT") == true, "mihomo win path")
+expect(winApp.yaml?.contains("PROCESS-NAME,chrome.exe,DIRECT") == true, "mihomo win name")
 expect(MihomoConfig.build(wg: "", selected: false, excludeLAN: false, cidrs: [], domains: [], apps: [], secret: "").yaml == nil, "mihomo rejects empty config")
 
 let awg = WGDocument.parse("""

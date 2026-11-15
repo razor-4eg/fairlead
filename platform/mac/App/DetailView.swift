@@ -144,7 +144,7 @@ tunnelBody
 
     private var statusMessage: String? {
         if model.tools.mihomo == nil {
-            return FairleadL10n.text("mihomo is not included in this copy of Fairlead.")
+            return FairleadL10n.text("This copy of Fairlead is missing the tunnel engine.")
         }
 
         if !model.helperOnline {
@@ -186,7 +186,7 @@ statusDetail
             }
             return FairleadL10n.text("Opening the tunnel…")
         case .disconnecting:
-            return FairleadL10n.text("Stopping mihomo…")
+            return FairleadL10n.text("Stopping the tunnel…")
         case .idle:
             return FairleadL10n.text("Tunnel is off")
         }

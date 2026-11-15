@@ -48,13 +48,15 @@ private var mihomoPID: Int32 = 0
 private var mihomoSecret = ""
 private var mihomoEndpoint = ""
 private var mihomoEndpointIP = ""
+private var deviceLabel = mihomoInterface
 private var lastProbeAt: Date?
 private var lastOkAt: Date?
 private var lastPingAt: Date?
 private var lastDelayMs = 0
 private var lastPingMs = 0
 private var probeFails = 0
-private var recovered = false
+private var recoveries = 0
+private var recoverUntil: Date?
 
 private let probePath = "/proxies/\(MihomoConfig.proxyName)/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=1500&expected=204"
 private let probeEvery: TimeInterval = 15
@@ -62,6 +64,7 @@ private let probeRetry: TimeInterval = 1
 private let probeStale: TimeInterval = 45
 private let pingEvery: TimeInterval = 5
 private let probeFailRestart = 6
+private let probeMaxRecover = 3
 
 private var configPath: String { FairleadPaths.mihomoDirectory + "/config.yaml" }
 private var logPath: String { FairleadPaths.mihomoDirectory + "/mihomo.log" }
@@ -200,7 +203,7 @@ mihomo -d workdir -f config.yaml. Output goes to mihomo.log.
 ===============
 */
 private func spawn(binary: String) -> String? {
-    let failure = FairleadL10n.text("mihomo could not be started.")
+    let failure = FairleadL10n.text("The tunnel could not be started.")
     unlink(logPath)
     guard FileManager.default.createFile(atPath: logPath, contents: nil, attributes: [.posixPermissions: 0o600]),
           let log = FileHandle(forWritingAtPath: logPath) else {
@@ -233,15 +236,42 @@ private func spawn(binary: String) -> String? {
 
 /*
 ===============
+tunEnabled
+True when GET /configs reports tun.enable. WireGuard can answer delay probes with TUN off.
+===============
+*/
+private func tunEnabled() -> Bool {
+    guard let reply = mihomoAPI("GET", "/configs", secret: mihomoSecret, timeout: 2), reply.status == 200 else {
+        return false
+    }
+
+    let text = String(decoding: reply.data, as: UTF8.self)
+    guard let tun = text.range(of: "\"tun\"") else { return false }
+    let window = text[tun.lowerBound...]
+    guard let enable = window.range(of: "\"enable\""),
+          window.distance(from: window.startIndex, to: enable.lowerBound) < 400 else {
+        return false
+    }
+
+    var value = window[enable.upperBound...]
+    while value.first == " " || value.first == "\t" || value.first == ":" {
+        value = value.dropFirst()
+    }
+
+    return value.hasPrefix("true")
+}
+
+/*
+===============
 waitReady
-Wait for the controller, then give the TUN a moment to fail loudly. Returns an error message on failure.
+Wait for the controller, then for tun.enable. TUN can take tens of seconds to fail or come up.
 ===============
 */
 private func waitReady() -> String? {
     var answered = false
     for _ in 0..<60 {
         if !mihomoRunning() {
-            return FairleadL10n.format("mihomo exited. %@", logTail())
+            return FairleadL10n.format("The tunnel exited. %@", logTail())
         }
 
         if let reply = mihomoAPI("GET", "/version", secret: mihomoSecret, timeout: 1), reply.status == 200 {
@@ -253,21 +283,28 @@ private func waitReady() -> String? {
     }
 
     guard answered else {
-        return FairleadL10n.format("mihomo did not answer on %@.", MihomoConfig.controller)
+        return FairleadL10n.format("The tunnel did not answer on %@.", MihomoConfig.controller)
     }
 
-    /* Brief pause so a TUN that fails immediately shows up in the log. */
-    usleep(400_000)
-    if !mihomoRunning() {
-        return FairleadL10n.format("mihomo exited. %@", logTail())
+    /* mihomo retries TUN for ~45s before giving up and leaving tun.enable false. */
+    for _ in 0..<100 {
+        if !mihomoRunning() {
+            return FairleadL10n.format("The tunnel exited. %@", logTail())
+        }
+
+        if tunEnabled() {
+            return nil
+        }
+
+        let log = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+        if log.contains("TUN listening error") {
+            return FairleadL10n.format("The tunnel could not start the network adapter. %@", logTail())
+        }
+
+        usleep(500_000)
     }
 
-    let log = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
-    if log.contains("TUN listening error") || log.contains("Start TUN") {
-        return FairleadL10n.format("mihomo could not start the TUN adapter. %@", logTail())
-    }
-
-    return nil
+    return FairleadL10n.text("The tunnel started without a network adapter.")
 }
 
 /*
@@ -301,7 +338,7 @@ waitControllerGone
 After a kill, wait until the old controller releases the port so the next spawn can bind.
 ===============
 */
-private func waitControllerGone(maxSeconds: TimeInterval = 3) {
+private func waitControllerGone(maxSeconds: TimeInterval = 8) {
     let deadline = Date().addingTimeInterval(maxSeconds)
     while Date() < deadline {
         if !controllerUp() { return }
@@ -400,7 +437,7 @@ Write config.yaml, start mihomo, and wait until the controller and TUN are up.
 func mihomoUp(wg: String, rules: MihomoRules) -> MihomoUp {
     stopProcess()
     guard let binary = ToolLocator.locate().mihomo else {
-        return MihomoUp(error: FairleadL10n.text("mihomo is not included in this copy of Fairlead."))
+        return MihomoUp(error: FairleadL10n.text("This copy of Fairlead is missing the tunnel engine."))
     }
 
     try? FileManager.default.createDirectory(atPath: FairleadPaths.mihomoDirectory, withIntermediateDirectories: true)
@@ -413,6 +450,7 @@ func mihomoUp(wg: String, rules: MihomoRules) -> MihomoUp {
     mihomoSecret = secret
     mihomoEndpoint = peerEndpoint(wg)
     mihomoEndpointIP = resolveEndpointIP(mihomoEndpoint)
+    deviceLabel = mihomoProtocolLabel(wg)
     if let error = spawn(binary: binary) {
         return MihomoUp(error: error)
     }
@@ -422,8 +460,9 @@ func mihomoUp(wg: String, rules: MihomoRules) -> MihomoUp {
         return MihomoUp(error: error)
     }
 
-    recovered = false
+    recoveries = 0
     probeFails = 0
+    recoverUntil = nil
     fputs("fairlead-helper: mihomo \(mihomoPID) up\n", stderr)
     return MihomoUp(pid: mihomoPID, secret: secret, endpoint: mihomoEndpoint, error: nil)
 }
@@ -439,20 +478,26 @@ func mihomoDown() {
     mihomoSecret = ""
     mihomoEndpoint = ""
     mihomoEndpointIP = ""
+    deviceLabel = mihomoInterface
     probeFails = 0
-    recovered = false
+    recoveries = 0
+    recoverUntil = nil
 }
 
 /*
 ===============
 reload
-Ask the running mihomo to read config.yaml again.
+Ask the running mihomo to read config.yaml again. Soft first; force only when asked.
 ===============
 */
-private func reload() -> Bool {
+private func reload(force: Bool) -> Bool {
     guard let body = try? JSONSerialization.data(withJSONObject: ["path": configPath]),
-          let text = String(data: body, encoding: .utf8),
-          let reply = mihomoAPI("PUT", "/configs?force=true", secret: mihomoSecret, body: text, timeout: 5) else {
+          let text = String(data: body, encoding: .utf8) else {
+        return false
+    }
+
+    let path = force ? "/configs?force=true" : "/configs"
+    guard let reply = mihomoAPI("PUT", path, secret: mihomoSecret, body: text, timeout: 20) else {
         return false
     }
 
@@ -462,22 +507,46 @@ private func reload() -> Bool {
 /*
 ===============
 mihomoReload
-Rewrite config.yaml with the new rules and reload mihomo. If the reload is refused, restart it.
+Rewrite config.yaml with the new rules and reload mihomo. Soft reload preferred; restart only if both fail.
 ===============
 */
 func mihomoReload(wg: String, rules: MihomoRules) -> String? {
     guard mihomoPID > 0 else { return FairleadL10n.text("The tunnel is not running.") }
     if let error = writeYAML(wg: wg, rules: rules, secret: mihomoSecret) { return error }
-    if mihomoRunning(), reload() { return nil }
 
-    fputs("fairlead-helper: mihomo reload failed, restarting\n", stderr)
+    /*
+     * Soft-reload rules, then drop live flows so apps pick up the new policy.
+     * Do not flush DNS caches — browsers still hold resolved addresses.
+     * Full restart is the fallback when soft reload fails.
+     */
+    if mihomoRunning(), reload(force: false) {
+        closeConnections()
+        return nil
+    }
+
+    fputs("fairlead-helper: rule reload failed, restarting mihomo\n", stderr)
     stopProcess()
     guard let binary = ToolLocator.locate().mihomo, spawn(binary: binary) == nil, waitReady() == nil else {
         stopProcess()
-        return FairleadL10n.text("mihomo could not be restarted.")
+        return FairleadL10n.text("The tunnel could not be restarted.")
     }
 
+    recoveries = 0
+    probeFails = 0
+    lastProbeAt = nil
+    lastOkAt = nil
+    recoverUntil = Date().addingTimeInterval(45)
     return nil
+}
+
+/*
+===============
+closeConnections
+Drop live flows so new rules apply. Leave DNS caches alone.
+===============
+*/
+private func closeConnections() {
+    _ = mihomoAPI("DELETE", "/connections", secret: mihomoSecret, timeout: 3)
 }
 
 /*
@@ -498,6 +567,8 @@ HTTP probe through the WireGuard outbound. 0 when the tunnel does not answer.
 ===============
 */
 private func probeDelay() -> Int {
+    /* Delay alone is not enough — WireGuard can answer with TUN disabled. */
+    guard tunEnabled() else { return 0 }
     guard let reply = mihomoAPI("GET", probePath, secret: mihomoSecret, timeout: 4), reply.status == 200 else {
         return 0
     }
@@ -585,31 +656,123 @@ private func pingEndpoint() -> Int {
 
 /*
 ===============
+mihomoTraffic
+One /traffic sample. up/down are bytes/s for the last second.
+===============
+*/
+private func mihomoTraffic() -> (rx: UInt64, tx: UInt64, down: UInt64, up: UInt64)? {
+    guard let url = URL(string: MihomoConfig.controllerURL + "/traffic") else { return nil }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2.5)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(mihomoSecret)", forHTTPHeaderField: "Authorization")
+
+    final class Box: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        var status = 0
+        var data = Data()
+        let done = DispatchSemaphore(value: 0)
+        private var finished = false
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            completionHandler(status == 200 ? .allow : .cancel)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+            self.data.append(data)
+            let text = String(decoding: self.data, as: UTF8.self)
+            if self.data.contains(UInt8(ascii: "\n")) || (text.contains("\"down\":") && text.contains("\"up\":")) {
+                finish()
+            }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            finish()
+        }
+
+        private func finish() {
+            guard !finished else { return }
+            finished = true
+            done.signal()
+        }
+    }
+
+    let box = Box()
+    let session = URLSession(configuration: apiSession.configuration, delegate: box, delegateQueue: nil)
+    let task = session.dataTask(with: request)
+    task.resume()
+    _ = box.done.wait(timeout: .now() + 3)
+    task.cancel()
+    session.invalidateAndCancel()
+
+    guard box.status == 200, !box.data.isEmpty else { return nil }
+    var body = String(decoding: box.data, as: UTF8.self)
+    if let nl = body.firstIndex(of: "\n") {
+        body = String(body[..<nl])
+    }
+    return (
+        rx: total(body, "\"downTotal\":"),
+        tx: total(body, "\"upTotal\":"),
+        down: total(body, "\"down\":"),
+        up: total(body, "\"up\":")
+    )
+}
+
+/*
+===============
 mihomoStatus
 Counters, HTTP probe for tunnel liveness, ICMP ping for the UI (only after the tunnel is up).
 Pass probe: false right after up() so Connected still waits on later status ticks.
 ===============
 */
 func mihomoStatus(probe: Bool = true) -> WGDeviceStatus? {
-    guard mihomoPID > 0, mihomoRunning() else {
+    let now = Date()
+    if mihomoPID <= 0 || !mihomoRunning() {
         lastProbeAt = nil
         lastOkAt = nil
         lastDelayMs = 0
         lastPingMs = 0
         probeFails = 0
+
+        /* Session still expected (config on disk) — try a few respawns. */
+        if FileManager.default.fileExists(atPath: configPath), recoveries < probeMaxRecover,
+           let binary = ToolLocator.locate().mihomo {
+            fputs("fairlead-helper: mihomo exited, restarting\n", stderr)
+            recoveries += 1
+            recoverUntil = now.addingTimeInterval(45)
+            stopProcess()
+            if spawn(binary: binary) == nil {
+                let peer = WGPeerStatus(
+                    publicKey: "", endpoint: mihomoEndpoint, allowedIPs: "",
+                    handshake: 0, rx: 0, tx: 0, keepalive: 0, delay: 0, ping: 0,
+                    stage: FairleadL10n.text("Opening the tunnel…")
+                )
+                return WGDeviceStatus(interface: deviceLabel, publicKey: "", listenPort: 0, peers: [peer])
+            }
+        }
+
         return nil
     }
 
     var rx: UInt64 = 0
     var tx: UInt64 = 0
-    if let reply = mihomoAPI("GET", "/connections", secret: mihomoSecret), reply.status == 200 {
-        let head = String(decoding: reply.data.prefix(512), as: UTF8.self)
-        rx = total(head, "\"downloadTotal\":")
-        tx = total(head, "\"uploadTotal\":")
+    var downRate: UInt64? = nil
+    var upRate: UInt64? = nil
+
+    var stage = ""
+    if let until = recoverUntil, now < until, !tunEnabled() {
+        let peer = WGPeerStatus(
+            publicKey: "", endpoint: mihomoEndpoint, allowedIPs: "",
+            handshake: 0, rx: 0, tx: 0, keepalive: 0, delay: 0, ping: 0,
+            stage: FairleadL10n.text("Opening the tunnel…")
+        )
+        return WGDeviceStatus(interface: deviceLabel, publicKey: "", listenPort: 0, peers: [peer])
     }
 
-    let now = Date()
-    var stage = ""
+    if recoverUntil != nil, (recoverUntil.map { now >= $0 } ?? true) || tunEnabled() {
+        recoverUntil = nil
+    }
+
     if probe {
         let gap = lastOkAt == nil ? probeRetry : probeEvery
         let needProbe = lastProbeAt == nil || now.timeIntervalSince(lastProbeAt!) >= gap
@@ -624,17 +787,31 @@ func mihomoStatus(probe: Bool = true) -> WGDeviceStatus? {
                 lastOkAt = now
                 lastDelayMs = delay
                 probeFails = 0
-            } else if lastOkAt == nil {
-                probeFails += 1
-                if probeFails >= probeFailRestart, !recovered {
-                    fputs("fairlead-helper: tunnel not reachable, restarting mihomo\n", stderr)
-                    recovered = true
-                    probeFails = 0
-                    lastProbeAt = nil
-                    let binary = ToolLocator.locate().mihomo
-                    stopProcess()
-                    if let binary, spawn(binary: binary) == nil {
-                        stage = FairleadL10n.text("Opening the tunnel…")
+                recoverUntil = nil
+            } else {
+                /* TUN off means Connected must drop now — WireGuard delay can still succeed alone. */
+                if !tunEnabled() {
+                    lastOkAt = nil
+                    lastDelayMs = 0
+                }
+                if lastOkAt == nil {
+                    probeFails += 1
+                    if probeFails >= probeFailRestart, recoveries < probeMaxRecover {
+                        fputs("fairlead-helper: tunnel not reachable, restarting mihomo\n", stderr)
+                        recoveries += 1
+                        probeFails = 0
+                        lastProbeAt = nil
+                        lastOkAt = nil
+                        recoverUntil = now.addingTimeInterval(45)
+                        let binary = ToolLocator.locate().mihomo
+                        stopProcess()
+                        if let binary, spawn(binary: binary) == nil {
+                                                    stage = FairleadL10n.text("Opening the tunnel…")
+                        } else {
+                            stage = FairleadL10n.text("The tunnel could not be reached.")
+                        }
+                    } else if recoveries >= probeMaxRecover, probeFails >= probeFailRestart {
+                        stage = FairleadL10n.text("The tunnel could not be reached.")
                     }
                 }
             }
@@ -659,6 +836,13 @@ func mihomoStatus(probe: Bool = true) -> WGDeviceStatus? {
             }
         }
         ping = lastPingMs
+        /* Real B/s from mihomo — only once Connected so Connecting stays snappy. */
+        if let sample = mihomoTraffic() {
+            rx = sample.rx
+            tx = sample.tx
+            downRate = sample.down
+            upRate = sample.up
+        }
     } else {
         lastOkAt = nil
         lastDelayMs = 0
@@ -674,9 +858,11 @@ func mihomoStatus(probe: Bool = true) -> WGDeviceStatus? {
         keepalive: 0,
         delay: delay,
         ping: ping,
-        stage: stage
+        stage: stage,
+        downRate: downRate,
+        upRate: upRate
     )
-    return WGDeviceStatus(interface: mihomoInterface, publicKey: "", listenPort: 0, peers: [peer])
+    return WGDeviceStatus(interface: deviceLabel, publicKey: "", listenPort: 0, peers: [peer])
 }
 
 /*
@@ -692,6 +878,11 @@ func mihomoAdopt(pid: Int32, secret: String, endpoint: String) -> Bool {
     mihomoPID = pid
     mihomoSecret = secret
     mihomoEndpoint = endpoint
+    if FileManager.default.fileExists(atPath: configPath),
+       let wg = try? String(contentsOfFile: configPath, encoding: .utf8) {
+        deviceLabel = mihomoProtocolLabel(wg)
+        mihomoEndpointIP = resolveEndpointIP(endpoint)
+    }
     return true
 }
 

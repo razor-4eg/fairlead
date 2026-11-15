@@ -16,6 +16,8 @@ struct AppSettings: Equatable {
     var launchAtLogin: Bool
     /// First launch opens in the menu bar only (no main window).
     var startHidden: Bool
+    /// `auto` or a FairleadL10n language code.
+    var language: String
     /// `nil` / empty = none; `last` = last active; otherwise a tunnel UUID string.
     var defaultTunnel: String?
     /// Updated on each successful connect. Used when `defaultTunnel == last`.
@@ -24,9 +26,15 @@ struct AppSettings: Equatable {
     static let empty = AppSettings(
         launchAtLogin: false,
         startHidden: false,
+        language: "auto",
         defaultTunnel: nil,
         lastActiveTunnelID: nil
     )
+
+    var languageSelection: String {
+        let key = language.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? "auto" : key
+    }
 
     var defaultTunnelSelection: String {
         let key = defaultTunnel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -38,6 +46,7 @@ extension AppSettings: Codable {
     enum CodingKeys: String, CodingKey {
         case launchAtLogin
         case startHidden
+        case language
         case defaultTunnel
         case lastActiveTunnelID
         case defaultTunnelID
@@ -47,6 +56,9 @@ extension AppSettings: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         startHidden = try container.decodeIfPresent(Bool.self, forKey: .startHidden) ?? false
+        let lang = (try container.decodeIfPresent(String.self, forKey: .language) ?? "auto")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        language = lang.isEmpty ? "auto" : lang
         lastActiveTunnelID = try container.decodeIfPresent(UUID.self, forKey: .lastActiveTunnelID)
         if let key = try container.decodeIfPresent(String.self, forKey: .defaultTunnel) {
             let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -62,6 +74,7 @@ extension AppSettings: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(launchAtLogin, forKey: .launchAtLogin)
         try container.encode(startHidden, forKey: .startHidden)
+        try container.encode(language, forKey: .language)
         try container.encodeIfPresent(defaultTunnel, forKey: .defaultTunnel)
         try container.encodeIfPresent(lastActiveTunnelID, forKey: .lastActiveTunnelID)
     }

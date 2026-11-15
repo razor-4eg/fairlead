@@ -37,6 +37,7 @@
 #define PROBE_STALE_SEC 45
 #define PING_EVERY_SEC 5
 #define PROBE_FAIL_RESTART 6
+#define PROBE_MAX_RECOVER 3
 
 typedef struct session_s {
 	int active;
@@ -55,10 +56,16 @@ typedef struct session_s {
 	time_t last_probe;
 	time_t last_ok;
 	time_t last_ping_at;
+	time_t recover_until;	/* Grace after a respawn — don't burn fails while TUN is coming up. */
+	ULONGLONG traffic_tick;	/* GetTickCount64 — last /traffic sample. */
+	unsigned long long traffic_rx;
+	unsigned long long traffic_tx;
+	unsigned long long down_bps;
+	unsigned long long up_bps;
 	int last_delay_ms;
 	int last_ping_ms;
 	int probe_fails;
-	int recovered;
+	int recoveries;
 } session_t;
 
 static session_t s_session;
@@ -224,6 +231,12 @@ static int api(const char *method, const char *path, const char *body, char *rep
 			}
 
 			len += (int)got;
+			reply[len] = '\0';
+
+			/* Totals sit at the front of /connections — stop before the huge array. */
+			if (strstr(reply, "\"downloadTotal\":") && strstr(reply, "\"uploadTotal\":")) {
+				break;
+			}
 		}
 
 		if (reply) {
@@ -408,7 +421,7 @@ static void stop_proc(void) {
 		TerminateProcess(s_session.proc.hProcess, 0);
 	}
 
-	WaitForSingleObject(s_session.proc.hProcess, 4000);
+	WaitForSingleObject(s_session.proc.hProcess, 2000);
 	CloseHandle(s_session.proc.hProcess);
 	CloseHandle(s_session.proc.hThread);
 	s_session.proc_open = 0;
@@ -476,8 +489,47 @@ static int spawn_mihomo(void) {
 
 /*
 ===============
+tun_enabled
+True when GET /configs reports tun.enable. WireGuard can answer delay probes with TUN off.
+===============
+*/
+static int tun_enabled(void) {
+	char	reply[2048];
+	int		status;
+	char	*tun;
+	char	*enable;
+
+	status = 0;
+
+	if (!api("GET", "/configs", NULL, reply, (int)sizeof(reply), &status, 1500) || status != 200) {
+		return 0;
+	}
+
+	tun = strstr(reply, "\"tun\"");
+
+	if (!tun) {
+		return 0;
+	}
+
+	enable = strstr(tun, "\"enable\"");
+
+	if (!enable || enable > tun + 400) {
+		return 0;
+	}
+
+	enable += 8;
+
+	while (*enable == ' ' || *enable == '\t' || *enable == ':') {
+		enable++;
+	}
+
+	return strncmp(enable, "true", 4) == 0;
+}
+
+/*
+===============
 wait_ready
-Wait for the controller, then give the TUN a moment to fail loudly. Fills err on failure.
+Wait for the controller, then for tun.enable. TUN can take tens of seconds to fail or come up.
 ===============
 */
 static int wait_ready(char *err, int err_cap) {
@@ -490,7 +542,7 @@ static int wait_ready(char *err, int err_cap) {
 	for (i = 0; i < 60; i++) {
 		if (!is_running()) {
 			last_line(line, (int)sizeof(line));
-			snprintf(err, (size_t)err_cap, "mihomo exited. %s", line);
+			snprintf(err, (size_t)err_cap, "The tunnel exited. %s", line);
 			return 0;
 		}
 
@@ -504,28 +556,35 @@ static int wait_ready(char *err, int err_cap) {
 	}
 
 	if (i >= 60) {
-		snprintf(err, (size_t)err_cap, "mihomo did not answer on %s.", CONTROLLER_ADDR);
+		snprintf(err, (size_t)err_cap, "The tunnel did not answer on %s.", CONTROLLER_ADDR);
 		return 0;
 	}
 
-	/* Brief pause so a TUN that fails immediately shows up in the log. */
-	Sleep(400);
+	/* mihomo retries TUN for ~45s before giving up and leaving tun.enable false. */
+	for (i = 0; i < 100; i++) {
+		if (!is_running()) {
+			last_line(line, (int)sizeof(line));
+			snprintf(err, (size_t)err_cap, "The tunnel exited. %s", line);
+			return 0;
+		}
 
-	if (!is_running()) {
-		last_line(line, (int)sizeof(line));
-		snprintf(err, (size_t)err_cap, "mihomo exited. %s", line);
-		return 0;
+		if (tun_enabled()) {
+			return 1;
+		}
+
+		read_log(logbuf, (int)sizeof(logbuf));
+
+		if (strstr(logbuf, "TUN listening error")) {
+			last_line(line, (int)sizeof(line));
+			snprintf(err, (size_t)err_cap, "The tunnel could not start the network adapter. %s", line);
+			return 0;
+		}
+
+		Sleep(200);
 	}
 
-	read_log(logbuf, (int)sizeof(logbuf));
-
-	if (strstr(logbuf, "TUN listening error") || strstr(logbuf, "Start TUN")) {
-		last_line(line, (int)sizeof(line));
-		snprintf(err, (size_t)err_cap, "mihomo could not start the TUN adapter. %s", line);
-		return 0;
-	}
-
-	return 1;
+	snprintf(err, (size_t)err_cap, "The tunnel started without a network adapter.");
+	return 0;
 }
 
 /*
@@ -606,7 +665,7 @@ static int write_config(const char *wg_text, const char **cidrs, int cidr_count,
 
 	if (!yaml) {
 		if (err[0] == '\0') {
-			snprintf(err, (size_t)err_cap, "Could not build the mihomo config.");
+			snprintf(err, (size_t)err_cap, "Could not build the tunnel config.");
 		}
 
 		return 0;
@@ -653,6 +712,44 @@ static unsigned long long total_of(const char *text, const char *key) {
 
 /*
 ===============
+read_totals
+Cumulative counters from /connections. Only the JSON header is kept — the array is ignored.
+===============
+*/
+static int read_totals(unsigned long long *rx, unsigned long long *tx) {
+	char	reply[2048];
+	int		status;
+
+	*rx = 0;
+	*tx = 0;
+	status = 0;
+
+	if (api("GET", "/connections", NULL, reply, (int)sizeof(reply), &status, 1500) && status == 200) {
+		*rx = total_of(reply, "\"downloadTotal\":");
+		*tx = total_of(reply, "\"uploadTotal\":");
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+===============
+close_connections
+Drop live flows so new rules apply immediately after a reload.
+Do not flush DNS caches — browsers still hold resolved addresses.
+===============
+*/
+static void close_connections(void) {
+	char	reply[128];
+	int		status;
+
+	status = 0;
+	api("DELETE", "/connections", NULL, reply, (int)sizeof(reply), &status, 3000);
+}
+
+/*
+===============
 probe_delay
 HTTP probe through the WireGuard outbound. Returns delay ms, or 0 on failure.
 ===============
@@ -665,6 +762,11 @@ static int probe_delay(void) {
 
 	status = 0;
 	delay = 0;
+
+	/* Delay alone is not enough — WireGuard can answer with TUN disabled. */
+	if (!tun_enabled()) {
+		return 0;
+	}
 
 	if (!api("GET", PROBE_PATH, NULL, reply, (int)sizeof(reply), &status, 2500) || status != 200) {
 		return 0;
@@ -811,9 +913,7 @@ static void fill_identity(win_tun_result_t *out) {
 	static const char *const lan_ranges[] = {
 		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"
 	};
-	char	reply[512];
-	int		status;
-	int		i;
+	int					i;
 
 	protocol_label(out->iface, (int)sizeof(out->iface));
 	snprintf(out->live_endpoint, sizeof(out->live_endpoint), "%s", s_session.endpoint);
@@ -840,17 +940,63 @@ static void fill_identity(win_tun_result_t *out) {
 	out->ping_ms = 0;
 	out->rx = 0;
 	out->tx = 0;
+	out->down_bps = 0;
+	out->up_bps = 0;
 
 	if (!is_running()) {
 		return;
 	}
 
-	status = 0;
+	/* Last good counters — refresh_traffic() updates these once Connected. */
+	out->rx = s_session.traffic_rx;
+	out->tx = s_session.traffic_tx;
+	out->down_bps = s_session.down_bps;
+	out->up_bps = s_session.up_bps;
+}
 
-	if (api("GET", "/connections", NULL, reply, (int)sizeof(reply), &status, 1500) && status == 200) {
-		out->rx = total_of(reply, "\"downloadTotal\":");
-		out->tx = total_of(reply, "\"uploadTotal\":");
+/*
+===============
+refresh_traffic
+Rates from successive /connections totals. Fast header-only read — no streaming API.
+===============
+*/
+static void refresh_traffic(win_tun_result_t *out) {
+	unsigned long long	rx;
+	unsigned long long	tx;
+	ULONGLONG			now;
+
+	if (!read_totals(&rx, &tx)) {
+		out->rx = s_session.traffic_rx;
+		out->tx = s_session.traffic_tx;
+		out->down_bps = s_session.down_bps;
+		out->up_bps = s_session.up_bps;
+		return;
 	}
+
+	now = GetTickCount64();
+
+	if (s_session.traffic_tick != 0 && now > s_session.traffic_tick &&
+		rx >= s_session.traffic_rx && tx >= s_session.traffic_tx) {
+		double	dt;
+
+		dt = (double)(now - s_session.traffic_tick) / 1000.0;
+
+		if (dt >= 0.2) {
+			s_session.down_bps = (unsigned long long)((rx - s_session.traffic_rx) / dt);
+			s_session.up_bps = (unsigned long long)((tx - s_session.traffic_tx) / dt);
+		}
+	} else {
+		s_session.down_bps = 0;
+		s_session.up_bps = 0;
+	}
+
+	s_session.traffic_rx = rx;
+	s_session.traffic_tx = tx;
+	s_session.traffic_tick = now;
+	out->rx = rx;
+	out->tx = tx;
+	out->down_bps = s_session.down_bps;
+	out->up_bps = s_session.up_bps;
 }
 
 /*
@@ -877,9 +1023,32 @@ static void fill_result(win_tun_result_t *out) {
 		s_session.last_delay_ms = 0;
 		s_session.last_ping_ms = 0;
 		s_session.probe_fails = 0;
-		snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+
+		if (s_session.wg && s_session.recoveries < PROBE_MAX_RECOVER) {
+			log_line("fairlead: mihomo exited, restarting");
+			s_session.recoveries++;
+			s_session.recover_until = now + 45;
+			stop_proc();
+
+			if (spawn_mihomo()) {
+				snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+				return;
+			}
+		}
+
+		snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
 		add_warning(out, "mihomo is not running.");
 		return;
+	}
+
+	/* After a respawn, wait for TUN before counting probe failures. */
+	if (s_session.recover_until != 0 && now < s_session.recover_until && !tun_enabled()) {
+		snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+		return;
+	}
+
+	if (s_session.recover_until != 0 && (now >= s_session.recover_until || tun_enabled())) {
+		s_session.recover_until = 0;
 	}
 
 	/*
@@ -905,24 +1074,40 @@ static void fill_result(win_tun_result_t *out) {
 			s_session.last_ok = now;
 			s_session.last_delay_ms = delay;
 			s_session.probe_fails = 0;
-		} else if (s_session.last_ok == 0) {
-			s_session.probe_fails++;
+			s_session.recover_until = 0;
+		} else {
+			/* TUN off means Connected must drop now — WireGuard delay can still succeed alone. */
+			if (!tun_enabled()) {
+				s_session.last_ok = 0;
+				s_session.last_delay_ms = 0;
+			}
 
-			/*
-			 * Rapid down/up can leave WireGuard stuck until mihomo is restarted.
-			 * One recovery per connect is enough — avoid a restart loop.
-			 */
-			if (s_session.probe_fails >= PROBE_FAIL_RESTART && !s_session.recovered && s_session.wg) {
-				log_line("fairlead: tunnel not reachable, restarting mihomo");
-				s_session.recovered = 1;
-				s_session.probe_fails = 0;
-				s_session.last_probe = 0;
-				stop_proc();
+			if (s_session.last_ok == 0) {
+				s_session.probe_fails++;
 
-				if (spawn_mihomo()) {
-					snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
-				} else {
-					add_warning(out, "mihomo could not be restarted.");
+				/*
+				 * Rapid down/up can leave WireGuard stuck until mihomo is restarted.
+				 * A few recoveries per session; grace window avoids burning them while TUN rises.
+				 */
+				if (s_session.probe_fails >= PROBE_FAIL_RESTART &&
+					s_session.recoveries < PROBE_MAX_RECOVER && s_session.wg) {
+					log_line("fairlead: tunnel not reachable, restarting mihomo");
+					s_session.recoveries++;
+					s_session.probe_fails = 0;
+					s_session.last_probe = 0;
+					s_session.last_ok = 0;
+					s_session.recover_until = now + 45;
+					stop_proc();
+
+					if (spawn_mihomo()) {
+						snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+					} else {
+						snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
+						add_warning(out, "The tunnel could not be restarted.");
+					}
+				} else if (s_session.recoveries >= PROBE_MAX_RECOVER &&
+					s_session.probe_fails >= PROBE_FAIL_RESTART) {
+					snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
 				}
 			}
 		}
@@ -946,9 +1131,15 @@ static void fill_result(win_tun_result_t *out) {
 		}
 
 		out->ping_ms = s_session.last_ping_ms;
+		/* Real B/s from mihomo — only once Connected so Connecting stays snappy. */
+		refresh_traffic(out);
 	} else {
 		s_session.last_ok = 0;
 		s_session.last_delay_ms = 0;
+		s_session.down_bps = 0;
+		s_session.up_bps = 0;
+		out->down_bps = 0;
+		out->up_bps = 0;
 	}
 }
 
@@ -977,20 +1168,23 @@ static void json_path(const char *src, char *dst, int cap) {
 /*
 ===============
 reload
-Ask the running mihomo to read config.yaml again. Returns 1 on 204.
+Ask the running mihomo to read config.yaml again. Soft first; force only when asked.
 ===============
 */
-static int reload(void) {
+static int reload(int force) {
 	char	path[MAX_PATH * 2];
 	char	body[MAX_PATH * 2 + 32];
 	char	reply[256];
+	char	route[64];
 	int		status;
 
 	status = 0;
 	json_path(s_session.config_path, path, (int)sizeof(path));
 	snprintf(body, sizeof(body), "{\"path\":\"%s\"}", path);
+	snprintf(route, sizeof(route), force ? "/configs?force=true" : "/configs");
 
-	if (!api("PUT", "/configs?force=true", body, reply, (int)sizeof(reply), &status, 3000)) {
+	/* Rule-only reloads often exceed a few seconds while TUN/routes settle. */
+	if (!api("PUT", route, body, reply, (int)sizeof(reply), &status, 20000)) {
 		return 0;
 	}
 
@@ -1012,10 +1206,16 @@ static void session_clear(void) {
 	s_session.last_probe = 0;
 	s_session.last_ok = 0;
 	s_session.last_ping_at = 0;
+	s_session.recover_until = 0;
+	s_session.traffic_tick = 0;
+	s_session.traffic_rx = 0;
+	s_session.traffic_tx = 0;
+	s_session.down_bps = 0;
+	s_session.up_bps = 0;
 	s_session.last_delay_ms = 0;
 	s_session.last_ping_ms = 0;
 	s_session.probe_fails = 0;
-	s_session.recovered = 0;
+	s_session.recoveries = 0;
 }
 
 /*
@@ -1203,7 +1403,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	resolve_endpoint_ip();
 
 	if (!spawn_mihomo()) {
-		snprintf(out->error, sizeof(out->error), "mihomo could not be started.");
+		snprintf(out->error, sizeof(out->error), "The tunnel could not be started.");
 		return 0;
 	}
 
@@ -1217,7 +1417,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	s_session.wg = _strdup(config);
 	s_session.active = 1;
 	out->ok = 1;
-	/* Connected waits for the HTTP probe on status ticks — keep up() snappy for UI stages. */
+	/* Connected waits for the HTTP probe on later status ticks — keep up() short. */
 	fill_identity(out);
 	snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
 	return 1;
@@ -1245,19 +1445,49 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 		return 0;
 	}
 
-	if (!is_running() || !reload()) {
-		log_line("fairlead: mihomo reload failed, restarting");
+	if (!is_running()) {
+		snprintf(out->error, sizeof(out->error), "The tunnel is not running.");
+		return 0;
+	}
+
+	/*
+	 * Soft-reload rules, then drop live flows so Chrome/etc pick up the new policy.
+	 * A full process restart is the reliable fallback — soft reload alone can leave
+	 * TUN/DNS half-applied until the user bounces the tunnel by hand.
+	 */
+	if (reload(0)) {
+		close_connections();
+	} else {
+		log_line("fairlead: rule reload failed, restarting mihomo");
 		stop_proc();
 
 		if (!spawn_mihomo() || !wait_ready(err, (int)sizeof(err))) {
-			snprintf(out->error, sizeof(out->error), "mihomo could not be restarted.");
+			snprintf(out->error, sizeof(out->error), "The tunnel could not be restarted.");
 			stop_proc();
 			session_clear();
 			return 0;
 		}
+
+		s_session.recoveries = 0;
+		s_session.probe_fails = 0;
+		s_session.last_probe = 0;
+		s_session.last_ok = 0;
+		s_session.traffic_tick = 0;
+		s_session.down_bps = 0;
+		s_session.up_bps = 0;
+		s_session.recover_until = time(NULL) + 45;
 	}
 
 	out->ok = 1;
-	fill_result(out);
+	fill_identity(out);
+
+	if (tun_enabled() && s_session.last_ok != 0) {
+		out->handshake = (int)s_session.last_ok;
+		out->delay_ms = s_session.last_delay_ms;
+		out->ping_ms = s_session.last_ping_ms;
+	} else {
+		snprintf(out->stage, sizeof(out->stage), "Checking the tunnel…");
+	}
+
 	return 1;
 }

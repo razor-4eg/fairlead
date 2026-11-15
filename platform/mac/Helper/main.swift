@@ -355,7 +355,7 @@ There is one mihomo process, so any tunnel that is up comes down first.
 private func bringUp(slug: String, config: String, rules: MihomoRules) -> RPCResponse {
     let tools = ToolLocator.locate()
     guard tools.ready else {
-        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("mihomo is not included in this copy of Fairlead."), tools: tools)
+        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("This copy of Fairlead is missing the tunnel engine."), tools: tools)
     }
 
     for other in Array(state.tunnels.keys) {
@@ -532,12 +532,18 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
         }
 
         let error = applyBypass(slug: name, rules: rules(request))
-        var response = snapshotResponse(id: request.id)
-        if let error {
-            response.ok = false
-            response.error = error
+        let tunnels = state.tunnels.keys.sorted().compactMap { slug -> ManagedTunnel? in
+            guard let runtime = state.tunnels[slug] else { return nil }
+            return managed(slug, runtime)
         }
-
+        var response = RPCResponse(
+            id: request.id,
+            ok: error == nil,
+            error: error,
+            tools: ToolLocator.locate(),
+            managed: tunnels,
+            devices: currentDevices(probe: false)
+        )
         return response
     case "quit":
         for slug in Array(state.tunnels.keys) {

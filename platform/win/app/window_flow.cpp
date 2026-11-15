@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
 
+#include "l10n.h"
 #include "text.h"
 
 #include <cctype>
@@ -76,7 +77,7 @@ winrt::fire_and_forget MainWindow::BootAsync() {
 }
 
 winrt::fire_and_forget MainWindow::TickAsync() {
-	if (ticking) {
+	if (ticking || rpc_busy) {
 		co_return;
 	}
 
@@ -92,8 +93,8 @@ winrt::fire_and_forget MainWindow::TickAsync() {
 		}
 	}
 
-	/* Connecting may run a probe (and occasionally a mihomo restart) inside status. */
-	int wait = session.helper_online ? (busy ? 12000 : 3000) : 200;
+	/* Connecting may run a probe (and occasionally a tunnel restart) inside status. */
+	int wait = session.helper_online ? (busy ? 20000 : 10000) : 200;
 	auto body = session.StatusBody();
 	co_await winrt::resume_background();
 	auto reply = session.Call(body, wait);
@@ -150,15 +151,18 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::ConnectAsync(Tunnel* tunnel
 
 	/* mihomo resolves domains itself. No pre-resolve here. */
 	auto body = session.Rpc("up", tunnel, true);
+	rpc_busy = true;
+	flag_off clear_rpc{ rpc_busy };
 	co_await winrt::resume_background();
-	auto reply = session.Call(body);
+	/* up() waits on TUN; don't lose the reply to a short pipe wait. */
+	auto reply = session.Call(body, 60000);
 	co_await resume_ui{ queue };
 	/* Cancelled while up() ran — DisconnectAsync already moved the phase. */
 	if (tunnel->phase != "Connecting") {
 		if (session.ReplyOk(reply)) {
 			auto down = session.Rpc("down", tunnel, false);
 			co_await winrt::resume_background();
-			session.Call(down);
+			session.Call(down, 30000);
 			co_await resume_ui{ queue };
 		}
 		Paint();
@@ -179,8 +183,10 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::DisconnectAsync(Tunnel* tun
 	session.BeginDisconnect(tunnel);
 	Paint();
 	auto body = session.Rpc("down", tunnel, false);
+	rpc_busy = true;
+	flag_off clear_rpc{ rpc_busy };
 	co_await winrt::resume_background();
-	session.Call(body);
+	session.Call(body, 30000);
 	co_await resume_ui{ queue };
 	session.FinishDisconnect(tunnel);
 	Paint();
@@ -196,14 +202,10 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::PushBypassAsync(Tunnel* tun
 	auto body = session.Rpc("bypass", tunnel, true);
 	co_await winrt::resume_background();
 	auto reply = session.Call(body);
-	if (!session.ReplyOk(reply)) {
-		reply = session.Call(body);
-	}
-
 	co_await resume_ui{ queue };
 	if (session.ReplyOk(reply)) {
 		session.ApplyStatus(reply);
-		if (session.banner.rfind("Could not update routes", 0) == 0) {
+		if (session.banner == l10n::text("Could not update routes on the live tunnel.") || session.banner.rfind("Could not update routes", 0) == 0) {
 			session.ClearBanner();
 		}
 
@@ -211,9 +213,9 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::PushBypassAsync(Tunnel* tun
 		co_return;
 	}
 
-	session.banner = session.ErrorOf(reply);
+	session.banner = l10n::display(session.ErrorOf(reply));
 	if (session.banner.empty()) {
-		session.banner = "Could not update routes on the live tunnel.";
+		session.banner = l10n::text("Could not update routes on the live tunnel.");
 	}
 
 	Paint();
@@ -232,7 +234,7 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::EnsureHelperAsync(bool inte
 	flag_off clear{ helper_starting };
 	std::wstring exe = widen(session.exe_dir) + L"\\fairlead-helper.exe";
 	if (!std::filesystem::exists(std::filesystem::path(exe))) {
-		session.banner = "fairlead-helper.exe is missing from " + session.exe_dir;
+		session.banner = l10n::format("fairlead-helper.exe is missing from %@", session.exe_dir);
 		Paint();
 		co_return;
 	}
@@ -307,7 +309,7 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::EnsureHelperAsync(bool inte
 		}
 	}
 
-	session.banner = "The helper did not start.";
+	session.banner = l10n::text("The helper did not start.");
 	Paint();
 }
 
@@ -347,7 +349,7 @@ winrt::fire_and_forget MainWindow::SaveRoutesAsync() {
 	RouteProgress().Visibility(mux::Visibility::Visible);
 	auto built = session.BuildList(S(RouteName().Text()), S(RouteBox().Text()), nullptr);
 	if (built.list) {
-		RouteProgress().Text(L"Adding the list");
+		RouteProgress().Text(hstring(l10n::wtext("Adding the list")));
 		session.CommitNew(std::move(built.list));
 		PaintRules();
 		co_await PushBypassAsync(session.selected);
@@ -398,7 +400,7 @@ winrt::fire_and_forget MainWindow::SaveListAsync() {
 	ListProgress().Visibility(mux::Visibility::Visible);
 	auto built = session.BuildList(S(ListName().Text()), S(ListEntries().Text()), list);
 	if (built.list) {
-		ListProgress().Text(L"Saving the list");
+		ListProgress().Text(hstring(l10n::wtext("Saving the list")));
 		auto name = built.list->name;
 		auto entries = std::move(built.list->entries);
 		session.CommitUpdate(list, name, std::move(entries));

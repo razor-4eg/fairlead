@@ -91,10 +91,12 @@ Open Settings from the gear. On a Mac you can also use the menu bar or Command-C
 
 **Default tunnel.** Fairlead selects this tunnel when it opens and connects it. Together with Open at login, the tunnel comes up after you sign in. None opens Fairlead without connecting.
 
-**Components.** Shows mihomo and the helper. Start helper installs the helper, or replaces the one already installed, after the administrator password. Config folder opens the directory with your configs.
+**Start helper.** Installs the helper, or replaces the one already installed, after the administrator password. Config folder opens the directory with your configs.
 
 ![Settings](docs/screenshots/settings.png)
 
 ## Language
 
-Fairlead uses the system language. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included.
+Fairlead uses the system language by default. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included. The same languages and the same Localizable.strings catalogs are used on macOS and Windows.
+
+To pick one yourself, open Settings and choose it under Language. Auto follows the system language again. The choice is saved with your other settings and applies right away, with no restart.

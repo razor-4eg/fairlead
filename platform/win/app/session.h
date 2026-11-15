@@ -51,6 +51,7 @@ struct Tunnel {
 	std::string rx = "0 B";
 	std::string tx = "0 B";
 	std::string lan = "Private LAN ranges stay off the tunnel when this is on.";
+	bool lan_default = true;
 	bool connected = false;
 	uint64_t sample_rx = 0;
 	uint64_t sample_tx = 0;
@@ -72,10 +73,11 @@ struct Session {
 	std::string notice;
 	std::string banner;
 	bool helper_online = false;
-	std::string awg_text = "mihomo  not found";
+	std::string awg_text = "engine  not found";
 	bool awg_ok = false;
 	bool launch_at_login = false;
 	bool start_hidden = false;
+	std::string language = "auto";
 	std::string default_id;
 	std::string last_active_id;
 	static constexpr char const* last_key = "last";
@@ -121,6 +123,8 @@ struct Session {
 	bool AddProgram(std::string const& path, std::string const& name);
 	void SetLaunch(bool on);
 	void SetStartHidden(bool on);
+	void SetLanguage(std::string const& pref);
+	void Relocalize();
 	void SetDefault(std::string const& id);
 	void OpenFolder() const;
 	bool Ping();

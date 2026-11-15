@@ -2,7 +2,7 @@
 //
 // copyright (c) 2026 razor-4eg.
 //
-// SettingsSheet.swift -- Settings for login, the default tunnel, and components.
+// SettingsSheet.swift -- Settings for login, language, the default tunnel, and helper.
 //
 //===============================================================
 
@@ -17,7 +17,7 @@ struct SettingsSheet: View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 10) {
                 Mark(size: 18)
-                Text("Settings")
+                Text(FairleadL10n.text("Settings"))
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(Theme.text)
             }
@@ -25,10 +25,10 @@ struct SettingsSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Open at login")
+                        Text(FairleadL10n.text("Open at login"))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.text)
-                        Text("Fairlead starts when you sign in. A default tunnel connects on its own.")
+                        Text(FairleadL10n.text("Fairlead starts when you sign in. A default tunnel connects on its own."))
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -50,10 +50,10 @@ struct SettingsSheet: View {
 
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Start hidden")
+                        Text(FairleadL10n.text("Start hidden"))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.text)
-                        Text("Open in the menu bar only. Click the Fairlead icon to show the window.")
+                        Text(FairleadL10n.text("Open in the menu bar only. Click the Fairlead icon to show the window."))
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -69,10 +69,28 @@ struct SettingsSheet: View {
                 Rectangle().fill(Theme.line).frame(height: 1)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Default tunnel")
+                    Text(FairleadL10n.text("Language"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.text)
-                    Text("Fairlead selects this tunnel when it opens and connects it.")
+                    Text(FairleadL10n.text("Language of the Fairlead interface. Auto follows the system language."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    FairleadSelect(
+                        selection: model.settings.languageSelection,
+                        options: [("auto", FairleadL10n.languageTitle("auto"))]
+                            + FairleadL10n.languageCodes.map { ($0, FairleadL10n.languageTitle($0)) },
+                        select: { model.setLanguage($0) }
+                    )
+                }
+
+                Rectangle().fill(Theme.line).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(FairleadL10n.text("Default tunnel"))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                    Text(FairleadL10n.text("Fairlead selects this tunnel when it opens and connects it."))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -95,7 +113,13 @@ struct SettingsSheet: View {
                     .strokeBorder(Theme.line)
             )
 
-            components
+            HStack {
+                FairleadButton(title: "Config folder") { model.openConfigFolder() }
+                Spacer()
+                FairleadButton(title: "Start helper", prominent: true) {
+                    Task { await model.installHelper() }
+                }
+            }
 
             HStack {
                 Spacer()
@@ -106,65 +130,6 @@ struct SettingsSheet: View {
         .frame(width: 560)
         .background(Theme.bg)
         .onAppear { model.syncLoginItem() }
-    }
-
-    private var components: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Components")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.text)
-            toolRow("mihomo", path: model.tools.mihomo)
-            toolRow("Helper", path: model.helperOnline ? FairleadPaths.socket : nil)
-            Text("mihomo is included and carries WireGuard and AmneziaWG, the TUN, and the routing rules. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac.")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            if !model.toolLog.isEmpty {
-                ScrollView {
-                    Text(model.toolLog)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 72)
-            }
-
-            HStack {
-                FairleadButton(title: "Config folder") { model.openConfigFolder() }
-                Spacer()
-                FairleadButton(title: "Start helper", prominent: true) {
-                    Task { await model.installHelper() }
-                }
-            }
-        }
-        .padding(16)
-        .background(Theme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.line)
-        )
-    }
-
-/*
-===============
-toolRow
-===============
-*/
-    private func toolRow(_ title: LocalizedStringKey, path: String?) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(path == nil ? Theme.danger : Theme.accent)
-                .frame(width: 6, height: 6)
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.text)
-                .frame(width: 132, alignment: .leading)
-            Text(path ?? FairleadL10n.text("not found"))
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
-        }
+        .id(model.settings.languageSelection)
     }
 }

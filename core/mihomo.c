@@ -133,10 +133,11 @@ becomes a prefix regex that also covers its helper processes. Other paths stay e
 ===============
 */
 static void y_process(ybuf_t *b, const char *path, const char *tail) {
-	char	re[1100];
-	size_t	len;
-	size_t	n;
-	size_t	i;
+	char		re[1100];
+	size_t		len;
+	size_t		n;
+	size_t		i;
+	const char	*base;
 
 	len = strlen(path);
 
@@ -146,6 +147,13 @@ static void y_process(ybuf_t *b, const char *path, const char *tail) {
 
 	if (path[0] != '/' || len < 6 || len > 500 || strncmp(path + len - 4, ".app", 4) != 0) {
 		y_rule(b, "PROCESS-PATH", path, tail);
+		/* Windows: also match by exe name so updates/moves still hit the rule. */
+		base = strrchr(path, '\\');
+
+		if (base && base[1] && strchr(base + 1, '.') && !strchr(base + 1, '\\')) {
+			y_rule(b, "PROCESS-NAME", base + 1, tail);
+		}
+
 		return;
 	}
 
@@ -172,7 +180,7 @@ fail
 */
 static char *fail(char *err, int err_cap, const char *msg) {
 	if (err && err_cap > 0) {
-		snprintf(err, err_cap, "%s", msg ? msg : "Could not build the mihomo config.");
+		snprintf(err, err_cap, "%s", msg ? msg : "Could not build the tunnel config.");
 	}
 
 	return NULL;
@@ -402,7 +410,7 @@ static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_s
 				continue;
 			}
 
-			y_rule(b, "DOMAIN", rules->domains[i], hit);
+			y_rule(b, "DOMAIN-SUFFIX", rules->domains[i], hit);
 		}
 
 		for (i = 0; i < rules->cidr_count; i++) {
@@ -603,23 +611,25 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan,
 		}
 	}
 
+	/*
+	 * redir-host (not fake-ip): live rule reloads must not poison browser DNS caches.
+	 * fake-ip + PUT /configs resets the pool cursor; flushing it leaves Chrome holding
+	 * dead 198.18.x.x addresses until the tunnel is bounced. Public resolvers keep
+	 * DIRECT apps alive; WG DNS stays on the proxy via remote-dns-resolve.
+	 */
 	y_add(&b, "dns:\n");
 	y_add(&b, "  enable: true\n");
-	y_add(&b, "  enhanced-mode: fake-ip\n");
-	y_add(&b, "  fake-ip-range: 198.18.0.1/16\n");
+	y_add(&b, "  enhanced-mode: redir-host\n");
+	y_add(&b, "  respect-rules: true\n");
 	y_add(&b, "  default-nameserver:\n");
-	y_add(&b, "    - system\n");
+	y_add(&b, "    - 1.1.1.1\n");
+	y_add(&b, "    - 8.8.8.8\n");
+	y_add(&b, "  proxy-server-nameserver:\n");
+	y_add(&b, "    - 1.1.1.1\n");
+	y_add(&b, "    - 8.8.8.8\n");
 	y_add(&b, "  nameserver:\n");
-
-	if (dns_n > 0) {
-		for (i = 0; i < dns_n; i++) {
-			y_add(&b, "    - ");
-			y_add(&b, dns_items[i]);
-			y_add(&b, "\n");
-		}
-	} else {
-		y_add(&b, "    - system\n");
-	}
+	y_add(&b, "    - 1.1.1.1\n");
+	y_add(&b, "    - 8.8.8.8\n");
 
 	y_add(&b, "proxies:\n");
 	y_add(&b, "  - name: fairlead\n");
@@ -762,7 +772,7 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan,
 					continue;
 				}
 
-				y_rule(&b, "DOMAIN", rules->domains[i], "DIRECT");
+				y_rule(&b, "DOMAIN-SUFFIX", rules->domains[i], "DIRECT");
 			}
 
 			for (i = 0; i < rules->cidr_count; i++) {

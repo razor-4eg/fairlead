@@ -15,8 +15,12 @@ public struct WGPeerStatus: Equatable, Codable, Sendable {
     public var ping: Int
     /// Progress while Connecting. Empty once the tunnel is reachable.
     public var stage: String
+    /// Instant download rate from mihomo /traffic (B/s). Nil when /traffic was not sampled.
+    public var downRate: UInt64?
+    /// Instant upload rate from mihomo /traffic (B/s). Nil when /traffic was not sampled.
+    public var upRate: UInt64?
 
-    public init(publicKey: String, endpoint: String, allowedIPs: String, handshake: Int, rx: UInt64, tx: UInt64, keepalive: Int, delay: Int = 0, ping: Int = 0, stage: String = "") {
+    public init(publicKey: String, endpoint: String, allowedIPs: String, handshake: Int, rx: UInt64, tx: UInt64, keepalive: Int, delay: Int = 0, ping: Int = 0, stage: String = "", downRate: UInt64? = nil, upRate: UInt64? = nil) {
         self.publicKey = publicKey
         self.endpoint = endpoint
         self.allowedIPs = allowedIPs
@@ -27,6 +31,8 @@ public struct WGPeerStatus: Equatable, Codable, Sendable {
         self.delay = delay
         self.ping = ping
         self.stage = stage
+        self.downRate = downRate
+        self.upRate = upRate
     }
 }
 

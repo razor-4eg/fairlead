@@ -56,7 +56,7 @@ The shared C builder does the work. Returns the YAML, or nil with a message.
 
             if yaml != nil { return (yaml, "") }
             let message = String(cString: err)
-            return (nil, message.isEmpty ? FairleadL10n.text("Could not build the mihomo config.") : CBridge.localize(message, templates: []))
+            return (nil, message.isEmpty ? FairleadL10n.text("Could not build the tunnel config.") : CBridge.localize(message, templates: []))
         }
     }
 }

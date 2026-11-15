@@ -2,6 +2,7 @@
 #include "session.h"
 
 #include "coreabi.h"
+#include "l10n.h"
 #include "text.h"
 #include "base.h"
 
@@ -60,7 +61,7 @@ int json_int(json_t const* obj, char const* key) {
 }
 
 std::string bytes_of(double n) {
-	char const* units[] = { "B", "KB", "MB", "GB" };
+	std::string units[] = { l10n::text("B"), l10n::text("KB"), l10n::text("MB"), l10n::text("GB") };
 	int i = 0;
 	if (n < 0) {
 		n = 0;
@@ -73,44 +74,61 @@ std::string bytes_of(double n) {
 
 	char buf[64];
 	if (i == 0) {
-		snprintf(buf, sizeof(buf), "%llu B", (unsigned long long)n);
+		snprintf(buf, sizeof(buf), "%llu", (unsigned long long)n);
 	} else if (n >= 10) {
-		snprintf(buf, sizeof(buf), "%.0f %s", n, units[i]);
+		snprintf(buf, sizeof(buf), "%.0f", n);
 	} else {
-		snprintf(buf, sizeof(buf), "%.1f %s", n, units[i]);
+		snprintf(buf, sizeof(buf), "%.1f", n);
 	}
 
-	return buf;
+	return std::string(buf) + " " + units[i];
 }
 
 std::string rate_of(double n) {
-	return bytes_of(n < 0 ? 0 : n) + "/s";
+	return bytes_of(n < 0 ? 0 : n) + l10n::text("/s");
 }
 
 std::string ago_of(int stamp) {
 	if (stamp <= 0) {
-		return "none";
+		return l10n::text("none");
 	}
 
 	auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	int seconds = (int)now - stamp;
 	if (seconds < 5) {
-		return "just now";
+		return l10n::text("just now");
 	}
 
 	if (seconds < 60) {
-		return std::to_string(seconds) + " s ago";
+		return l10n::format("%d s ago", seconds);
 	}
 
 	if (seconds < 3600) {
-		return std::to_string(seconds / 60) + " min ago";
+		return l10n::format("%d min ago", seconds / 60);
 	}
 
 	if (seconds < 86400) {
-		return std::to_string(seconds / 3600) + " h ago";
+		return l10n::format("%d h ago", seconds / 3600);
 	}
 
-	return "a while ago";
+	return l10n::text("a while ago");
+}
+
+/* Idle tunnels carry display strings; rewrite them when the language changes. */
+void localize_idle(Tunnel& tunnel) {
+	if (tunnel.lan_default) {
+		tunnel.lan = l10n::text("Private LAN ranges stay off the tunnel when this is on.");
+	}
+
+	if (tunnel.phase == "Off") {
+		tunnel.detail = l10n::text("Tunnel is off");
+		tunnel.down = rate_of(0);
+		tunnel.up = rate_of(0);
+		tunnel.rx = bytes_of(0);
+		tunnel.tx = bytes_of(0);
+	} else if (tunnel.phase == "Disconnecting") {
+		tunnel.detail = l10n::text("Stopping the tunnel…");
+	}
 }
 
 std::wstring module_dir() {
@@ -281,8 +299,13 @@ Session::Session() {
 	coreabi::load();
 	dir = appdata_dir();
 	exe_dir = tool_dir();
+	l10n::set_root(module_dir() + L"\\l10n");
 	token = LoadToken();
 	Load();
+	for (auto const& tunnel : tunnels) {
+		localize_idle(*tunnel);
+	}
+
 	RefreshTools();
 	selected = ResolveDefault();
 	if (!selected && !tunnels.empty()) {
@@ -291,17 +314,17 @@ Session::Session() {
 }
 
 std::string Session::HelperText() const {
-	return helper_online ? "Helper is running" : "Helper is not running";
+	return l10n::text(helper_online ? "Helper is running" : "Helper is not running");
 }
 
 std::string Session::PolicyTitle() const {
-	return selected && selected->selected_policy ? "Through the tunnel" : "Direct";
+	return l10n::text(selected && selected->selected_policy ? "Through the tunnel" : "Direct");
 }
 
 std::string Session::PolicyBody() const {
-	return selected && selected->selected_policy
+	return l10n::text(selected && selected->selected_policy
 		? "Only these addresses use the tunnel. Everything else stays on the regular network."
-		: "These addresses stay out of the tunnel and use the regular network.";
+		: "These addresses stay out of the tunnel and use the regular network.");
 }
 
 std::vector<Tunnel*> Session::Filtered() const {
@@ -347,7 +370,7 @@ void Session::RefreshLabels(Tunnel* tunnel) {
 	json_t* root = json_parse(&arena, text.c_str());
 	if (root) {
 		std::string endpoint = json_str(root, "endpoint");
-		tunnel->endpoint = endpoint.empty() ? "no endpoint" : endpoint;
+		tunnel->endpoint = endpoint.empty() ? l10n::text("no endpoint") : endpoint;
 		tunnel->address = json_str(root, "address");
 		tunnel->amnezia = json_bool(root, "amnezia", false);
 	}
@@ -357,19 +380,19 @@ void Session::RefreshLabels(Tunnel* tunnel) {
 
 void Session::RefreshTools() {
 	if (!coreabi::ready()) {
-		notice = "fairlead-core.dll is missing from " + narrow(coreabi::dll_path());
+		notice = l10n::format("fairlead-core.dll is missing from %@", narrow(coreabi::dll_path()));
 		awg_ok = false;
-		awg_text = "mihomo  not found";
+		awg_text = "engine  " + l10n::text("not found");
 		return;
 	}
 
 	std::filesystem::path awg = std::filesystem::path(widen(exe_dir)) / L"bin" / L"mihomo.exe";
 	awg_ok = std::filesystem::exists(awg);
-	awg_text = awg_ok ? narrow(awg.wstring()) : "mihomo  not found";
+	awg_text = awg_ok ? narrow(awg.wstring()) : "engine  " + l10n::text("not found");
 	if (!helper_online) {
-		notice = "The system helper is not running. A tunnel cannot start without it.";
+		notice = l10n::text("The system helper is not running. A tunnel cannot start without it.");
 	} else if (selected && !awg_ok) {
-		notice = "mihomo is not included in this copy of Fairlead.";
+		notice = l10n::text("This copy of Fairlead is missing the tunnel engine.");
 	} else {
 		notice.clear();
 	}
@@ -531,10 +554,26 @@ void Session::ApplyStatus(std::string const& reply) {
 
 			/* Connected when the HTTP probe through the tunnel succeeded. Ping is display only. */
 			if (live->handshake > 0) {
-				if (live->sample_tick != 0 && now > live->sample_tick) {
+				uint64_t down_rate = json_u64(peer, "downRate");
+				uint64_t up_rate = json_u64(peer, "upRate");
+				bool have_rate = json_get(peer, "downRate") || json_get(peer, "upRate");
+				/* Helper rates when present and non-zero; otherwise derive from totals. */
+				if (have_rate && (down_rate > 0 || up_rate > 0)) {
+					live->down = rate_of((double)down_rate);
+					live->up = rate_of((double)up_rate);
+				} else if (live->sample_tick != 0 && now > live->sample_tick &&
+					rx >= live->sample_rx && tx >= live->sample_tx) {
 					double dt = (now - live->sample_tick) / 1000.0;
-					live->down = rate_of((double)(rx - live->sample_rx) / dt);
-					live->up = rate_of((double)(tx - live->sample_tx) / dt);
+					if (dt >= 0.2) {
+						double down = (double)(rx - live->sample_rx) / dt;
+						double up = (double)(tx - live->sample_tx) / dt;
+						double cap = 10.0 * 1024.0 * 1024.0 * 1024.0;
+						live->down = rate_of(down > cap ? 0 : down);
+						live->up = rate_of(up > cap ? 0 : up);
+					}
+				} else if (have_rate) {
+					live->down = rate_of(0);
+					live->up = rate_of(0);
 				}
 
 				live->sample_rx = rx;
@@ -545,18 +584,18 @@ void Session::ApplyStatus(std::string const& reply) {
 				live->connected = true;
 				live->phase = "Connected";
 				live->detail = live->ping_ms > 0
-					? ("Reachable · " + std::to_string(live->ping_ms) + " ms")
-					: "Reachable";
+					? l10n::format("Reachable · %d ms", live->ping_ms)
+					: l10n::text("Reachable");
 			} else if (live->phase == "Connecting" || live->connected) {
 				live->connected = false;
 				live->phase = "Connecting";
 				std::string stage = json_str(peer, "stage");
-				live->detail = stage.empty() ? "Checking the tunnel…" : stage;
+				live->detail = stage.empty() ? l10n::text("Checking the tunnel…") : l10n::display(stage);
 				live->delay_ms = 0;
-				live->down = "0 B/s";
-				live->up = "0 B/s";
-				live->rx = "0 B";
-				live->tx = "0 B";
+				live->down = rate_of(0);
+				live->up = rate_of(0);
+				live->rx = bytes_of(0);
+				live->tx = bytes_of(0);
 				live->sample_rx = 0;
 				live->sample_tx = 0;
 				live->sample_tick = 0;
@@ -584,6 +623,7 @@ void Session::ApplyStatus(std::string const& reply) {
 
 			if (!joined.empty()) {
 				live->lan = joined;
+				live->lan_default = false;
 			}
 		}
 	}
@@ -594,13 +634,13 @@ void Session::ApplyStatus(std::string const& reply) {
 void Session::BeginConnect(Tunnel* tunnel) {
 	banner.clear();
 	tunnel->phase = "Connecting";
-	tunnel->detail = "Opening the tunnel…";
+	tunnel->detail = l10n::text("Opening the tunnel…");
 	tunnel->connected = false;
 	tunnel->handshake = 0;
-	tunnel->down = "0 B/s";
-	tunnel->up = "0 B/s";
-	tunnel->rx = "0 B";
-	tunnel->tx = "0 B";
+	tunnel->down = rate_of(0);
+	tunnel->up = rate_of(0);
+	tunnel->rx = bytes_of(0);
+	tunnel->tx = bytes_of(0);
 	tunnel->sample_rx = 0;
 	tunnel->sample_tx = 0;
 	tunnel->sample_tick = 0;
@@ -610,10 +650,10 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 	if (reply.empty() || !ReplyOk(reply)) {
 		tunnel->phase = "Off";
 		tunnel->connected = false;
-		tunnel->detail = "Tunnel is off";
-		banner = ErrorOf(reply);
+		tunnel->detail = l10n::text("Tunnel is off");
+		banner = l10n::display(ErrorOf(reply));
 		if (banner.empty()) {
-			banner = "The tunnel did not start.";
+			banner = l10n::text("The tunnel did not start.");
 		}
 
 		return false;
@@ -621,7 +661,7 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 
 	tunnel->connected = false;
 	tunnel->phase = "Connecting";
-	tunnel->detail = "Opening the tunnel…";
+	tunnel->detail = l10n::text("Opening the tunnel…");
 	ApplyStatus(reply);
 	RememberLast(tunnel->id);
 	return true;
@@ -629,26 +669,27 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 
 void Session::BeginDisconnect(Tunnel* tunnel) {
 	tunnel->phase = "Disconnecting";
-	tunnel->detail = "Stopping mihomo…";
+	tunnel->detail = l10n::text("Stopping the tunnel…");
 }
 
 void Session::FinishDisconnect(Tunnel* tunnel) {
 	tunnel->connected = false;
 	tunnel->phase = "Off";
-	tunnel->detail = "Tunnel is off";
+	tunnel->detail = l10n::text("Tunnel is off");
 	tunnel->iface.clear();
 	tunnel->handshake = 0;
-	tunnel->down = "0 B/s";
-	tunnel->up = "0 B/s";
-	tunnel->rx = "0 B";
-	tunnel->tx = "0 B";
+	tunnel->down = rate_of(0);
+	tunnel->up = rate_of(0);
+	tunnel->rx = bytes_of(0);
+	tunnel->tx = bytes_of(0);
 	tunnel->sample_rx = 0;
 	tunnel->sample_tx = 0;
 	tunnel->sample_tick = 0;
 }
 
 std::unique_ptr<Tunnel> Session::MakeDraft() {
-	auto tunnel = new_tunnel("Tunnel " + std::to_string(tunnels.size() + 1), coreabi::blank());
+	auto tunnel = new_tunnel(l10n::format("Tunnel %d", (int)tunnels.size() + 1), coreabi::blank());
+	localize_idle(*tunnel);
 	RefreshLabels(tunnel.get());
 	return tunnel;
 }
@@ -665,7 +706,7 @@ void Session::Adopt(std::unique_ptr<Tunnel> tunnel) {
 bool Session::ImportFile(std::string const& path) {
 	std::string text = read_file(widen(path));
 	if (text.empty() && !std::filesystem::exists(std::filesystem::path(widen(path)))) {
-		banner = "Could not read that file.";
+		banner = l10n::text("Could not read that file.");
 		return false;
 	}
 
@@ -673,7 +714,7 @@ bool Session::ImportFile(std::string const& path) {
 	std::string name;
 	int code = coreabi::import_text(text, config, name);
 	if (code != 0 || config.empty()) {
-		banner = code == 1 ? "That file is not a WireGuard or AmneziaWG config." : "Could not read that share.";
+		banner = l10n::text(code == 1 ? "That file is not a WireGuard or AmneziaWG config." : "The Amnezia share could not be read.");
 		return false;
 	}
 
@@ -682,6 +723,7 @@ bool Session::ImportFile(std::string const& path) {
 	}
 
 	auto tunnel = new_tunnel(name, config);
+	localize_idle(*tunnel);
 	RefreshLabels(tunnel.get());
 	selected = tunnel.get();
 	tunnels.push_back(std::move(tunnel));
@@ -788,7 +830,7 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 		}
 
 		if (list->entries.size() >= 4096) {
-			built.problems.push_back({ line, reported ? "" : "A list can hold 4096 entries." });
+			built.problems.push_back({ line, reported ? "" : l10n::text("A list can hold 4096 entries.") });
 			reported = true;
 			continue;
 		}
@@ -796,13 +838,13 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 		std::string kind, value, note, error;
 		coreabi::classify(line, kind, value, note, error);
 		if (!note.empty() || kind == "error" || kind.empty()) {
-			built.problems.push_back({ line, error.empty() ? "Enter an IP, a network, or a domain." : error });
+			built.problems.push_back({ line, error.empty() ? l10n::text("Enter an IP, a network, or a domain.") : l10n::display(error) });
 			continue;
 		}
 
 		std::string key = kind + " " + value;
 		if (std::find(seen.begin(), seen.end(), key) != seen.end()) {
-			built.problems.push_back({ line, kind == "domain" ? "That domain is already listed." : "That address is already listed." });
+			built.problems.push_back({ line, l10n::text(kind == "domain" ? "That domain is already listed." : "That address is already listed.") });
 			continue;
 		}
 
@@ -816,7 +858,7 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 
 	if (list->entries.empty()) {
 		if (built.problems.empty()) {
-			built.problems.push_back({ "", "Enter an IP, a network, or a domain." });
+			built.problems.push_back({ "", l10n::text("Enter an IP, a network, or a domain.") });
 		}
 
 		return built;
@@ -893,6 +935,25 @@ void Session::SetLaunch(bool on) {
 void Session::SetStartHidden(bool on) {
 	start_hidden = on;
 	Save();
+}
+
+void Session::SetLanguage(std::string const& pref) {
+	l10n::set_preference(pref);
+	language = l10n::preference();
+	Relocalize();
+	Save();
+}
+
+/* Rewrites stored display strings after the language changes. Live tunnels refresh on the next status tick. */
+void Session::Relocalize() {
+	for (auto const& tunnel : tunnels) {
+		localize_idle(*tunnel);
+		if (!tunnel->connected) {
+			RefreshLabels(tunnel.get());
+		}
+	}
+
+	RefreshTools();
 }
 
 void Session::SetDefault(std::string const& id) {
@@ -978,7 +1039,7 @@ bool Session::LaunchHelper(void* hwnd, std::string& error) {
 	error.clear();
 	std::wstring exe = widen(exe_dir) + L"\\fairlead-helper.exe";
 	if (!std::filesystem::exists(std::filesystem::path(exe))) {
-		error = "fairlead-helper.exe is missing from " + exe_dir;
+		error = l10n::format("fairlead-helper.exe is missing from %@", exe_dir);
 		return false;
 	}
 
@@ -1002,7 +1063,7 @@ bool Session::LaunchHelper(void* hwnd, std::string& error) {
 	info.lpDirectory = directory.c_str();
 	info.nShow = SW_HIDE;
 	if (!ShellExecuteExW(&info)) {
-		error = "The helper start was cancelled.";
+		error = l10n::text("The helper start was cancelled.");
 		return false;
 	}
 
@@ -1060,6 +1121,13 @@ void Session::Load() {
 
 	launch_at_login = json_bool(root, "launchAtLogin", false);
 	start_hidden = json_bool(root, "startHidden", false);
+	language = trim_copy(json_str(root, "language"));
+	if (language.empty()) {
+		language = "auto";
+	}
+
+	l10n::set_preference(language);
+	language = l10n::preference();
 	default_id = json_str(root, "defaultTunnel");
 	last_active_id = json_str(root, "lastActiveTunnel");
 	json_t* list = json_get(root, "tunnels");
@@ -1109,6 +1177,7 @@ void Session::Save() {
 	out += launch_at_login ? "true" : "false";
 	out += ",\n  \"startHidden\": ";
 	out += start_hidden ? "true" : "false";
+	out += ",\n  \"language\": " + json_quote(language);
 	out += ",\n  \"defaultTunnel\": " + json_quote(default_id);
 	out += ",\n  \"lastActiveTunnel\": " + json_quote(last_active_id);
 	out += ",\n  \"tunnels\": [\n";

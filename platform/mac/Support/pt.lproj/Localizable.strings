@@ -145,7 +145,6 @@
 "Fairlead starts when you sign in. A default tunnel connects on its own." = "O Fairlead abre quando inicia sessão. Um túnel predefinido liga-se sozinho.";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "Abrir só na barra de menus. Clique no ícone do Fairlead para mostrar a janela.";
 "Default tunnel" = "Túnel predefinido";
-"None" = "Nenhum";
 "Last active" = "Último ativo";
 "Fairlead selects this tunnel when it opens and connects it." = "O Fairlead escolhe este túnel ao abrir e liga-o.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "O macOS ainda precisa de autorização. Abra Definições do Sistema → Geral → Itens de Início e permita o Fairlead.";
@@ -153,8 +152,8 @@
 "Enter a domain, for example example.com." = "Introduza um domínio, por exemplo example.com.";
 "Wildcards such as *.example.com are not supported." = "Caracteres universais como *.example.com não são suportados.";
 "That domain is already listed." = "Esse domínio já está na lista.";
-"mihomo is not included in this copy of Fairlead." = "Esta cópia do Fairlead não inclui o mihomo.";
-"mihomo could not be started." = "Não foi possível iniciar o mihomo.";
+"This copy of Fairlead is missing the tunnel engine." = "Esta cópia do Fairlead não inclui o motor do túnel.";
+"The tunnel could not be started." = "Não foi possível iniciar o túnel.";
 "This Amnezia share is not AmneziaWG or WireGuard." = "Esta partilha Amnezia não é AmneziaWG nem WireGuard.";
 "The Amnezia share could not be read." = "Não foi possível ler a partilha Amnezia.";
 "Jc, Jmin, and Jmax must be numbers, and Jmin cannot be greater than Jmax." = "Jc, Jmin e Jmax têm de ser números, e Jmin não pode ser maior que Jmax.";
@@ -190,17 +189,37 @@
 "%d domains.few" = "%d domínios";
 "%d domains.many" = "%d domínios";
 "%d domains.other" = "%d domínios";
-"mihomo is included and carries WireGuard and AmneziaWG, the TUN, and the routing rules. The helper asks for an administrator password only the first time, then launchd keeps it running across reboots. Configs with keys stay on this Mac." = "O mihomo está incluído e cobre WireGuard e AmneziaWG, o TUN e as regras de encaminhamento. O assistente pede a palavra-passe de administrador só na primeira vez; depois o launchd mantém-no após reinícios. As configurações com chaves ficam neste Mac.";
 
-"A domain is matched by name. An app is matched by its process path while connected." = "Um domínio é reconhecido pelo nome. Uma app é reconhecida pelo caminho do seu processo enquanto há ligação.";
-"mihomo exited. %@" = "O mihomo terminou. %@";
-"mihomo did not answer on %@." = "O mihomo não respondeu em %@.";
-"mihomo could not start the TUN adapter. %@" = "O mihomo não conseguiu iniciar o adaptador TUN. %@";
-"mihomo could not be restarted." = "Não foi possível reiniciar o mihomo.";
-"Could not build the mihomo config." = "Não foi possível criar a configuração do mihomo.";
+"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Um domínio corresponde a esse nome e aos seus subdomínios. Uma app é reconhecida pelo caminho do seu processo enquanto há ligação.";
+"The tunnel exited. %@" = "O túnel terminou. %@";
+"The tunnel did not answer on %@." = "O túnel não respondeu em %@.";
+"The tunnel could not start the network adapter. %@" = "O túnel não conseguiu iniciar o adaptador de rede. %@";
+"The tunnel could not be restarted." = "Não foi possível reiniciar o túnel.";
+"Could not build the tunnel config." = "Não foi possível criar a configuração do túnel.";
 "Edit list" = "Editar lista";
 "Saving the list" = "A guardar a lista";
-"Opening the tunnel…" = "Opening the tunnel…";
-"Stopping mihomo…" = "Stopping mihomo…";
-"Tunnel is off" = "Tunnel is off";
-"Private LAN ranges stay off the tunnel when this is on." = "Private LAN ranges stay off the tunnel when this is on.";
+"Opening the tunnel…" = "A abrir o túnel…";
+"Stopping the tunnel…" = "A parar o túnel…";
+"Tunnel is off" = "O túnel está desligado";
+"Private LAN ranges stay off the tunnel when this is on." = "Os intervalos de LAN privada ficam fora do túnel quando esta opção está ativa.";
+"Auto" = "Automático";
+"Language" = "Idioma";
+"Language of the Fairlead interface. Auto follows the system language." = "Idioma da interface do Fairlead. «Automático» segue o idioma do sistema.";
+
+/* Windows */
+"Process rule" = "Regra de processo";
+"Looking for apps…" = "A procurar apps…";
+"Browse…" = "Procurar…";
+"No apps found. Use Browse… to pick an .exe." = "Nenhuma app encontrada. Use «Procurar…» para escolher um .exe.";
+"No matches." = "Sem resultados.";
+"Open in the tray only. Click the Fairlead icon to show the window." = "Abrir só na área de notificação. Clique no ícone do Fairlead para mostrar a janela.";
+"Could not update routes on the live tunnel." = "Não foi possível atualizar as rotas do túnel ativo.";
+"The helper did not start." = "O assistente não iniciou.";
+"fairlead-helper.exe is missing from %@" = "Falta o fairlead-helper.exe em %@";
+"The helper start was cancelled." = "O arranque do assistente foi cancelado.";
+"fairlead-core.dll is missing from %@" = "Falta o fairlead-core.dll em %@";
+"Could not read that file." = "Não foi possível ler esse ficheiro.";
+"That file is not a WireGuard or AmneziaWG config." = "Esse ficheiro não é uma configuração WireGuard ou AmneziaWG.";
+"The tunnel did not start." = "O túnel não iniciou.";
+"The tunnel started without a network adapter." = "O túnel iniciou sem adaptador de rede.";
+"The tunnel could not be reached." = "Não foi possível alcançar o túnel.";

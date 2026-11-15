@@ -66,6 +66,7 @@ init
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
         tunnels = store.load()
         settings = settingsStore.load()
+        FairleadL10n.applyPreference(settings.language)
         selection = preferredStartupSelection()
         pendingMainWindow = !settings.startHidden
         if settings.startHidden {
@@ -190,6 +191,28 @@ setStartHidden
     func setStartHidden(_ enabled: Bool) {
         settings.startHidden = enabled
         settingsStore.save(settings)
+    }
+
+/*
+===============
+setLanguage
+`auto` follows the system language; otherwise a shipped language code.
+===============
+*/
+    func setLanguage(_ code: String) {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = trimmed.isEmpty ? "auto" : trimmed
+        guard settings.language != next else { return }
+        settings.language = next
+        FairleadL10n.applyPreference(next)
+        if next == "auto" {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            let tag = next == "zh-Hans" ? "zh-Hans" : next
+            UserDefaults.standard.set([tag], forKey: "AppleLanguages")
+        }
+        settingsStore.save(settings)
+        objectWillChange.send()
     }
 
 /*
@@ -1111,7 +1134,7 @@ refresh
         }
 
         // When the helper is down, fail fast so start and quit are not blocked.
-        let response = await rpc(RPCRequest(op: "status"), timeout: helperOnline ? 3 : 0.2)
+        let response = await rpc(RPCRequest(op: "status"), timeout: helperOnline ? 10 : 0.2)
         guard let response, response.ok else {
             helperOnline = false
             if tools.mihomo == nil {
@@ -1167,17 +1190,28 @@ absorb
 ===============
 */
     private func absorb(_ devices: [WGDeviceStatus], interface: String, id: UUID) {
-        guard let device = devices.first(where: { $0.interface == interface }) else { return }
+        /* Helper reports interface "mihomo"; managed.realInterface is WireGuard/AmneziaWG. */
+        guard let device = devices.first(where: { $0.interface == interface }) ?? devices.first else { return }
         let peer = device.peers.max { $0.handshake < $1.handshake }
         mutate(id) { live in
             let rx = peer.map { $0.rx } ?? live.rx
             let tx = peer.map { $0.tx } ?? live.tx
             let now = Date()
-            if let previous = live.sampleDate {
+            if let peer, let down = peer.downRate, let up = peer.upRate {
+                /* Helper /traffic rates are already B/s for the last second. */
+                live.rateDown = Double(down)
+                live.rateUp = Double(up)
+            } else if let previous = live.sampleDate {
                 let delta = now.timeIntervalSince(previous)
                 if delta > 0.2, rx >= live.sampleRx, tx >= live.sampleTx {
-                    live.rateDown = Double(rx - live.sampleRx) / delta
-                    live.rateUp = Double(tx - live.sampleTx) / delta
+                    let down = Double(rx - live.sampleRx) / delta
+                    let up = Double(tx - live.sampleTx) / delta
+                    let cap = 10.0 * 1024 * 1024 * 1024
+                    live.rateDown = down > cap ? 0 : down
+                    live.rateUp = up > cap ? 0 : up
+                } else if rx < live.sampleRx || tx < live.sampleTx {
+                    live.rateDown = 0
+                    live.rateUp = 0
                 }
             }
 

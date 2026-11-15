@@ -153,7 +153,7 @@ struct BypassPane: View {
     }
 
     private var listNote: some View {
-        Text("A domain is matched by name. An app is matched by its process path while connected.")
+        Text("A domain matches that name and its subdomains. An app is matched by its process path while connected.")
             .font(.system(size: 12))
             .foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -238,11 +238,12 @@ rowActions
     private func rowActions(view: @escaping () -> Void, enabled: Binding<Bool>, remove: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button(action: view) {
-                Text(FairleadL10n.text("View"))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
+                Image(systemName: "pencil")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.faint)
             }
             .buttonStyle(.plain)
+            .help(FairleadL10n.text("Edit"))
             FairleadSwitch(isOn: enabled)
             Button(action: remove) {
                 Image(systemName: "xmark")
