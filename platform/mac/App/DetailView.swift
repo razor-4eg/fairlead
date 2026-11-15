@@ -116,7 +116,7 @@ tunnelBody
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.muted)
                         if let iface = live.realInterface, live.phase == .connected {
-                            Text(FairleadL10n.format("%@  ·  gateway %@", iface, live.gateway ?? "—"))
+                            Text(live.gateway.map { FairleadL10n.format("%@  ·  %@", iface, $0) } ?? iface)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Theme.faint)
                         }
@@ -143,8 +143,8 @@ tunnelBody
     }
 
     private var statusMessage: String? {
-        if model.tools.amneziaWG == nil {
-            return FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead.")
+        if model.tools.mihomo == nil {
+            return FairleadL10n.text("mihomo is not included in this copy of Fairlead.")
         }
 
         if !model.helperOnline {
@@ -176,16 +176,19 @@ statusDetail
     private func statusDetail(_ live: LiveTunnel) -> String {
         switch live.phase {
         case .connected:
-            return FairleadL10n.format("Handshake %@", Format.ago(live.handshake, now: model.now))
-        case .connecting:
-            if live.realInterface != nil {
-                return FairleadL10n.text("Waiting for the handshake")
+            if live.pingMs > 0 {
+                return FairleadL10n.format("Reachable · %d ms", live.pingMs)
             }
-            return FairleadL10n.text("Bringing up the interface and routes")
+            return FairleadL10n.text("Reachable")
+        case .connecting:
+            if let stage = live.stage, !stage.isEmpty {
+                return stage
+            }
+            return FairleadL10n.text("Opening the tunnel…")
         case .disconnecting:
-            return FairleadL10n.text("Restoring the previous routes")
+            return FairleadL10n.text("Stopping mihomo…")
         case .idle:
-            return FairleadL10n.text("Traffic is bypassing WireGuard")
+            return FairleadL10n.text("Tunnel is off")
         }
     }
 }
@@ -197,6 +200,8 @@ struct PowerButton: View {
 
     private var connected: Bool { phase == .connected }
     private var busy: Bool { phase == .connecting || phase == .disconnecting }
+    /// Connecting stays clickable so the user can cancel.
+    private var locked: Bool { phase == .disconnecting }
 
     var body: some View {
         Button(action: action) {
@@ -220,13 +225,13 @@ struct PowerButton: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(busy)
+        .disabled(locked)
         .onAppear { spin = busy }
         .onChange(of: busy) { _, isBusy in
             spin = isBusy
         }
         .animation(busy ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default, value: spin)
-        .help(Text(FairleadL10n.text(connected ? "Disconnect" : "Connect")))
+        .help(Text(FairleadL10n.text(connected || phase == .connecting ? "Disconnect" : "Connect")))
     }
 }
 

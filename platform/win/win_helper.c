@@ -135,6 +135,37 @@ static void append_escaped(char **buf, int *len, int *cap, const char *text) {
 static char s_slug[32];
 static int s_quit;
 
+#define LIST_MAX 2048
+#define CIDR_MAX 8192
+
+/*
+===============
+read_strings
+Copy up to cap string items from a JSON array into out.
+===============
+*/
+static int read_strings(const json_t *arr, const char **out, int cap) {
+	const json_t	*c;
+	const char		*s;
+	int				n;
+
+	n = 0;
+
+	if (!arr || arr->type != JSON_ARR) {
+		return 0;
+	}
+
+	for (c = arr->child; c && n < cap; c = c->next) {
+		s = json_string(c);
+
+		if (s && s[0]) {
+			out[n++] = s;
+		}
+	}
+
+	return n;
+}
+
 /*
 ===============
 handle_request
@@ -150,10 +181,12 @@ static char *handle_request(const char *body) {
 	const char			*name;
 	const char			*config;
 	const char			*policy;
-	const json_t		*cidrs;
 	const char			**cidr_list;
-	int					cidr_cap;
+	const char			**domain_list;
+	const char			**app_list;
 	int					cidr_count;
+	int					domain_count;
+	int					app_count;
 	int					exclude;
 	int					selected;
 	win_tun_result_t	tun;
@@ -163,13 +196,15 @@ static char *handle_request(const char *body) {
 	int					i;
 	int					ok;
 	const char			*error;
-	const json_t		*c;
-	const char			*s;
 	char				num[64];
+	char				path[MAX_PATH + 16];
 
 	cidr_count = 0;
-	cidr_cap = BYPASS_MAX;
+	domain_count = 0;
+	app_count = 0;
 	cidr_list = NULL;
+	domain_list = NULL;
+	app_list = NULL;
 	exclude = 0;
 	selected = 0;
 	buf = NULL;
@@ -204,23 +239,21 @@ static char *handle_request(const char *body) {
 	}
 
 	selected = policy && strcmp(policy, "selected") == 0;
-	cidrs = json_get(root, "cidrs");
-	cidr_list = (const char **)malloc((size_t)cidr_cap * sizeof(*cidr_list));
+	cidr_list = (const char **)malloc(CIDR_MAX * sizeof(*cidr_list));
+	domain_list = (const char **)malloc(LIST_MAX * sizeof(*domain_list));
+	app_list = (const char **)malloc(LIST_MAX * sizeof(*app_list));
 
-	if (!cidr_list) {
+	if (!cidr_list || !domain_list || !app_list) {
+		free((void *)cidr_list);
+		free((void *)domain_list);
+		free((void *)app_list);
 		arena_free(&arena);
 		return _strdup("{\"id\":\"\",\"ok\":false,\"error\":\"Not enough memory.\"}");
 	}
 
-	if (cidrs && cidrs->type == JSON_ARR) {
-		for (c = cidrs->child; c && cidr_count < cidr_cap; c = c->next) {
-			s = json_string(c);
-
-			if (s) {
-				cidr_list[cidr_count++] = s;
-			}
-		}
-	}
+	cidr_count = read_strings(json_get(root, "cidrs"), cidr_list, CIDR_MAX);
+	domain_count = read_strings(json_get(root, "domains"), domain_list, LIST_MAX);
+	app_count = read_strings(json_get(root, "apps"), app_list, LIST_MAX);
 
 	memset(&tun, 0, sizeof(tun));
 
@@ -236,11 +269,12 @@ static char *handle_request(const char *body) {
 	} else if (strcmp(op, "up") == 0) {
 		if (!name || !config) {
 			error = "The config is empty.";
-		} else if (win_tun_up(name, config, cidr_list, cidr_count, exclude, selected, s_exe_dir, &tun)) {
+		} else if (win_tun_up(name, config, cidr_list, cidr_count, domain_list, domain_count, app_list, app_count,
+			exclude, selected, s_exe_dir, &tun)) {
 			snprintf(s_slug, sizeof(s_slug), "%s", name);
 			ok = 1;
 		} else {
-			error = tun.error[0] ? tun.error : "amneziawg-go did not create an interface.";
+			error = tun.error[0] ? tun.error : "mihomo did not start.";
 		}
 	} else if (strcmp(op, "down") == 0) {
 		win_tun_down(&tun);
@@ -254,7 +288,7 @@ static char *handle_request(const char *body) {
 		s_quit = 1;
 		memset(&tun, 0, sizeof(tun));
 	} else if (strcmp(op, "bypass") == 0) {
-		if (!win_tun_bypass(cidr_list, cidr_count, exclude, selected, &tun)) {
+		if (!win_tun_bypass(cidr_list, cidr_count, domain_list, domain_count, app_list, app_count, exclude, selected, &tun)) {
 			error = tun.error[0] ? tun.error : "The tunnel is not running.";
 		} else {
 			ok = 1;
@@ -286,6 +320,12 @@ static char *handle_request(const char *body) {
 		append(&buf, &len, &cap, "]");
 	}
 
+	if (strcmp(op, "tools") == 0) {
+		snprintf(path, sizeof(path), "%s\\bin\\mihomo.exe", s_exe_dir);
+		append(&buf, &len, &cap, ",\"mihomo\":");
+		append_escaped(&buf, &len, &cap, GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES ? path : "");
+	}
+
 	append(&buf, &len, &cap, ",\"managed\":[");
 
 	if (tun.iface[0] && s_slug[0]) {
@@ -305,26 +345,6 @@ static char *handle_request(const char *body) {
 			append_escaped(&buf, &len, &cap, tun.lan[i]);
 		}
 
-		append(&buf, &len, &cap, "],\"bypass\":[");
-
-		for (i = 0; i < tun.owned_count; i++) {
-			if (i) {
-				append(&buf, &len, &cap, ",");
-			}
-
-			append_escaped(&buf, &len, &cap, tun.owned[i]);
-		}
-
-		append(&buf, &len, &cap, "],\"endpointIPs\":[");
-
-		for (i = 0; i < tun.endpoint_count; i++) {
-			if (i) {
-				append(&buf, &len, &cap, ",");
-			}
-
-			append_escaped(&buf, &len, &cap, tun.endpoints[i]);
-		}
-
 		append(&buf, &len, &cap, "]}");
 	}
 
@@ -337,13 +357,22 @@ static char *handle_request(const char *body) {
 		append_escaped(&buf, &len, &cap, tun.public_key);
 		append(&buf, &len, &cap, ",\"peers\":[{\"endpoint\":");
 		append_escaped(&buf, &len, &cap, tun.live_endpoint);
-		snprintf(num, sizeof(num), ",\"handshake\":%d,\"rx\":%llu,\"tx\":%llu}]}", tun.handshake,
-			(unsigned long long)tun.rx, (unsigned long long)tun.tx);
+		snprintf(num, sizeof(num), ",\"handshake\":%d,\"delay\":%d,\"ping\":%d,\"rx\":%llu,\"tx\":%llu",
+			tun.handshake, tun.delay_ms, tun.ping_ms, (unsigned long long)tun.rx, (unsigned long long)tun.tx);
 		append(&buf, &len, &cap, num);
+
+		if (tun.stage[0]) {
+			append(&buf, &len, &cap, ",\"stage\":");
+			append_escaped(&buf, &len, &cap, tun.stage);
+		}
+
+		append(&buf, &len, &cap, "}]}");
 	}
 
 	append(&buf, &len, &cap, "]}");
 	free((void *)cidr_list);
+	free((void *)domain_list);
+	free((void *)app_list);
 	arena_free(&arena);
 	return buf;
 }

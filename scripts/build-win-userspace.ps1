@@ -1,12 +1,12 @@
-# Builds amneziawg-go.exe and wintun.dll into .build\win.
-# amneziawg-go carries plain WireGuard too. Ordinary configs send no obfuscation fields.
-# scripts\build-win.bat copies them next to Fairlead.exe. Go is downloaded into .build and is not required on PATH.
+# Builds mihomo.exe and wintun.dll into .build\win.
+# Fairlead uses mihomo for TUN, process routing, WireGuard, and AmneziaWG.
+# scripts\build-win.bat ships them to dist\win\bin. Go is downloaded into .build and is not required on PATH.
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $cache = Join-Path $root ".build\win-userspace"
 $dist = Join-Path $root ".build\win"
 $goVersion = "1.27.3"
-$awgRef = "v3.1.20260828"
+$mihomoRef = "v1.19.34"
 $goZip = Join-Path $cache "go.zip"
 $goRoot = Join-Path $cache "go"
 New-Item -ItemType Directory -Force -Path $cache, $dist | Out-Null
@@ -31,14 +31,20 @@ $env:GOARCH = "amd64"
 $env:GOSUMDB = "off"
 $env:GOPROXY = "https://proxy.golang.org,direct"
 
-$awg = Join-Path $cache "amneziawg-go"
-if (Test-Path $awg) { Remove-Item -Recurse -Force $awg }
-git clone --depth 1 --branch $awgRef https://github.com/amnezia-vpn/amneziawg-go.git $awg
-Push-Location $awg
-$uapi = Join-Path $awg "ipc\uapi_windows.go"
-(Get-Content $uapi -Raw).Replace('O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)', 'D:P(A;;GA;;;SY)(A;;GA;;;BA)') | Set-Content $uapi -NoNewline
-go build -trimpath -ldflags "-s -w" -o (Join-Path $dist "amneziawg-go.exe") .
-if ($LASTEXITCODE -ne 0) { throw "amneziawg-go build failed" }
+$mihomo = Join-Path $cache "mihomo"
+if (-not (Test-Path (Join-Path $mihomo ".git"))) {
+	if (Test-Path $mihomo) { Remove-Item -Recurse -Force $mihomo }
+	git clone --depth 1 --branch $mihomoRef https://github.com/MetaCubeX/mihomo.git $mihomo
+} else {
+	Push-Location $mihomo
+	git fetch --depth 1 origin tag $mihomoRef
+	git checkout -f $mihomoRef
+	Pop-Location
+}
+
+Push-Location $mihomo
+go build -trimpath -ldflags "-s -w" -o (Join-Path $dist "mihomo.exe") .
+if ($LASTEXITCODE -ne 0) { throw "mihomo build failed" }
 Pop-Location
 
 $wintunZip = Join-Path $cache "wintun.zip"
@@ -47,4 +53,4 @@ $wintunDir = Join-Path $cache "wintun"
 if (Test-Path $wintunDir) { Remove-Item -Recurse -Force $wintunDir }
 Expand-Archive -Path $wintunZip -DestinationPath $wintunDir -Force
 Copy-Item (Join-Path $wintunDir "wintun\bin\amd64\wintun.dll") (Join-Path $dist "wintun.dll") -Force
-Write-Host "wrote .build\win\amneziawg-go.exe, wintun.dll"
+Write-Host "wrote .build\win\mihomo.exe, wintun.dll"

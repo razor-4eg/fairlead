@@ -10,8 +10,6 @@ struct RouteEntry {
 	std::string id;
 	std::string kind;
 	std::string value;
-	std::string status;
-	std::vector<std::string> addresses;
 };
 
 struct RouteList {
@@ -26,8 +24,6 @@ struct AppRule {
 	std::string path;
 	std::string name;
 	bool enabled = true;
-	bool learn = true;
-	std::vector<std::string> learned;
 };
 
 struct RouteProblem {
@@ -48,29 +44,25 @@ struct Tunnel {
 	std::string address;
 	bool amnezia = false;
 	std::string phase = "Off";
-	std::string detail = "Traffic is bypassing WireGuard";
+	std::string detail = "Tunnel is off";
 	std::string iface;
 	std::string down = "0 B/s";
 	std::string up = "0 B/s";
 	std::string rx = "0 B";
 	std::string tx = "0 B";
-	std::string lan = "The current Wi-Fi or Ethernet network. It appears after you connect.";
+	std::string lan = "Private LAN ranges stay off the tunnel when this is on.";
 	bool connected = false;
 	uint64_t sample_rx = 0;
 	uint64_t sample_tx = 0;
 	int64_t sample_tick = 0;
 	int handshake = 0;
-};
-
-struct ProcHit {
-	std::string path;
-	std::vector<std::string> ips;
+	int delay_ms = 0;
+	int ping_ms = 0;
 };
 
 struct BuiltList {
 	std::unique_ptr<RouteList> list;
 	std::vector<RouteProblem> problems;
-	std::vector<RouteEntry*> pending;
 };
 
 struct Session {
@@ -80,7 +72,7 @@ struct Session {
 	std::string notice;
 	std::string banner;
 	bool helper_online = false;
-	std::string awg_text = "amneziawg-go  not found";
+	std::string awg_text = "mihomo  not found";
 	bool awg_ok = false;
 	bool launch_at_login = false;
 	bool start_hidden = false;
@@ -126,10 +118,6 @@ struct Session {
 	BuiltList BuildList(std::string const& name, std::string const& text, RouteList* replacing);
 	void CommitNew(std::unique_ptr<RouteList> list);
 	void CommitUpdate(RouteList* list, std::string name, std::vector<RouteEntry> entries);
-	bool BeginResolve(std::string const& id);
-	void EndResolve(std::string const& id);
-	std::vector<ProcHit> SnapshotTcp() const;
-	bool ApplyLearn(std::vector<ProcHit> const& found);
 	bool AddProgram(std::string const& path, std::string const& name);
 	void SetLaunch(bool on);
 	void SetStartHidden(bool on);
@@ -145,9 +133,6 @@ struct Session {
 
 private:
 	std::timed_mutex pipe;
-	std::vector<std::string> resolving;
 	void Load();
 	std::string LoadToken();
 };
-
-std::vector<std::string> lookup_host(std::string const& host);

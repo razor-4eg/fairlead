@@ -13,6 +13,7 @@
 #include "../base.h"
 #include "../net.h"
 #include "../tunnel.h"
+#include "../mihomo.h"
 #include "qcompress.h"
 
 #endif

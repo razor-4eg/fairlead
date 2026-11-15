@@ -35,8 +35,8 @@ public enum QCompress {
     }
 }
 
-/// AmneziaWG parameters carried in a WireGuard config. Plain configs use the same amneziawg-go binary.
-/// The key lists, checks, and UAPI encoding all come from the shared C kernel.
+/// AmneziaWG parameters carried in a WireGuard config. Plain and Amnezia configs both run in mihomo.
+/// The key lists and checks come from the shared C kernel.
 public enum Amnezia {
     public static func isAmnezia(_ document: WGDocument) -> Bool {
         document.withC { amnezia_is($0) != 0 }
@@ -48,17 +48,6 @@ public enum Amnezia {
             let count = Int(amnezia_present(doc, &keys, Int32(keys.count)))
             return keys.prefix(max(0, min(count, keys.count))).compactMap { $0.map { String(cString: $0) } }
         }
-    }
-
-    /// Device lines for amneziawg-go. Empty for a plain WireGuard config. Nil when a value cannot be encoded.
-    public static func uapiLines(for document: WGDocument) -> [String]? {
-        let text: String? = document.withC { doc in
-            CBridge.optionalString(capacity: 16384) { buffer, cap in
-                amnezia_uapi(doc, buffer, cap)
-            }
-        }
-        guard let text else { return nil }
-        return text.split(whereSeparator: \.isNewline).map(String.init)
     }
 
     /// True for a number, or a range such as `20-30`, no larger than `max`.

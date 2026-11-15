@@ -6,6 +6,8 @@
 
 Fairlead is a WireGuard and AmneziaWG client for macOS and Windows. You import a config, connect, and choose which traffic uses the tunnel.
 
+The data plane is [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta): TUN, DNS, process rules, WireGuard, and AmneziaWG. Fairlead is the UI, the config editor, and a small privileged helper that starts and stops mihomo.
+
 WireGuard is a trademark of Jason A. Donenfeld. Fairlead is an independent client.
 
 ## Install
@@ -42,7 +44,7 @@ Do this only for an app you trust. The password you see while connecting is the 
 
 Closing the window does not disconnect. Fairlead keeps running: in the menu bar on a Mac, and in the tray on Windows. On a Mac the Dock icon goes away while the window is closed. Open the window again from that icon.
 
-Quit from the same menu when you want to disconnect. Fairlead removes the routes it added and restores DNS.
+Quit from the same menu when you want to disconnect. Fairlead stops mihomo and restores normal routing and DNS.
 
 One tunnel runs at a time. Connecting another stops the current one.
 
@@ -58,18 +60,18 @@ The window shows the endpoint, address, handshake, and live down and up rates. T
 
 ## Routes
 
-AllowedIPs in the config decide what can enter the tunnel. The switch above the list decides what that list does. Both modes use the same addresses, domains, and apps.
+AllowedIPs in the config decide what the WireGuard peer can carry. The switch above the list decides how Fairlead’s filter list is applied. Both modes use the same addresses, domains, and apps. Fairlead writes the list into the mihomo config as rules, and mihomo does the routing.
 
 **Direct.** Traffic goes through the tunnel, except the list, which stays on your normal network.
 
 **Through.** Only the list goes through the tunnel. Everything else stays on your normal network.
 
-**Add route** opens a window. Put one address or domain on each line, and a note after it on the same line. **Add app** picks an application. A rule can be switched off without deleting it.
+**Add route** opens a window. Give the list a name and put one address or domain on each line. **Add app** picks an application. A rule can be switched off without deleting it.
 
-- An IP address or a network, with an optional note.
-- A domain, such as `example.com`. Fairlead resolves it with the DNS of your normal network and updates the addresses when the record expires. `*.example.com` is not accepted. If the name points at a shared address, such as a CDN, that address follows the rule for every program.
-- The current Wi-Fi or Ethernet network. It stays on your normal connection. Those routes appear after you connect.
-- An app. Fairlead remembers the addresses that app connects to. A connection that is already open moves after it reconnects. On a Mac this follows the address, so other programs using that same address follow the rule too.
+- An IP address or a network. Mihomo matches it as a CIDR.
+- A domain, such as `example.com`. Mihomo matches the name itself, so Fairlead does not look up addresses ahead of time. `*.example.com` is not accepted.
+- The current Wi-Fi or Ethernet network. It stays on your normal connection.
+- An app. Mihomo matches the process path of the running program, not addresses it connected to before. On a Mac, a `.app` bundle includes helper processes inside the bundle.
 
 ![Addresses, domains, and apps on one list](docs/screenshots/routes.png)
 
@@ -89,7 +91,7 @@ Open Settings from the gear. On a Mac you can also use the menu bar or Command-C
 
 **Default tunnel.** Fairlead selects this tunnel when it opens and connects it. Together with Open at login, the tunnel comes up after you sign in. None opens Fairlead without connecting.
 
-**Components.** Shows the tunnel program and the helper. Start helper installs the helper, or replaces the one already installed, after the administrator password. Config folder opens the directory with your configs.
+**Components.** Shows mihomo and the helper. Start helper installs the helper, or replaces the one already installed, after the administrator password. Config folder opens the directory with your configs.
 
 ![Settings](docs/screenshots/settings.png)
 

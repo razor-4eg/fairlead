@@ -106,7 +106,6 @@ private:
 	int normal_y = 0;
 	bool have_pos = false;
 	bool helper_starting = false;
-	bool resolve_posted = false;
 	Tunnel* pending_delete = nullptr;
 	Microsoft::UI::Xaml::Controls::MenuFlyout row_menu{ nullptr };
 
@@ -117,7 +116,6 @@ private:
 	winrt::Windows::Foundation::IAsyncAction DisconnectAsync(Tunnel* tunnel);
 	winrt::Windows::Foundation::IAsyncAction PushBypassAsync(Tunnel* tunnel);
 	winrt::Windows::Foundation::IAsyncAction EnsureHelperAsync(bool interactive);
-	winrt::fire_and_forget ResolveAsync(Tunnel* tunnel);
 	winrt::fire_and_forget SaveRoutesAsync();
 	winrt::fire_and_forget SaveListAsync();
 	winrt::fire_and_forget ImportAsync();

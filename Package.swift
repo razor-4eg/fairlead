@@ -10,11 +10,6 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "CProc",
-            path: "platform/mac/CProc",
-            linkerSettings: [.linkedLibrary("proc")]
-        ),
-        .target(
             name: "FairleadC",
             path: "core",
             exclude: ["abi.c"],
@@ -36,7 +31,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Fairlead",
-            dependencies: ["FairleadCore", "CProc"],
+            dependencies: ["FairleadCore"],
             path: "platform/mac/App",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

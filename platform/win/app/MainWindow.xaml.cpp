@@ -528,7 +528,7 @@ void MainWindow::Paint() {
 	TxText().Text(H(tunnel ? tunnel->tx : "0 B"));
 	PolicyTitleText().Text(H(session.PolicyTitle()));
 	PolicyBodyText().Text(H(session.PolicyBody()));
-	LanBody().Text(H(tunnel ? tunnel->lan : "The current Wi-Fi or Ethernet network. It appears after you connect."));
+	LanBody().Text(H(tunnel ? tunnel->lan : "Private LAN ranges stay off the tunnel when this is on."));
 	RulesEmpty().Visibility(shown(session.RulesEmpty()));
 	NoteSelection();
 	RebuildList();
@@ -703,7 +703,8 @@ void MainWindow::PaintPower() {
 	std::string phase = tunnel ? tunnel->phase : "";
 	bool on = tunnel && (tunnel->connected || phase == "Connected");
 	bool busy = phase == "Connecting" || phase == "Disconnecting";
-	Power().IsEnabled(!busy);
+	/* Connecting stays clickable so the user can cancel; only Disconnecting locks the button. */
+	Power().IsEnabled(phase != "Disconnecting");
 	Power().Background(media::SolidColorBrush(on ? rgba(32, 124, 219, 182) : rgba(12, 255, 255, 255)));
 	PowerRing().Stroke(brush(on ? L"AccentBrush" : L"LineBrush"));
 	PowerIcon().Foreground(brush(on ? L"AccentBrush" : L"MutedBrush"));
@@ -923,28 +924,10 @@ void MainWindow::PaintRules() {
 		}, [this, item] { OpenList(item); });
 	}
 
-	bool pending = false;
-	for (auto const& list : tunnel->lists) {
-		if (!list->enabled) {
-			continue;
-		}
-
-		for (auto const& entry : list->entries) {
-			if (entry.kind == "domain" && entry.addresses.empty() && entry.status.empty()) {
-				pending = true;
-			}
-		}
-	}
-
-	if (pending && !resolve_posted) {
-		resolve_posted = true;
-		ResolveAsync(tunnel);
-	}
-
 	for (auto const& app : tunnel->apps) {
 		AppRule* item = app.get();
 		bool missing = !std::filesystem::exists(std::filesystem::path(widen(item->path)));
-		std::string sub = missing ? "App not found" : std::to_string(item->learned.size()) + " addresses";
+		std::string sub = missing ? "App not found" : "Process rule";
 		add("App", item->name, sub, item->enabled, widen(item->path), missing, [item](bool value) { item->enabled = value; }, [tunnel, item] {
 			std::erase_if(tunnel->apps, [&](std::unique_ptr<AppRule> const& one) { return one.get() == item; });
 		}, [this, item] { OpenApp(item); });
@@ -1533,28 +1516,6 @@ void MainWindow::OpenList(RouteList* list) {
 	ListEntries().Text(H(body));
 	ListEntries().IsReadOnly(false);
 	ListEntries().Height(180);
-	std::string resolved;
-	for (auto const& entry : list->entries) {
-		if (entry.kind != "domain") {
-			continue;
-		}
-
-		if (!resolved.empty()) {
-			resolved += "\n";
-		}
-
-		resolved += entry.value;
-		if (entry.addresses.empty()) {
-			resolved += std::string("\n  ") + (entry.status.empty() ? "Looking up the address" : entry.status);
-		} else {
-			for (auto const& ip : entry.addresses) {
-				resolved += "\n  " + ip;
-			}
-		}
-	}
-
-	ListResolved().Text(H(resolved));
-	ListResolvedPane().Visibility(shown(!resolved.empty()));
 	ListError().Visibility(mux::Visibility::Collapsed);
 	ListError().Text(L"");
 	ListProgress().Visibility(mux::Visibility::Collapsed);
@@ -1571,20 +1532,9 @@ void MainWindow::OpenApp(AppRule* app) {
 	ListName().Text(L"");
 	ListName().Visibility(mux::Visibility::Collapsed);
 	ListHint().Visibility(mux::Visibility::Collapsed);
-	std::string body = app->learned.empty() ? "Nothing learned yet." : "";
-	for (auto const& ip : app->learned) {
-		if (!body.empty()) {
-			body += "\n";
-		}
-
-		body += ip;
-	}
-
-	ListEntries().Text(H(body));
+	ListEntries().Text(H(app->path));
 	ListEntries().IsReadOnly(true);
 	ListEntries().Height(280);
-	ListResolved().Text(L"");
-	ListResolvedPane().Visibility(mux::Visibility::Collapsed);
 	ListError().Visibility(mux::Visibility::Collapsed);
 	ListProgress().Visibility(mux::Visibility::Collapsed);
 	ListClose().Visibility(mux::Visibility::Visible);

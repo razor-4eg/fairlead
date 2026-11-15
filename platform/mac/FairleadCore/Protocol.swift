@@ -1,27 +1,13 @@
 import Foundation
 
 public struct ToolReport: Codable, Equatable, Sendable {
-    public var wg: String?
-    public var wgQuick: String?
-    public var wireguardGo: String?
-    public var amneziaWG: String?
-    public var brew: String?
+    public var mihomo: String?
 
-    /// amneziawg-go carries plain WireGuard and AmneziaWG.
-    public var ready: Bool { amneziaWG != nil }
+    /// mihomo carries plain WireGuard and AmneziaWG, the TUN, and the routing rules.
+    public var ready: Bool { mihomo != nil }
 
-    public init(
-        wg: String? = nil,
-        wgQuick: String? = nil,
-        wireguardGo: String? = nil,
-        amneziaWG: String? = nil,
-        brew: String? = nil
-    ) {
-        self.wg = wg
-        self.wgQuick = wgQuick
-        self.wireguardGo = wireguardGo
-        self.amneziaWG = amneziaWG
-        self.brew = brew
+    public init(mihomo: String? = nil) {
+        self.mihomo = mihomo
     }
 }
 
@@ -29,30 +15,18 @@ public struct ManagedTunnel: Codable, Equatable, Sendable {
     public var name: String
     public var realInterface: String
     public var gatewayV4: String?
-    public var gatewayV6: String?
-    public var gatewayIface: String?
     public var lanCIDRs: [String]
-    public var bypass: [String]
-    public var endpointIPs: [String]
 
     public init(
         name: String,
         realInterface: String,
         gatewayV4: String?,
-        gatewayV6: String?,
-        gatewayIface: String?,
-        lanCIDRs: [String],
-        bypass: [String],
-        endpointIPs: [String]
+        lanCIDRs: [String]
     ) {
         self.name = name
         self.realInterface = realInterface
         self.gatewayV4 = gatewayV4
-        self.gatewayV6 = gatewayV6
-        self.gatewayIface = gatewayIface
         self.lanCIDRs = lanCIDRs
-        self.bypass = bypass
-        self.endpointIPs = endpointIPs
     }
 }
 
@@ -62,6 +36,8 @@ public struct RPCRequest: Codable, Sendable {
     public var name: String?
     public var config: String?
     public var cidrs: [String]?
+    public var domains: [String]?
+    public var apps: [String]?
     public var excludeLAN: Bool?
     public var policy: String?
 
@@ -71,6 +47,8 @@ public struct RPCRequest: Codable, Sendable {
         name: String? = nil,
         config: String? = nil,
         cidrs: [String]? = nil,
+        domains: [String]? = nil,
+        apps: [String]? = nil,
         excludeLAN: Bool? = nil,
         policy: String? = nil
     ) {
@@ -79,6 +57,8 @@ public struct RPCRequest: Codable, Sendable {
         self.name = name
         self.config = config
         self.cidrs = cidrs
+        self.domains = domains
+        self.apps = apps
         self.excludeLAN = excludeLAN
         self.policy = policy
     }
@@ -126,15 +106,11 @@ public enum RPCFrame {
 
 public enum ToolLocator {
     public static func locate() -> ToolReport {
-        var amnezia = [
-            "/usr/local/libexec/fairlead-amneziawg-go",
-            "/opt/homebrew/bin/amneziawg-go",
-            "/usr/local/bin/amneziawg-go",
-        ]
+        var candidates = ["/usr/local/libexec/fairlead-mihomo"]
         if let directory = Bundle.main.executableURL?.deletingLastPathComponent() {
-            amnezia.insert(directory.appendingPathComponent("amneziawg-go").path, at: 0)
+            candidates.insert(directory.appendingPathComponent("mihomo").path, at: 0)
         }
-        return ToolReport(amneziaWG: firstExecutable(amnezia))
+        return ToolReport(mihomo: firstExecutable(candidates))
     }
 
     private static func firstExecutable(_ paths: [String]) -> String? {

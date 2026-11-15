@@ -2,7 +2,7 @@
 //
 // copyright (c) 2026 razor-4eg.
 //
-// win_tun.c -- One userspace tunnel on Windows. The helper owns the adapter, the routes, and DNS.
+// win_tun.c -- One mihomo process on Windows. mihomo owns the TUN adapter, routes, DNS, WireGuard, and process rules.
 //
 //===============================================================
 
@@ -11,108 +11,57 @@
 #include "../../core/base.h"
 #include "../../core/net.h"
 #include "../../core/tunnel.h"
+#include "../../core/mihomo.h"
 
 #define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
+#include <winhttp.h>
 #include <iphlpapi.h>
-#include <netioapi.h>
+#include <icmpapi.h>
+#include <ws2tcpip.h>
+#include <bcrypt.h>
+#include <psapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-#pragma comment(lib, "iphlpapi.lib")
-#pragma comment(lib, "ws2_32.lib")
+#define CONTROLLER_HOST L"127.0.0.1"
+#define CONTROLLER_PORT 18984
+#define CONTROLLER_ADDR "127.0.0.1:18984"
+#define PROXY_NAME "fairlead"
 
-typedef DWORD (WINAPI *set_dns_fn)(GUID *iface, const void *settings);
-
-typedef struct dns_settings_s {
-	ULONG Version;
-	ULONGLONG Flags;
-	wchar_t *Domain;
-	wchar_t *NameServer;
-	wchar_t *SearchList;
-	ULONG RegistrationEnabled;
-	ULONG RegisterAdapterName;
-	ULONG EnableLLMNR;
-	ULONG QueryAdapterName;
-	wchar_t *ProfileNameServer;
-
-} dns_settings_t;
-
-#define DNS_VER 1
-#define DNS_F_NAMESERVER 0x2
-
-typedef struct route_rec_s {
-	char cidr[64];
-	int via_tunnel;
-
-} route_rec_t;
+#define PROBE_PATH "/proxies/" PROXY_NAME "/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=1500&expected=204"
+#define PROBE_EVERY_SEC 15
+#define PROBE_RETRY_SEC 1
+#define PROBE_STALE_SEC 45
+#define PING_EVERY_SEC 5
+#define PROBE_FAIL_RESTART 6
 
 typedef struct session_s {
 	int active;
 	char slug[32];
-	char iface[64];
+	char exe[MAX_PATH];
+	char workdir[MAX_PATH];
 	char config_path[MAX_PATH];
+	char log_path[MAX_PATH];
+	char pid_path[MAX_PATH];
+	char secret[72];
+	char endpoint[160];
+	char endpoint_ip[64];	/* Resolved before TUN is up. Ping uses this only — no DNS after connect. */
+	char *wg;
 	PROCESS_INFORMATION proc;
 	int proc_open;
-	NET_LUID tun_luid;
-	NET_LUID phys_luid;
-	int have_tun;
-	int have_phys;
-	char gateway_v4[64];
-	char gateway_iface[128];
-	char phys_ip[64];
-
-	char lan[8][64];
-	int lan_count;
-	char endpoints[4][64];
-	int endpoint_count;
-	route_rec_t routes[BYPASS_MAX + 16];
-	int route_count;
-	char owned[BYPASS_MAX][64];
-	int owned_count;
-	char dns_backup[8][64];
-	int dns_backup_count;
-	GUID phys_guid;
-	int dns_set;
-	char dns_servers[4][64];
-	int dns_server_count;
-	int capture;
-	char binary[32];
-	char warnings[12][256];
-	int warning_count;
+	time_t last_probe;
+	time_t last_ok;
+	time_t last_ping_at;
+	int last_delay_ms;
+	int last_ping_ms;
+	int probe_fails;
+	int recovered;
 } session_t;
 
 static session_t s_session;
-static CRITICAL_SECTION s_lock;
-static int s_lock_ready;
-
-/*
-===============
-lock
-The tunnel lock. The first caller creates it.
-===============
-*/
-static void lock(void) {
-	if (!s_lock_ready) {
-		InitializeCriticalSection(&s_lock);
-		s_lock_ready = 1;
-	}
-
-	EnterCriticalSection(&s_lock);
-}
-
-/*
-===============
-unlock
-Leave the tunnel lock.
-===============
-*/
-static void unlock(void) {
-	LeaveCriticalSection(&s_lock);
-}
 
 /*
 ===============
@@ -127,7 +76,7 @@ static void log_line(const char *text) {
 
 	n = GetEnvironmentVariableA("ProgramData", path, MAX_PATH);
 
-	if (n == 0 || n >= MAX_PATH) {
+	if (n == 0 || n >= MAX_PATH - 32) {
 		return;
 	}
 
@@ -146,11 +95,36 @@ static void log_line(const char *text) {
 
 /*
 ===============
-data_path
-ProgramData\Fairlead\leaf.
+add_warning
 ===============
 */
-static int data_path(char *path, int cap, const char *leaf) {
+static void add_warning(win_tun_result_t *out, const char *text) {
+	if (!out || out->warning_count >= 12) {
+		return;
+	}
+
+	snprintf(out->warnings[out->warning_count++], sizeof(out->warnings[0]), "%s", text);
+}
+
+/*
+===============
+file_exists
+===============
+*/
+static int file_exists(const char *path) {
+	DWORD	attr;
+
+	attr = GetFileAttributesA(path);
+	return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/*
+===============
+run_dir
+ProgramData\Fairlead\run, created on demand.
+===============
+*/
+static int run_dir(char *path, int cap) {
 	DWORD	n;
 
 	n = GetEnvironmentVariableA("ProgramData", path, (DWORD)cap);
@@ -161,798 +135,394 @@ static int data_path(char *path, int cap, const char *leaf) {
 
 	strncat(path, "\\Fairlead", (size_t)cap - strlen(path) - 1);
 	CreateDirectoryA(path, NULL);
-	strncat(path, "\\", (size_t)cap - strlen(path) - 1);
-	strncat(path, leaf, (size_t)cap - strlen(path) - 1);
+	strncat(path, "\\run", (size_t)cap - strlen(path) - 1);
+	CreateDirectoryA(path, NULL);
 	return 1;
 }
 
 /*
 ===============
-guid_text
-Canonical GUID text.
+make_secret
+Random hex for the controller. The helper token file stays untouched.
 ===============
 */
-static void guid_text(const GUID *id, char *out, int cap) {
-	snprintf(out, (size_t)cap, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-		id->Data1, id->Data2, id->Data3,
-		id->Data4[0], id->Data4[1], id->Data4[2], id->Data4[3],
-		id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7]);
+static void make_secret(char *out, int cap) {
+	unsigned char	raw[16];
+	int				i;
+
+	if (BCryptGenRandom(NULL, raw, (ULONG)sizeof(raw), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+		for (i = 0; i < (int)sizeof(raw); i++) {
+			raw[i] = (unsigned char)(rand() & 0xff);
+		}
+	}
+
+	for (i = 0; i < (int)sizeof(raw) && i * 2 + 2 < cap; i++) {
+		snprintf(out + i * 2, (size_t)(cap - i * 2), "%02x", raw[i]);
+	}
 }
 
 /*
 ===============
-guid_read
-Parse a GUID string.
+api
+One controller request. reply may be NULL. Returns 1 when a response came back; status is its HTTP code.
+timeout_ms covers send and receive (WinHTTP).
 ===============
 */
-static int guid_read(const char *text, GUID *id) {
-	unsigned	d1;
-	unsigned	d2;
-	unsigned	d3;
-	unsigned	b[8];
-	int			i;
+static int api(const char *method, const char *path, const char *body, char *reply, int reply_cap, int *status, int timeout_ms) {
+	HINTERNET	ses;
+	HINTERNET	con;
+	HINTERNET	req;
+	wchar_t		wmethod[8];
+	wchar_t		wpath[512];
+	wchar_t		hdr[256];
+	wchar_t		wsecret[80];
+	DWORD		code;
+	DWORD		size;
+	DWORD		got;
+	DWORD		blen;
+	int			len;
+	int			ok;
+	int			t;
 
-	if (sscanf(text, "{%8x-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x}",
-		&d1, &d2, &d3, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]) != 11) {
+	ok = 0;
+	code = 0;
+	len = 0;
+	blen = body ? (DWORD)strlen(body) : 0;
+	t = timeout_ms > 0 ? timeout_ms : 3000;
+
+	if (reply && reply_cap > 0) {
+		reply[0] = '\0';
+	}
+
+	MultiByteToWideChar(CP_UTF8, 0, method, -1, wmethod, 8);
+	MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512);
+	MultiByteToWideChar(CP_UTF8, 0, s_session.secret, -1, wsecret, 80);
+	swprintf(hdr, 256, L"Authorization: Bearer %ls\r\nContent-Type: application/json\r\n", wsecret);
+
+	ses = WinHttpOpen(L"Fairlead", WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
+
+	if (!ses) {
 		return 0;
 	}
 
-	id->Data1 = d1;
-	id->Data2 = (unsigned short)d2;
-	id->Data3 = (unsigned short)d3;
+	WinHttpSetTimeouts(ses, t, t, t, t);
+	con = WinHttpConnect(ses, CONTROLLER_HOST, CONTROLLER_PORT, 0);
+	req = con ? WinHttpOpenRequest(con, wmethod, wpath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0) : NULL;
 
-	for (i = 0; i < 8; i++) {
-		id->Data4[i] = (unsigned char)b[i];
+	if (req && WinHttpSendRequest(req, hdr, (DWORD)-1, body ? (LPVOID)body : WINHTTP_NO_REQUEST_DATA, blen, blen, 0) &&
+		WinHttpReceiveResponse(req, NULL)) {
+		size = sizeof(code);
+		WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size, WINHTTP_NO_HEADER_INDEX);
+		ok = 1;
+
+		/* Large bodies such as /connections are cut at reply_cap on purpose. */
+		while (reply && len < reply_cap - 1) {
+			got = 0;
+
+			if (!WinHttpReadData(req, reply + len, (DWORD)(reply_cap - 1 - len), &got) || got == 0) {
+				break;
+			}
+
+			len += (int)got;
+		}
+
+		if (reply) {
+			reply[len] = '\0';
+		}
 	}
 
-	return 1;
+	if (status) {
+		*status = (int)code;
+	}
+
+	if (req) {
+		WinHttpCloseHandle(req);
+	}
+
+	if (con) {
+		WinHttpCloseHandle(con);
+	}
+
+	WinHttpCloseHandle(ses);
+	return ok;
 }
 
 /*
 ===============
-save_session
-Remember the live adapter so a restarted helper can tear it down.
+read_log
+The tail of mihomo.log, up to cap - 1 bytes.
 ===============
 */
-static void save_session(void) {
-	char	path[MAX_PATH];
-	char	guid[80];
+static int read_log(char *buf, int cap) {
 	FILE	*f;
-	int		i;
+	long	size;
+	long	from;
+	int		n;
 
-	if (!data_path(path, MAX_PATH, "session.txt")) {
+	buf[0] = '\0';
+	f = fopen(s_session.log_path, "rb");
+
+	if (!f) {
+		return 0;
+	}
+
+	fseek(f, 0, SEEK_END);
+	size = ftell(f);
+	from = size > cap - 1 ? size - (cap - 1) : 0;
+	fseek(f, from, SEEK_SET);
+	n = (int)fread(buf, 1, (size_t)(cap - 1), f);
+	fclose(f);
+	buf[n > 0 ? n : 0] = '\0';
+	return n;
+}
+
+/*
+===============
+last_line
+The last non-empty line of the log, for an error message.
+===============
+*/
+static void last_line(char *out, int cap) {
+	char	buf[4096];
+	int		n;
+	char	*start;
+
+	out[0] = '\0';
+	n = read_log(buf, (int)sizeof(buf));
+
+	while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) {
+		buf[--n] = '\0';
+	}
+
+	if (n <= 0) {
 		return;
 	}
 
-	f = fopen(path, "wb");
+	start = strrchr(buf, '\n');
+	snprintf(out, (size_t)cap, "%s", start ? start + 1 : buf);
+}
+
+/*
+===============
+is_running
+===============
+*/
+static int is_running(void) {
+	return s_session.proc_open && WaitForSingleObject(s_session.proc.hProcess, 0) == WAIT_TIMEOUT;
+}
+
+/*
+===============
+write_pid
+Remember the child so a later helper can find an orphan.
+===============
+*/
+static void write_pid(void) {
+	FILE	*f;
+
+	f = fopen(s_session.pid_path, "wb");
 
 	if (!f) {
 		return;
 	}
 
-	fprintf(f, "pid %lu\n", s_session.proc_open ? (unsigned long)s_session.proc.dwProcessId : 0ul);
-	fprintf(f, "exe %s\n", s_session.binary);
-	fprintf(f, "iface %s\n", s_session.iface);
-	guid_text(&s_session.phys_guid, guid, (int)sizeof(guid));
-	fprintf(f, "guid %s\n", guid);
-	fprintf(f, "dns %d\n", s_session.dns_set);
-
-	for (i = 0; i < s_session.dns_backup_count; i++) {
-		fprintf(f, "backup %s\n", s_session.dns_backup[i]);
-	}
-
-	for (i = 0; i < s_session.route_count; i++) {
-		fprintf(f, "route %d %s\n", s_session.routes[i].via_tunnel, s_session.routes[i].cidr);
-	}
-
+	fprintf(f, "%lu\n", (unsigned long)s_session.proc.dwProcessId);
 	fclose(f);
 }
 
 /*
 ===============
-clear_session_file
-Forget the saved adapter.
+controller_up
+True when something still answers on the external-controller port.
 ===============
 */
-static void clear_session_file(void) {
-	char	path[MAX_PATH];
+static int controller_up(void) {
+	HINTERNET	ses;
+	HINTERNET	con;
+	HINTERNET	req;
+	int			ok;
 
-	if (data_path(path, MAX_PATH, "session.txt")) {
-		DeleteFileA(path);
-	}
-}
+	ses = WinHttpOpen(L"Fairlead", WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
 
-/*
-===============
-file_exists
-True when path is a file.
-===============
-*/
-static int file_exists(const char *path) {
-	DWORD	a;
-
-	a = GetFileAttributesA(path);
-	return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
-}
-
-/*
-===============
-copy_result
-Fill a status struct from the live session.
-===============
-*/
-static void copy_result(win_tun_result_t *out) {
-	int		i;
-
-	memset(out, 0, sizeof(*out));
-	out->ok = s_session.active;
-	snprintf(out->iface, sizeof(out->iface), "%s", s_session.iface);
-	snprintf(out->gateway_v4, sizeof(out->gateway_v4), "%s", s_session.gateway_v4);
-	snprintf(out->gateway_iface, sizeof(out->gateway_iface), "%s", s_session.gateway_iface);
-	out->lan_count = s_session.lan_count;
-
-	for (i = 0; i < s_session.lan_count && i < 8; i++) {
-		snprintf(out->lan[i], 64, "%s", s_session.lan[i]);
-	}
-
-	out->endpoint_count = s_session.endpoint_count;
-
-	for (i = 0; i < s_session.endpoint_count && i < 4; i++) {
-		snprintf(out->endpoints[i], 64, "%s", s_session.endpoints[i]);
-	}
-
-	out->owned_count = s_session.owned_count;
-
-	if (out->owned_count > 48) {
-		out->owned_count = 48;
-	}
-
-	for (i = 0; i < out->owned_count; i++) {
-		snprintf(out->owned[i], 64, "%s", s_session.owned[i]);
-	}
-
-	out->warning_count = s_session.warning_count;
-
-	if (out->warning_count > 12) {
-		out->warning_count = 12;
-	}
-
-	for (i = 0; i < out->warning_count; i++) {
-		snprintf(out->warnings[i], 256, "%s", s_session.warnings[i]);
-	}
-}
-
-/*
-===============
-find_default
-The physical default route: LUID, gateway, name, and local address.
-===============
-*/
-static int find_default(NET_LUID *luid, char *gw, int gw_cap, char *name, int name_cap, char *local_ip, int local_cap, GUID *guid) {
-	ULONG				i;
-	ULONG				best;
-	int					found;
-	MIB_IPFORWARD_ROW2	*row;
-	MIB_IPFORWARD_ROW2	*r;
-	char				ip[64];
-	wchar_t				alias[256];
-	ULONG				size;
-	struct sockaddr_in	*sin;
-	ULONG				prefix;
-
-	PMIB_IPFORWARD_TABLE2 table = NULL;
-	best = 0xffffffffu;
-	found = 0;
-	row = NULL;
-
-	if (GetIpForwardTable2(AF_INET, &table) != NO_ERROR) {
+	if (!ses) {
 		return 0;
 	}
 
-	for (i = 0; i < table->NumEntries; i++) {
-		r = &table->Table[i];
+	WinHttpSetTimeouts(ses, 200, 200, 200, 200);
+	con = WinHttpConnect(ses, CONTROLLER_HOST, CONTROLLER_PORT, 0);
+	req = con ? WinHttpOpenRequest(con, L"GET", L"/version", NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0) : NULL;
+	ok = req && WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+		WinHttpReceiveResponse(req, NULL);
 
-		if (r->DestinationPrefix.PrefixLength != 0) {
-			continue;
-		}
-
-		if (r->NextHop.si_family != AF_INET) {
-			continue;
-		}
-
-		if (r->NextHop.Ipv4.sin_addr.S_un.S_addr == 0) {
-			continue;
-		}
-
-		if (r->Metric < best) {
-			best = r->Metric;
-			row = r;
-			found = 1;
-		}
+	if (req) {
+		WinHttpCloseHandle(req);
 	}
 
-	if (found) {
-		*luid = row->InterfaceLuid;
-		inet_ntop(AF_INET, &row->NextHop.Ipv4.sin_addr, ip, sizeof(ip));
-		snprintf(gw, (size_t)gw_cap, "%s", ip);
-		ConvertInterfaceLuidToGuid(luid, guid);
-		{
-			if (ConvertInterfaceLuidToAlias(luid, alias, 256) == NO_ERROR && name && name_cap > 0) {
-				WideCharToMultiByte(CP_UTF8, 0, alias, -1, name, name_cap, NULL, NULL);
-			}
-		}
-
-		if (local_ip && local_cap) {
-			local_ip[0] = '\0';
-		}
-
-		{
-			size = 0;
-			IP_ADAPTER_ADDRESSES *addrs = NULL;
-
-			GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, NULL, NULL, &size);
-			addrs = (IP_ADAPTER_ADDRESSES *)malloc(size);
-
-			if (addrs && GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, NULL, addrs, &size) == NO_ERROR) {
-				IP_ADAPTER_ADDRESSES *a;
-
-				for (a = addrs; a; a = a->Next) {
-					if (memcmp(&a->Luid, luid, sizeof(*luid)) != 0) {
-						continue;
-					}
-
-					if (a->FirstUnicastAddress) {
-						sin = (struct sockaddr_in *)a->FirstUnicastAddress->Address.lpSockaddr;
-						inet_ntop(AF_INET, &sin->sin_addr, local_ip, (size_t)local_cap);
-					}
-
-					{
-						IP_ADAPTER_UNICAST_ADDRESS *u;
-
-						s_session.lan_count = 0;
-
-						for (u = a->FirstUnicastAddress; u && s_session.lan_count < 8; u = u->Next) {
-							sin = (struct sockaddr_in *)u->Address.lpSockaddr;
-							ip_t ip;
-							cidr_t cidr;
-							char text[64];
-							prefix = u->OnLinkPrefixLength;
-
-							if (sin->sin_family != AF_INET) {
-								continue;
-							}
-
-							inet_ntop(AF_INET, &sin->sin_addr, text, sizeof(text));
-
-							if (!ip_parse(text, &ip)) {
-								continue;
-							}
-
-							if (prefix == 0 || prefix >= 32) {
-								continue;
-							}
-
-							ip_mask(&ip, (int)prefix);
-							cidr.ip = ip;
-							cidr.prefix = (int)prefix;
-							cidr_format(&cidr, text, (int)sizeof(text));
-							snprintf(s_session.lan[s_session.lan_count], 64, "%s", text);
-							s_session.lan_count++;
-						}
-					}
-				}
-			}
-
-			free(addrs);
-		}
+	if (con) {
+		WinHttpCloseHandle(con);
 	}
 
-	FreeMibTable(table);
-	return found;
+	WinHttpCloseHandle(ses);
+	return ok;
 }
 
 /*
 ===============
-resolve_host
-One numeric address for a host. IPv4 wins when both exist.
+wait_controller_gone
+After a kill, wait until the old controller releases the port so the next spawn can bind.
 ===============
 */
-static int resolve_host(const char *host, char *out, int cap) {
-	struct addrinfo			hints;
-	struct addrinfo			*info;
-	struct addrinfo			*it;
-	char					v4[64];
-	char					v6[64];
-	ip_t					ip;
-	struct sockaddr_in		*sin4;
-	struct sockaddr_in6		*sin6;
+static void wait_controller_gone(int max_ms) {
+	int	waited;
 
-	info = NULL;
-
-	if (ip_parse(host, &ip)) {
-		ip_format(&ip, out, cap);
-		return 1;
-	}
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_family = AF_UNSPEC;
-
-	if (getaddrinfo(host, NULL, &hints, &info) != 0) {
-		return 0;
-	}
-
-	v4[0] = v6[0] = '\0';
-
-	for (it = info; it; it = it->ai_next) {
-		if (it->ai_family == AF_INET && !v4[0]) {
-			sin4 = (struct sockaddr_in *)it->ai_addr;
-			inet_ntop(AF_INET, &sin4->sin_addr, v4, sizeof(v4));
-		} else if (it->ai_family == AF_INET6 && !v6[0]) {
-			sin6 = (struct sockaddr_in6 *)it->ai_addr;
-			inet_ntop(AF_INET6, &sin6->sin6_addr, v6, sizeof(v6));
-		}
-	}
-
-	freeaddrinfo(info);
-
-	if (v4[0]) {
-		snprintf(out, (size_t)cap, "%s", v4);
-		return 1;
-	}
-
-	if (v6[0]) {
-		snprintf(out, (size_t)cap, "%s", v6);
-		return 1;
-	}
-
-	return 0;
-}
-
-/*
-===============
-adapter_luid
-LUID of an adapter alias.
-===============
-*/
-static int adapter_luid(const char *name, NET_LUID *luid) {
-	wchar_t	wide[256];
-
-	MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 256);
-	return ConvertInterfaceAliasToLuid(wide, luid) == NO_ERROR;
-}
-
-/*
-===============
-ip_ready
-True when this alias has an IPv4 interface.
-===============
-*/
-static int ip_ready(const wchar_t *alias, NET_LUID *luid) {
-	MIB_IPINTERFACE_ROW	row;
-
-	if (ConvertInterfaceAliasToLuid(alias, luid) != NO_ERROR) {
-		return 0;
-	}
-
-	InitializeIpInterfaceEntry(&row);
-	row.InterfaceLuid = *luid;
-	row.Family = AF_INET;
-	return GetIpInterfaceEntry(&row) == NO_ERROR;
-}
-
-/*
-===============
-find_tun
-The live adapter for this tunnel. A leftover copy is named with a trailing number.
-===============
-*/
-static int find_tun(const char *name, NET_LUID *luid) {
-	wchar_t	want[256];
-	wchar_t	alt[256];
-	int		n;
-
-	if (!MultiByteToWideChar(CP_UTF8, 0, name, -1, want, 256)) {
-		return 0;
-	}
-
-	if (ip_ready(want, luid)) {
-		return 1;
-	}
-
-	for (n = 1; n <= 8; n++) {
-		_snwprintf(alt, 256, L"%s %d", want, n);
-
-		if (ip_ready(alt, luid)) {
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
-/*
-===============
-wait_adapter
-Wait until the userspace adapter has a LUID.
-===============
-*/
-static int wait_adapter(const char *name, NET_LUID *luid) {
-	int		i;
-
-	for (i = 0; i < 80; i++) {
-		if (adapter_luid(name, luid) || find_tun(name, luid)) {
-			return 1;
+	for (waited = 0; waited < max_ms; waited += 100) {
+		if (!controller_up()) {
+			return;
 		}
 
 		Sleep(100);
 	}
-
-	return 0;
-}
-
-/*
-===============
-uapi_exchange
-Send one userspace message and read the reply.
-===============
-*/
-static int uapi_exchange(const char *iface, const char *message, char *reply, int reply_cap) {
-	wchar_t	path[512];
-	wchar_t	wiface[128];
-	HANDLE	pipe;
-	DWORD	wrote;
-	DWORD	got;
-
-	wrote = 0;
-	got = 0;
-
-	MultiByteToWideChar(CP_UTF8, 0, iface, -1, wiface, 128);
-	_snwprintf(path, 512, L"\\\\.\\pipe\\ProtectedPrefix\\Administrators\\AmneziaWG\\%s", wiface);
-	pipe = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-
-	if (pipe == INVALID_HANDLE_VALUE) {
-		return 0;
-	}
-
-	if (!WriteFile(pipe, message, (DWORD)strlen(message), &wrote, NULL)) {
-		CloseHandle(pipe);
-		return 0;
-	}
-
-	if (reply && reply_cap > 0) {
-		if (!ReadFile(pipe, reply, (DWORD)reply_cap - 1, &got, NULL)) {
-			got = 0;
-		}
-
-		reply[got] = '\0';
-	}
-
-	CloseHandle(pipe);
-	return 1;
-}
-
-/*
-===============
-spawn_go
-Start amneziawg-go on an interface name. Plain WireGuard uses it too.
-===============
-*/
-static int spawn_go(const char *exe_dir, const char *binary_name, const char *iface, PROCESS_INFORMATION *pi) {
-	char				binary[MAX_PATH];
-	char				cmd[1024];
-	char				log_path[MAX_PATH];
-	SECURITY_ATTRIBUTES	sa;
-	HANDLE				logf;
-	DWORD				n;
-	char				msg[192];
-
-	STARTUPINFOA si;
-
-	snprintf(binary, sizeof(binary), "%s\\%s", exe_dir, binary_name);
-
-	if (!file_exists(binary)) {
-		return 0;
-	}
-
-	n = GetEnvironmentVariableA("ProgramData", log_path, MAX_PATH);
-
-	if (n == 0) {
-		snprintf(log_path, sizeof(log_path), "C:\\ProgramData");
-	}
-
-	strncat(log_path, "\\Fairlead", sizeof(log_path) - strlen(log_path) - 1);
-	CreateDirectoryA(log_path, NULL);
-	strncat(log_path, "\\amneziawg-go.log", sizeof(log_path) - strlen(log_path) - 1);
-	memset(&sa, 0, sizeof(sa));
-	sa.nLength = sizeof(sa);
-	sa.bInheritHandle = TRUE;
-	logf = CreateFileA(log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	memset(&si, 0, sizeof(si));
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-	si.wShowWindow = SW_HIDE;
-	/* The Windows daemon takes only the interface name. -f is the Unix flag and makes it exit. */
-	si.hStdInput = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
-	si.hStdOutput = logf == INVALID_HANDLE_VALUE ? CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL) : logf;
-	si.hStdError = si.hStdOutput;
-	snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"", binary, iface);
-	memset(pi, 0, sizeof(*pi));
-
-	if (!CreateProcessA(binary, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, exe_dir, &si, pi)) {
-		snprintf(msg, sizeof(msg), "fairlead: could not start %s (%lu)", binary_name, (unsigned long)GetLastError());
-		log_line(msg);
-
-		if (si.hStdInput != INVALID_HANDLE_VALUE) {
-			CloseHandle(si.hStdInput);
-		}
-
-		if (logf != INVALID_HANDLE_VALUE) {
-			CloseHandle(logf);
-		} else if (si.hStdOutput != INVALID_HANDLE_VALUE) {
-			CloseHandle(si.hStdOutput);
-		}
-
-		return 0;
-	}
-
-	if (si.hStdInput != INVALID_HANDLE_VALUE) {
-		CloseHandle(si.hStdInput);
-	}
-
-	if (logf != INVALID_HANDLE_VALUE) {
-		CloseHandle(logf);
-	} else if (si.hStdOutput != INVALID_HANDLE_VALUE) {
-		CloseHandle(si.hStdOutput);
-	}
-
-	return 1;
 }
 
 /*
 ===============
 stop_proc
-Stop the userspace daemon.
+Turn the TUN off through the controller so mihomo drops the adapter and routes, then end the process.
 ===============
 */
 static void stop_proc(void) {
+	char	reply[128];
+	int		status;
+
 	if (!s_session.proc_open) {
+		wait_controller_gone(2000);
 		return;
 	}
 
-	TerminateProcess(s_session.proc.hProcess, 0);
-	WaitForSingleObject(s_session.proc.hProcess, 3000);
+	if (is_running()) {
+		api("PATCH", "/configs", "{\"tun\":{\"enable\":false}}", reply, (int)sizeof(reply), &status, 1000);
+		WaitForSingleObject(s_session.proc.hProcess, 500);
+	}
+
+	if (is_running()) {
+		TerminateProcess(s_session.proc.hProcess, 0);
+	}
+
+	WaitForSingleObject(s_session.proc.hProcess, 4000);
 	CloseHandle(s_session.proc.hProcess);
 	CloseHandle(s_session.proc.hThread);
 	s_session.proc_open = 0;
 	memset(&s_session.proc, 0, sizeof(s_session.proc));
+	DeleteFileA(s_session.pid_path);
+	wait_controller_gone(3000);
 }
 
 /*
 ===============
-add_address
-Assign a CIDR on the adapter. The host bits are kept. The LUID is read again each try, because Wintun may replace a leftover adapter after the daemon starts.
+spawn_mihomo
+mihomo.exe -d workdir -f config.yaml, hidden. Output goes to mihomo.log.
 ===============
 */
-static int add_address(const char *iface, const char *cidr_text) {
-	cidr_t					cidr;
-	MIB_UNICASTIPADDRESS_ROW	row;
-	char						ip[64];
-	char						raw[128];
-	char						*slash;
-	int							attempt;
-	DWORD						err;
-	char						msg[192];
+static int spawn_mihomo(void) {
+	char				cmd[1024];
+	SECURITY_ATTRIBUTES	sa;
+	HANDLE				logf;
+	HANDLE				nul;
+	STARTUPINFOA		si;
+	char				msg[192];
 
-	if (!cidr_parse(cidr_text, &cidr)) {
-		return 0;
-	}
+	memset(&sa, 0, sizeof(sa));
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	logf = CreateFileA(s_session.log_path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+	memset(&si, 0, sizeof(si));
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+	si.hStdInput = nul;
+	si.hStdOutput = logf == INVALID_HANDLE_VALUE ? nul : logf;
+	si.hStdError = si.hStdOutput;
+	snprintf(cmd, sizeof(cmd), "\"%s\" -d \"%s\" -f \"%s\"", s_session.exe, s_session.workdir, s_session.config_path);
+	memset(&s_session.proc, 0, sizeof(s_session.proc));
 
-	/* The adapter address is the host, not the masked network. */
-	{
-		snprintf(raw, sizeof(raw), "%s", cidr_text);
-		str_trim(raw);
-		slash = strchr(raw, '/');
+	if (!CreateProcessA(s_session.exe, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, NULL, s_session.workdir, &si, &s_session.proc)) {
+		snprintf(msg, sizeof(msg), "fairlead: could not start mihomo (%lu)", (unsigned long)GetLastError());
+		log_line(msg);
 
-		if (slash) {
-			*slash = '\0';
+		if (nul != INVALID_HANDLE_VALUE) {
+			CloseHandle(nul);
 		}
 
-		snprintf(ip, sizeof(ip), "%s", raw);
-	}
-
-	{
-		err = ERROR_NOT_FOUND;
-
-		ADDRESS_FAMILY family = cidr.ip.v6 ? AF_INET6 : AF_INET;
-
-		for (attempt = 0; attempt < 80; attempt++) {
-			NET_LUID luid;
-			MIB_IPINTERFACE_ROW iface_row;
-			NET_IFINDEX index = 0;
-
-			if (!find_tun(iface, &luid)) {
-				Sleep(100);
-				continue;
-			}
-
-			if (family == AF_INET6) {
-				InitializeIpInterfaceEntry(&iface_row);
-				iface_row.InterfaceLuid = luid;
-				iface_row.Family = AF_INET6;
-
-				if (GetIpInterfaceEntry(&iface_row) != NO_ERROR) {
-					Sleep(100);
-					continue;
-				}
-			}
-
-			if (ConvertInterfaceLuidToIndex(&luid, &index) != NO_ERROR) {
-				Sleep(100);
-				continue;
-			}
-
-			s_session.tun_luid = luid;
-			s_session.have_tun = 1;
-			InitializeUnicastIpAddressEntry(&row);
-			row.InterfaceLuid = luid;
-			row.InterfaceIndex = index;
-			row.PrefixOrigin = IpPrefixOriginManual;
-			row.SuffixOrigin = IpSuffixOriginManual;
-			row.ValidLifetime = 0xffffffff;
-			row.PreferredLifetime = 0xffffffff;
-			row.DadState = IpDadStatePreferred;
-			row.OnLinkPrefixLength = (UINT8)cidr.prefix;
-
-			if (family == AF_INET) {
-				row.Address.Ipv4.sin_family = AF_INET;
-
-				if (inet_pton(AF_INET, ip, &row.Address.Ipv4.sin_addr) != 1) {
-					return 0;
-				}
-			} else {
-				row.Address.Ipv6.sin6_family = AF_INET6;
-
-				if (inet_pton(AF_INET6, ip, &row.Address.Ipv6.sin6_addr) != 1) {
-					return 0;
-				}
-			}
-
-			err = CreateUnicastIpAddressEntry(&row);
-
-			if (err == NO_ERROR || err == ERROR_OBJECT_ALREADY_EXISTS) {
-				return 1;
-			}
-
-			if (err != ERROR_NOT_FOUND) {
-				break;
-			}
-
-			Sleep(100);
-		}
-
-		{
-			snprintf(msg, sizeof(msg), "fairlead: address %s failed (%lu)", ip, (unsigned long)err);
-			log_line(msg);
+		if (logf != INVALID_HANDLE_VALUE) {
+			CloseHandle(logf);
 		}
 
 		return 0;
 	}
-}
 
-/*
-===============
-set_mtu
-Set the adapter MTU.
-===============
-*/
-static int set_mtu(NET_LUID luid, int mtu) {
-	MIB_IPINTERFACE_ROW	row;
-
-	InitializeIpInterfaceEntry(&row);
-	row.InterfaceLuid = luid;
-	row.Family = AF_INET;
-
-	if (GetIpInterfaceEntry(&row) != NO_ERROR) {
-		return 0;
+	if (nul != INVALID_HANDLE_VALUE) {
+		CloseHandle(nul);
 	}
 
-	row.NlMtu = (ULONG)mtu;
-	row.UseAutomaticMetric = FALSE;
-	row.Metric = 5;
-	row.SitePrefixLength = 0;
-	return SetIpInterfaceEntry(&row) == NO_ERROR;
-}
-
-/*
-===============
-route_row
-Fill a route row for cidr via gateway, or on-link.
-===============
-*/
-static int route_row(NET_LUID luid, const char *cidr_text, const char *gateway, MIB_IPFORWARD_ROW2 *row) {
-	cidr_t	cidr;
-	char		dest[64];
-
-	if (!cidr_parse(cidr_text, &cidr) || cidr.ip.v6) {
-		return 0;
+	if (logf != INVALID_HANDLE_VALUE) {
+		CloseHandle(logf);
 	}
 
-	ip_format(&cidr.ip, dest, (int)sizeof(dest));
-	InitializeIpForwardEntry(row);
-	row->InterfaceLuid = luid;
-	row->DestinationPrefix.Prefix.si_family = AF_INET;
-	row->DestinationPrefix.Prefix.Ipv4.sin_family = AF_INET;
-
-	if (inet_pton(AF_INET, dest, &row->DestinationPrefix.Prefix.Ipv4.sin_addr) != 1) {
-		return 0;
-	}
-
-	row->DestinationPrefix.PrefixLength = (UINT8)cidr.prefix;
-	row->NextHop.si_family = AF_INET;
-	row->NextHop.Ipv4.sin_family = AF_INET;
-
-	if (gateway && gateway[0]) {
-		if (inet_pton(AF_INET, gateway, &row->NextHop.Ipv4.sin_addr) != 1) {
-			return 0;
-		}
-	}
-
-	row->Metric = 5;
+	s_session.proc_open = 1;
+	write_pid();
 	return 1;
 }
 
 /*
 ===============
-add_route
-Install a route and remember it.
+wait_ready
+Wait for the controller, then give the TUN a moment to fail loudly. Fills err on failure.
 ===============
 */
-static int add_route(const char *cidr_text, int via_tunnel) {
-	MIB_IPFORWARD_ROW2	row;
-	NET_LUID			luid;
-	const char			*gw;
-	int					i;
+static int wait_ready(char *err, int err_cap) {
+	char	reply[256];
+	char	line[320];
+	char	logbuf[8192];
+	int		status;
+	int		i;
 
-	gw = NULL;
-
-	if (!via_tunnel) {
-		if (!s_session.have_phys || !s_session.gateway_v4[0]) {
+	for (i = 0; i < 60; i++) {
+		if (!is_running()) {
+			last_line(line, (int)sizeof(line));
+			snprintf(err, (size_t)err_cap, "mihomo exited. %s", line);
 			return 0;
 		}
 
-		luid = s_session.phys_luid;
-		gw = s_session.gateway_v4;
-	} else {
-		if (!s_session.have_tun) {
-			return 0;
+		status = 0;
+
+		if (api("GET", "/version", NULL, reply, (int)sizeof(reply), &status, 1000) && status == 200) {
+			break;
 		}
 
-		luid = s_session.tun_luid;
+		Sleep(250);
 	}
 
-	if (!route_row(luid, cidr_text, gw, &row)) {
+	if (i >= 60) {
+		snprintf(err, (size_t)err_cap, "mihomo did not answer on %s.", CONTROLLER_ADDR);
 		return 0;
 	}
 
-	{
-		DWORD err = CreateIpForwardEntry2(&row);
+	/* Brief pause so a TUN that fails immediately shows up in the log. */
+	Sleep(400);
 
-		if (err != NO_ERROR && err != ERROR_OBJECT_ALREADY_EXISTS) {
-			return 0;
-		}
+	if (!is_running()) {
+		last_line(line, (int)sizeof(line));
+		snprintf(err, (size_t)err_cap, "mihomo exited. %s", line);
+		return 0;
 	}
 
-	for (i = 0; i < s_session.route_count; i++) {
-		if (strcmp(s_session.routes[i].cidr, cidr_text) == 0 && s_session.routes[i].via_tunnel == via_tunnel) {
-			return 1;
-		}
-	}
+	read_log(logbuf, (int)sizeof(logbuf));
 
-	if (s_session.route_count < (int)(sizeof(s_session.routes) / sizeof(s_session.routes[0]))) {
-		snprintf(s_session.routes[s_session.route_count].cidr, 64, "%s", cidr_text);
-		s_session.routes[s_session.route_count].via_tunnel = via_tunnel;
-		s_session.route_count++;
+	if (strstr(logbuf, "TUN listening error") || strstr(logbuf, "Start TUN")) {
+		last_line(line, (int)sizeof(line));
+		snprintf(err, (size_t)err_cap, "mihomo could not start the TUN adapter. %s", line);
+		return 0;
 	}
 
 	return 1;
@@ -960,468 +530,518 @@ static int add_route(const char *cidr_text, int via_tunnel) {
 
 /*
 ===============
-del_route_at
-Delete one remembered route and close the gap.
+normalize_cidr
+A bare address becomes /32 or /128. mihomo's IP-CIDR rule needs the prefix.
 ===============
 */
-static void del_route_at(int index) {
-	MIB_IPFORWARD_ROW2	row;
-	NET_LUID			luid;
-	const char			*gw;
+static int normalize_cidr(const char *text, char *out, int cap) {
+	cidr_t	parsed;
+	char	tmp[64];
 
-	luid = s_session.routes[index].via_tunnel ? s_session.tun_luid : s_session.phys_luid;
-	gw = s_session.routes[index].via_tunnel ? NULL : s_session.gateway_v4;
-
-	if (route_row(luid, s_session.routes[index].cidr, gw, &row)) {
-		DeleteIpForwardEntry2(&row);
+	if (!text || !text[0] || strlen(text) >= 56) {
+		return 0;
 	}
 
-	memmove(&s_session.routes[index], &s_session.routes[index + 1], (size_t)(s_session.route_count - index - 1) * sizeof(s_session.routes[0]));
-	s_session.route_count--;
-}
+	snprintf(tmp, sizeof(tmp), "%s", text);
 
-/*
-===============
-delete_matching
-Delete remembered routes with this CIDR.
-===============
-*/
-static void delete_matching(const char *cidr, int via_tunnel) {
-	int		i;
-
-	for (i = 0; i < s_session.route_count; ) {
-		if (strcmp(s_session.routes[i].cidr, cidr) == 0 && s_session.routes[i].via_tunnel == via_tunnel) {
-			del_route_at(i);
-		} else {
-			i++;
-		}
+	if (!strchr(tmp, '/')) {
+		strcat(tmp, strchr(tmp, ':') ? "/128" : "/32");
 	}
-}
 
-/*
-===============
-is_half
-One of the four /1 networks a default route is split into.
-===============
-*/
-static int is_half(const char *dest) {
-	return strcmp(dest, "0.0.0.0/1") == 0 || strcmp(dest, "128.0.0.0/1") == 0
-		|| strcmp(dest, "::/1") == 0 || strcmp(dest, "8000::/1") == 0;
-}
-
-/*
-===============
-sync_capture
-Capture-all installs the /1 halves. The other mode routes only the tunnel DNS.
-===============
-*/
-static void sync_capture(const doc_t *doc, int capture) {
-	int		n;
-	int		i;
-
-	char families[16][8];
-	char dests[16][64];
-	n = tunnel_destinations(doc, families, dests, 16);
-	s_session.capture = capture;
-
-	if (capture) {
-		for (i = 0; i < n; i++) {
-			if (!is_half(dests[i])) {
-				continue;
-			}
-
-			if (strcmp(families[i], "inet") != 0) {
-				continue;
-			}
-
-			add_route(dests[i], 1);
-		}
-	} else {
-		for (i = 0; i < s_session.route_count; ) {
-			if (s_session.routes[i].via_tunnel && is_half(s_session.routes[i].cidr)) {
-				del_route_at(i);
-			} else {
-				i++;
-			}
-		}
-
-		for (i = 0; i < s_session.dns_server_count; i++) {
-			char dest[80];
-
-			if (strchr(s_session.dns_servers[i], ':')) {
-				continue;
-			}
-
-			snprintf(dest, sizeof(dest), "%s/32", s_session.dns_servers[i]);
-			add_route(dest, 1);
-		}
+	if (!cidr_parse(tmp, &parsed)) {
+		return 0;
 	}
+
+	snprintf(out, (size_t)cap, "%s", tmp);
+	return 1;
 }
 
 /*
 ===============
-apply_dns
-Point the physical adapter at the tunnel DNS and remember the old servers.
+write_config
+Build config.yaml from the WireGuard text and the rules. Fills err on failure.
 ===============
 */
-static void apply_dns(void) {
-	set_dns_fn		fn;
-	wchar_t			joined[512];
-	dns_settings_t	settings;
-	HMODULE			mod;
+static int write_config(const char *wg_text, const char **cidrs, int cidr_count, const char **domains, int domain_count,
+	const char **apps, int app_count, int exclude_lan, int selected, char *err, int err_cap) {
+	mihomo_rules_t	rules;
+	char			(*norm)[64];
+	const char		**ptrs;
+	int				n;
 	int				i;
-	ULONG			size;
+	char			*yaml;
+	FILE			*f;
+	size_t			len;
+	size_t			wrote;
 
-	IP_ADAPTER_ADDRESSES *addrs = NULL;
-	size = 0;
+	norm = (char (*)[64])calloc(cidr_count > 0 ? (size_t)cidr_count : 1, 64);
+	ptrs = (const char **)calloc(cidr_count > 0 ? (size_t)cidr_count : 1, sizeof(*ptrs));
 
-	if (s_session.dns_server_count == 0 || !s_session.have_phys) {
+	if (!norm || !ptrs) {
+		free(norm);
+		free(ptrs);
+		snprintf(err, (size_t)err_cap, "Not enough memory.");
+		return 0;
+	}
+
+	n = 0;
+
+	for (i = 0; i < cidr_count; i++) {
+		if (normalize_cidr(cidrs[i], norm[n], 64)) {
+			ptrs[n] = norm[n];
+			n++;
+		}
+	}
+
+	memset(&rules, 0, sizeof(rules));
+	rules.cidrs = ptrs;
+	rules.cidr_count = n;
+	rules.domains = domains;
+	rules.domain_count = domain_count;
+	rules.apps = apps;
+	rules.app_count = app_count;
+	yaml = mihomo_config(wg_text, selected, exclude_lan, &rules, CONTROLLER_ADDR, s_session.secret, err, err_cap);
+	free(norm);
+	free(ptrs);
+
+	if (!yaml) {
+		if (err[0] == '\0') {
+			snprintf(err, (size_t)err_cap, "Could not build the mihomo config.");
+		}
+
+		return 0;
+	}
+
+	f = fopen(s_session.config_path, "wb");
+
+	if (!f) {
+		free(yaml);
+		snprintf(err, (size_t)err_cap, "Could not write %s.", s_session.config_path);
+		return 0;
+	}
+
+	len = strlen(yaml);
+	wrote = fwrite(yaml, 1, len, f);
+	fclose(f);
+	free(yaml);
+
+	if (wrote != len) {
+		snprintf(err, (size_t)err_cap, "Could not write %s.", s_session.config_path);
+		return 0;
+	}
+
+	return 1;
+}
+
+/*
+===============
+total_of
+Read an unsigned number after a JSON key.
+===============
+*/
+static unsigned long long total_of(const char *text, const char *key) {
+	const char	*p;
+
+	p = strstr(text, key);
+
+	if (!p) {
+		return 0;
+	}
+
+	return strtoull(p + strlen(key), NULL, 10);
+}
+
+/*
+===============
+probe_delay
+HTTP probe through the WireGuard outbound. Returns delay ms, or 0 on failure.
+===============
+*/
+static int probe_delay(void) {
+	char	reply[256];
+	int		status;
+	char	*p;
+	int		delay;
+
+	status = 0;
+	delay = 0;
+
+	if (!api("GET", PROBE_PATH, NULL, reply, (int)sizeof(reply), &status, 2500) || status != 200) {
+		return 0;
+	}
+
+	p = strstr(reply, "\"delay\":");
+
+	if (!p) {
+		return 0;
+	}
+
+	delay = atoi(p + 8);
+	return delay > 0 ? delay : 0;
+}
+
+/*
+===============
+resolve_endpoint_ip
+DNS lookup before TUN is up. Stores an IPv4 address for ICMP ping.
+===============
+*/
+static void resolve_endpoint_ip(void) {
+	char				host[256];
+	struct addrinfo		hints;
+	struct addrinfo		*res;
+	struct addrinfo		*a;
+
+	s_session.endpoint_ip[0] = '\0';
+
+	if (!endpoint_host(s_session.endpoint, host, (int)sizeof(host))) {
 		return;
 	}
 
-	joined[0] = 0;
+	/* Already a dotted IPv4 — no DNS. */
+	{
+		struct in_addr	addr;
 
-	for (i = 0; i < s_session.dns_server_count; i++) {
-		wchar_t one[64];
-
-		MultiByteToWideChar(CP_UTF8, 0, s_session.dns_servers[i], -1, one, 64);
-
-		if (joined[0]) {
-			wcscat(joined, L" ");
-		}
-
-		wcscat(joined, one);
-	}
-
-	GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, NULL, NULL, &size);
-	addrs = (IP_ADAPTER_ADDRESSES *)malloc(size);
-	s_session.dns_backup_count = 0;
-
-	if (addrs && GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, NULL, addrs, &size) == NO_ERROR) {
-		IP_ADAPTER_ADDRESSES *a;
-
-		for (a = addrs; a; a = a->Next) {
-			IP_ADAPTER_DNS_SERVER_ADDRESS *d;
-
-			if (memcmp(&a->Luid, &s_session.phys_luid, sizeof(s_session.phys_luid)) != 0) {
-				continue;
-			}
-
-			for (d = a->FirstDnsServerAddress; d && s_session.dns_backup_count < 8; d = d->Next) {
-				char ip[64];
-
-				if (d->Address.lpSockaddr->sa_family == AF_INET) {
-					inet_ntop(AF_INET, &((struct sockaddr_in *)d->Address.lpSockaddr)->sin_addr, ip, sizeof(ip));
-				} else if (d->Address.lpSockaddr->sa_family == AF_INET6) {
-					inet_ntop(AF_INET6, &((struct sockaddr_in6 *)d->Address.lpSockaddr)->sin6_addr, ip, sizeof(ip));
-				} else {
-					continue;
-				}
-
-				snprintf(s_session.dns_backup[s_session.dns_backup_count], 64, "%s", ip);
-				s_session.dns_backup_count++;
-			}
-		}
-	}
-
-	free(addrs);
-	mod = LoadLibraryA("iphlpapi.dll");
-	fn = mod ? (set_dns_fn)GetProcAddress(mod, "SetInterfaceDnsSettings") : NULL;
-
-	if (!fn) {
-		return;
-	}
-
-	memset(&settings, 0, sizeof(settings));
-	settings.Version = DNS_VER;
-	settings.Flags = DNS_F_NAMESERVER;
-	settings.NameServer = joined;
-
-	if (fn(&s_session.phys_guid, &settings) == NO_ERROR) {
-		s_session.dns_set = 1;
-	}
-}
-
-/*
-===============
-restore_dns
-Put the physical DNS servers back.
-===============
-*/
-static void restore_dns(void) {
-	set_dns_fn		fn;
-	HMODULE			mod;
-	wchar_t			joined[512];
-	dns_settings_t	settings;
-	int				i;
-
-	if (!s_session.dns_set) {
-		return;
-	}
-
-	joined[0] = 0;
-
-	for (i = 0; i < s_session.dns_backup_count; i++) {
-		wchar_t one[64];
-
-		MultiByteToWideChar(CP_UTF8, 0, s_session.dns_backup[i], -1, one, 64);
-
-		if (joined[0]) {
-			wcscat(joined, L" ");
-		}
-
-		wcscat(joined, one);
-	}
-
-	mod = LoadLibraryA("iphlpapi.dll");
-	fn = mod ? (set_dns_fn)GetProcAddress(mod, "SetInterfaceDnsSettings") : NULL;
-
-	if (!fn) {
-		return;
-	}
-
-	memset(&settings, 0, sizeof(settings));
-	settings.Version = DNS_VER;
-	settings.Flags = DNS_F_NAMESERVER;
-	settings.NameServer = joined;
-	fn(&s_session.phys_guid, &settings);
-	s_session.dns_set = 0;
-}
-
-/*
-===============
-clear_routes
-Delete every route this session added.
-===============
-*/
-static void clear_routes(void) {
-	while (s_session.route_count > 0) {
-		del_route_at(0);
-	}
-}
-
-/*
-===============
-mtu_of
-MTU from the config, or 1420.
-===============
-*/
-static int mtu_of(const doc_t *doc) {
-	int		iface;
-	char	value[32];
-	int		mtu;
-
-	iface = doc_interface(doc);
-	mtu = 0;
-
-	if (iface < 0) {
-		return 1420;
-	}
-
-	doc_value(doc, iface, "MTU", value, (int)sizeof(value));
-
-	if (value[0]) {
-		mtu = atoi(value);
-
-		if (mtu >= 1280) {
-			return mtu;
-		}
-	}
-
-	return 1420;
-}
-
-/*
-===============
-fill_dns
-DNS servers from the Interface section.
-===============
-*/
-static void fill_dns(const doc_t *doc) {
-	char	dns[512];
-	int		n;
-	int		i;
-
-	char items[8][256];
-	s_session.dns_server_count = 0;
-	doc_dns(doc, dns, (int)sizeof(dns));
-	n = split_commas(dns, items, 8);
-
-	for (i = 0; i < n && s_session.dns_server_count < 4; i++) {
-		ip_t ip;
-
-		if (!ip_parse(items[i], &ip)) {
-			continue;
-		}
-
-		ip_format(&ip, s_session.dns_servers[s_session.dns_server_count], 64);
-		s_session.dns_server_count++;
-	}
-}
-
-/*
-===============
-remember_owned
-A CIDR the plan says this session owns.
-===============
-*/
-static void remember_owned(const char *cidr) {
-	int		i;
-
-	for (i = 0; i < s_session.owned_count; i++) {
-		if (strcmp(s_session.owned[i], cidr) == 0) {
+		if (InetPtonA(AF_INET, host, &addr) == 1) {
+			snprintf(s_session.endpoint_ip, sizeof(s_session.endpoint_ip), "%s", host);
 			return;
 		}
 	}
 
-	if (s_session.owned_count < BYPASS_MAX) {
-		snprintf(s_session.owned[s_session.owned_count], 64, "%s", cidr);
-		s_session.owned_count++;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+
+	if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res) {
+		return;
+	}
+
+	for (a = res; a; a = a->ai_next) {
+		if (a->ai_family == AF_INET) {
+			char	ip[64];
+
+			if (getnameinfo(a->ai_addr, (socklen_t)a->ai_addrlen, ip, (DWORD)sizeof(ip), NULL, 0, NI_NUMERICHOST) == 0) {
+				snprintf(s_session.endpoint_ip, sizeof(s_session.endpoint_ip), "%s", ip);
+			}
+
+			break;
+		}
+	}
+
+	freeaddrinfo(res);
+}
+
+/*
+===============
+ping_endpoint
+ICMP echo to the pre-resolved endpoint IP. No DNS after connect.
+===============
+*/
+static int ping_endpoint(void) {
+	struct in_addr		addr;
+	HANDLE				icmp;
+	char				send[32];
+	char				reply[sizeof(ICMP_ECHO_REPLY) + 64];
+	DWORD				n;
+	PICMP_ECHO_REPLY	echo;
+	int					rtt;
+
+	rtt = 0;
+
+	if (!s_session.endpoint_ip[0] || InetPtonA(AF_INET, s_session.endpoint_ip, &addr) != 1) {
+		return 0;
+	}
+
+	icmp = IcmpCreateFile();
+
+	if (icmp == INVALID_HANDLE_VALUE) {
+		return 0;
+	}
+
+	memset(send, 0, sizeof(send));
+	n = IcmpSendEcho(icmp, addr.S_un.S_addr, send, (WORD)sizeof(send), NULL, reply, (DWORD)sizeof(reply), 800);
+	IcmpCloseHandle(icmp);
+
+	if (n > 0) {
+		echo = (PICMP_ECHO_REPLY)reply;
+
+		if (echo->Status == IP_SUCCESS) {
+			rtt = (int)echo->RoundTripTime;
+
+			if (rtt <= 0) {
+				rtt = 1;
+			}
+		}
+	}
+
+	return rtt;
+}
+
+/*
+===============
+protocol_label
+WireGuard or AmneziaWG from the stored config.
+===============
+*/
+static void protocol_label(char *out, int cap) {
+	doc_t	doc;
+
+	snprintf(out, (size_t)cap, "WireGuard");
+
+	if (!s_session.wg || !s_session.wg[0]) {
+		return;
+	}
+
+	doc_init(&doc);
+	doc_parse(&doc, s_session.wg);
+
+	if (amnezia_is(&doc)) {
+		snprintf(out, (size_t)cap, "AmneziaWG");
+	}
+
+	doc_free(&doc);
+}
+
+/*
+===============
+fill_identity
+Protocol label, peer endpoint, and counters — no liveness probe.
+===============
+*/
+static void fill_identity(win_tun_result_t *out) {
+	static const char *const lan_ranges[] = {
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"
+	};
+	char	reply[512];
+	int		status;
+	int		i;
+
+	protocol_label(out->iface, (int)sizeof(out->iface));
+	snprintf(out->live_endpoint, sizeof(out->live_endpoint), "%s", s_session.endpoint);
+	out->gateway_v4[0] = '\0';
+	out->stage[0] = '\0';
+	out->lan_count = 0;
+
+	for (i = 0; i < (int)(sizeof(lan_ranges) / sizeof(lan_ranges[0])) && out->lan_count < 8; i++) {
+		snprintf(out->lan[out->lan_count++], sizeof(out->lan[0]), "%s", lan_ranges[i]);
+	}
+
+	if (s_session.endpoint_ip[0]) {
+		snprintf(out->gateway_v4, sizeof(out->gateway_v4), "%s", s_session.endpoint_ip);
+	} else if (s_session.endpoint[0]) {
+		char	host[256];
+
+		if (endpoint_host(s_session.endpoint, host, (int)sizeof(host))) {
+			snprintf(out->gateway_v4, sizeof(out->gateway_v4), "%s", host);
+		}
+	}
+
+	out->handshake = 0;
+	out->delay_ms = 0;
+	out->ping_ms = 0;
+	out->rx = 0;
+	out->tx = 0;
+
+	if (!is_running()) {
+		return;
+	}
+
+	status = 0;
+
+	if (api("GET", "/connections", NULL, reply, (int)sizeof(reply), &status, 1500) && status == 200) {
+		out->rx = total_of(reply, "\"downloadTotal\":");
+		out->tx = total_of(reply, "\"uploadTotal\":");
 	}
 }
 
 /*
 ===============
-apply_plan
-Install the bypass plan on top of the current routes.
+fill_result
+Counters, HTTP probe for tunnel liveness, ICMP ping for the UI (only after the tunnel is up).
 ===============
 */
-static void apply_plan(const char **cidrs, int cidr_count, int exclude_lan, int selected) {
-	bypass_t	*plan;
-	const char	*eps[4];
-	const char	*lan[8];
-	char		(*desired_tunnel)[64];
-	char		(*desired_direct)[64];
-	int			i;
-	int			lan_count;
-	int			nt;
-	int			nd;
-	int			k;
-	int			keep;
+static void fill_result(win_tun_result_t *out) {
+	time_t	now;
+	int		need_probe;
+	int		need_ping;
+	int		gap;
+	int		delay;
+	int		ping;
 
-	nt = 0;
-	nd = 0;
-	desired_tunnel = NULL;
-	desired_direct = NULL;
-	plan = (bypass_t *)calloc(1, sizeof(*plan));
+	fill_identity(out);
+	now = time(NULL);
 
-	if (!plan) {
-		snprintf(s_session.warnings[0], 256, "%s", "Not enough memory for the route plan.");
-		s_session.warning_count = 1;
+	if (!is_running()) {
+		s_session.last_probe = 0;
+		s_session.last_ok = 0;
+		s_session.last_ping_at = 0;
+		s_session.last_delay_ms = 0;
+		s_session.last_ping_ms = 0;
+		s_session.probe_fails = 0;
+		snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+		add_warning(out, "mihomo is not running.");
 		return;
 	}
 
-	for (i = 0; i < s_session.endpoint_count && i < 4; i++) {
-		eps[i] = s_session.endpoints[i];
+	/*
+	 * While connecting, retry often. Once reachable, re-check every PROBE_EVERY_SEC.
+	 * Keep the stage on "Checking…" after the first attempt — "Opening…" between retries
+	 * looked like a hang when WireGuard was slow after a rapid reconnect.
+	 */
+	gap = s_session.last_ok == 0 ? PROBE_RETRY_SEC : PROBE_EVERY_SEC;
+	need_probe = s_session.last_probe == 0 ||
+		(now >= s_session.last_probe && (now - s_session.last_probe) >= gap);
+
+	if (s_session.last_ok == 0) {
+		snprintf(out->stage, sizeof(out->stage),
+			s_session.last_probe == 0 ? "Opening the tunnel…" : "Checking the tunnel…");
 	}
 
-	/* s_session.lan is a block of strings, not an array of pointers. */
-	lan_count = s_session.lan_count;
+	if (need_probe) {
+		s_session.last_probe = now;
+		snprintf(out->stage, sizeof(out->stage), "Checking the tunnel…");
+		delay = probe_delay();
 
-	if (lan_count > 8) {
-		lan_count = 8;
+		if (delay > 0) {
+			s_session.last_ok = now;
+			s_session.last_delay_ms = delay;
+			s_session.probe_fails = 0;
+		} else if (s_session.last_ok == 0) {
+			s_session.probe_fails++;
+
+			/*
+			 * Rapid down/up can leave WireGuard stuck until mihomo is restarted.
+			 * One recovery per connect is enough — avoid a restart loop.
+			 */
+			if (s_session.probe_fails >= PROBE_FAIL_RESTART && !s_session.recovered && s_session.wg) {
+				log_line("fairlead: tunnel not reachable, restarting mihomo");
+				s_session.recovered = 1;
+				s_session.probe_fails = 0;
+				s_session.last_probe = 0;
+				stop_proc();
+
+				if (spawn_mihomo()) {
+					snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+				} else {
+					add_warning(out, "mihomo could not be restarted.");
+				}
+			}
+		}
 	}
 
-	for (i = 0; i < lan_count; i++) {
-		lan[i] = s_session.lan[i];
-	}
+	if (s_session.last_ok != 0 && now >= s_session.last_ok && (now - s_session.last_ok) <= PROBE_STALE_SEC) {
+		out->handshake = (int)s_session.last_ok;
+		out->delay_ms = s_session.last_delay_ms;
+		out->stage[0] = '\0';
+		/* Tiny ICMP to the endpoint IP. Every few seconds is enough for the UI. */
+		need_ping = s_session.last_ping_at == 0 ||
+			(now >= s_session.last_ping_at && (now - s_session.last_ping_at) >= PING_EVERY_SEC);
 
-	bypass_plan(selected, cidrs, cidr_count, NULL, 0, lan, lan_count, exclude_lan, eps, s_session.endpoint_count, plan);
-	s_session.warning_count = plan->warning_count;
+		if (need_ping) {
+			s_session.last_ping_at = now;
+			ping = ping_endpoint();
 
-	if (s_session.warning_count > 12) {
-		s_session.warning_count = 12;
-	}
+			if (ping > 0) {
+				s_session.last_ping_ms = ping;
+			}
+		}
 
-	for (i = 0; i < s_session.warning_count; i++) {
-		snprintf(s_session.warnings[i], 256, "%s", plan->warnings[i]);
-	}
-
-	if (selected) {
-		nt = plan->route_count;
-		desired_tunnel = plan->routes;
-		nd = plan->direct_count;
-		desired_direct = plan->direct;
+		out->ping_ms = s_session.last_ping_ms;
 	} else {
-		nd = plan->route_count;
-		desired_direct = plan->routes;
+		s_session.last_ok = 0;
+		s_session.last_delay_ms = 0;
 	}
-
-	for (i = 0; i < s_session.owned_count; ) {
-		keep = 0;
-
-		for (k = 0; k < nt; k++) {
-			if (strcmp(s_session.owned[i], desired_tunnel[k]) == 0) {
-				keep = 1;
-			}
-		}
-
-		for (k = 0; k < nd; k++) {
-			if (strcmp(s_session.owned[i], desired_direct[k]) == 0) {
-				keep = 1;
-			}
-		}
-
-		if (!keep) {
-			delete_matching(s_session.owned[i], 0);
-			delete_matching(s_session.owned[i], 1);
-			memmove(&s_session.owned[i], &s_session.owned[i + 1], (size_t)(s_session.owned_count - i - 1) * 64);
-			s_session.owned_count--;
-		} else {
-			i++;
-		}
-	}
-
-	for (i = 0; i < nt; i++) {
-		if (add_route(desired_tunnel[i], 1)) {
-			remember_owned(desired_tunnel[i]);
-		}
-	}
-
-	for (i = 0; i < nd; i++) {
-		if (add_route(desired_direct[i], 0)) {
-			remember_owned(desired_direct[i]);
-		}
-	}
-
-	free(plan);
 }
 
 /*
 ===============
-read_stats
-Handshake and byte counters from the userspace daemon.
+json_path
+Escape backslashes and quotes for a JSON string.
 ===============
 */
-static void read_stats(win_tun_result_t *out) {
-	char				reply[4096];
-	device_status_t	dev;
-	char				msg[] = "get=1\n\n";
+static void json_path(const char *src, char *dst, int cap) {
+	int		n;
 
-	if (!s_session.active) {
-		return;
+	n = 0;
+
+	for (; *src && n + 3 < cap; src++) {
+		if (*src == '\\' || *src == '"') {
+			dst[n++] = '\\';
+		}
+
+		dst[n++] = *src;
 	}
 
-	if (!uapi_exchange(s_session.iface, msg, reply, (int)sizeof(reply))) {
-		return;
+	dst[n] = '\0';
+}
+
+/*
+===============
+reload
+Ask the running mihomo to read config.yaml again. Returns 1 on 204.
+===============
+*/
+static int reload(void) {
+	char	path[MAX_PATH * 2];
+	char	body[MAX_PATH * 2 + 32];
+	char	reply[256];
+	int		status;
+
+	status = 0;
+	json_path(s_session.config_path, path, (int)sizeof(path));
+	snprintf(body, sizeof(body), "{\"path\":\"%s\"}", path);
+
+	if (!api("PUT", "/configs?force=true", body, reply, (int)sizeof(reply), &status, 3000)) {
+		return 0;
 	}
 
-	uapi_parse_get(reply, s_session.iface, &dev);
+	return status >= 200 && status < 300;
+}
 
-	if (dev.peer_count > 0) {
-		out->rx = dev.peers[0].rx;
-		out->tx = dev.peers[0].tx;
-		out->handshake = dev.peers[0].handshake;
-		snprintf(out->live_endpoint, sizeof(out->live_endpoint), "%s", dev.peers[0].endpoint);
+/*
+===============
+session_clear
+===============
+*/
+static void session_clear(void) {
+	free(s_session.wg);
+	s_session.wg = NULL;
+	s_session.active = 0;
+	s_session.slug[0] = '\0';
+	s_session.endpoint[0] = '\0';
+	s_session.endpoint_ip[0] = '\0';
+	s_session.last_probe = 0;
+	s_session.last_ok = 0;
+	s_session.last_ping_at = 0;
+	s_session.last_delay_ms = 0;
+	s_session.last_ping_ms = 0;
+	s_session.probe_fails = 0;
+	s_session.recovered = 0;
+}
+
+/*
+===============
+read_endpoint
+The peer Endpoint from the WireGuard text, for the status line.
+===============
+*/
+static void read_endpoint(const char *wg_text) {
+	doc_t	doc;
+	int		peers[PEER_MAX];
+
+	s_session.endpoint[0] = '\0';
+	doc_init(&doc);
+	doc_parse(&doc, wg_text);
+
+	if (doc_peers(&doc, peers, PEER_MAX) > 0) {
+		doc_value(&doc, peers[0], "Endpoint", s_session.endpoint, (int)sizeof(s_session.endpoint));
 	}
 
-	snprintf(out->public_key, sizeof(out->public_key), "%s", dev.public_key);
+	doc_free(&doc);
 }
 
 /*
 ===============
 win_tun_active
-True while a tunnel is up.
 ===============
 */
 int win_tun_active(void) {
@@ -1431,209 +1051,91 @@ int win_tun_active(void) {
 /*
 ===============
 win_tun_status
-Copy the live counters and the last error.
+Counters and liveness for the reply. Empty when no session is up.
 ===============
 */
 void win_tun_status(win_tun_result_t *out) {
-	lock();
-	copy_result(out);
-	read_stats(out);
-	out->ok = s_session.active;
-	unlock();
-}
+	memset(out, 0, sizeof(*out));
 
-/*
-===============
-session_down
-Drop routes, DNS, the daemon, and the saved session.
-===============
-*/
-static void session_down(void) {
-	restore_dns();
-	clear_routes();
-	stop_proc();
-	clear_session_file();
-	s_session.active = 0;
-	s_session.have_tun = 0;
-	s_session.owned_count = 0;
-	s_session.iface[0] = '\0';
+	if (!s_session.active) {
+		return;
+	}
+
+	out->ok = 1;
+	fill_result(out);
 }
 
 /*
 ===============
 win_tun_down
-Bring the tunnel down.
+Stop mihomo. It drops the adapter and routes with it.
 ===============
 */
 int win_tun_down(win_tun_result_t *out) {
-	lock();
-	session_down();
-
 	if (out) {
 		memset(out, 0, sizeof(*out));
+	}
+
+	stop_proc();
+	session_clear();
+
+	if (out) {
 		out->ok = 1;
 	}
 
-	unlock();
-	log_line("fairlead: tunnel down");
 	return 1;
 }
 
 /*
 ===============
 win_tun_reconcile
-On helper start, drop an adapter a previous process left behind.
+On helper start, end a mihomo a previous helper left behind. Only the recorded pid is touched.
 ===============
 */
 void win_tun_reconcile(void) {
+	char			dir[MAX_PATH];
 	char			path[MAX_PATH];
-	char			line[256];
+	char			line[64];
 	FILE			*f;
 	unsigned long	pid;
-	char			iface[64];
-	GUID			guid;
-	int				have_guid;
-	int				dns;
-	int				backup_count;
-	int				*via;
-	int				route_count;
-	int				route_cap;
-	WSADATA			wsa;
-	int				flag;
-	char			cidr[64];
-	char			backups[8][64];
-	char			(*routes)[64];
-	int				i;
 	HANDLE			proc;
-	char			image[MAX_PATH];
+	wchar_t			image[MAX_PATH];
 	DWORD			n;
+	wchar_t			*base;
 
-	pid = 0;
-	have_guid = 0;
-	dns = 0;
-	backup_count = 0;
-	route_count = 0;
-	route_cap = BYPASS_MAX + 16;
-	via = (int *)calloc((size_t)route_cap, sizeof(int));
-	routes = (char (*)[64])calloc((size_t)route_cap, 64);
-
-	if (!via || !routes) {
-		free(via);
-		free(routes);
+	if (!run_dir(dir, MAX_PATH)) {
 		return;
 	}
 
-	iface[0] = '\0';
-	memset(&guid, 0, sizeof(guid));
-
-	if (!data_path(path, MAX_PATH, "session.txt")) {
-		free(via);
-		free(routes);
-		return;
-	}
-
+	snprintf(path, sizeof(path), "%s\\mihomo.pid", dir);
 	f = fopen(path, "rb");
 
 	if (!f) {
-		free(via);
-		free(routes);
 		return;
 	}
 
-	while (fgets(line, (int)sizeof(line), f)) {
-		str_trim(line);
+	pid = 0;
 
-		if (sscanf(line, "pid %lu", &pid) == 1) {
-			continue;
-		}
-
-		if (strncmp(line, "iface ", 6) == 0) {
-			snprintf(iface, sizeof(iface), "%s", line + 6);
-		} else if (strncmp(line, "guid ", 5) == 0) {
-			have_guid = guid_read(line + 5, &guid);
-		} else if (sscanf(line, "dns %d", &dns) == 1) {
-			continue;
-		} else if (strncmp(line, "backup ", 7) == 0 && backup_count < 8) {
-			snprintf(backups[backup_count], 64, "%s", line + 7);
-			backup_count++;
-		} else if (route_count < route_cap && strncmp(line, "route ", 6) == 0) {
-			flag = 0;
-
-			if (sscanf(line + 6, "%d %63s", &flag, cidr) == 2) {
-				via[route_count] = flag;
-				snprintf(routes[route_count], 64, "%s", cidr);
-				route_count++;
-			}
-		}
+	if (fgets(line, (int)sizeof(line), f)) {
+		pid = strtoul(line, NULL, 10);
 	}
 
 	fclose(f);
 
-	WSAStartup(MAKEWORD(2, 2), &wsa);
-	lock();
-	memset(&s_session, 0, sizeof(s_session));
-
-	if (have_guid) {
-		s_session.phys_guid = guid;
-	}
-
-	s_session.dns_backup_count = backup_count;
-	{
-		for (i = 0; i < backup_count; i++) {
-			snprintf(s_session.dns_backup[i], 64, "%s", backups[i]);
-		}
-	}
-
-	s_session.dns_set = dns && have_guid;
-	restore_dns();
-
-	if (find_default(&s_session.phys_luid, s_session.gateway_v4, (int)sizeof(s_session.gateway_v4), s_session.gateway_iface, (int)sizeof(s_session.gateway_iface), s_session.phys_ip, (int)sizeof(s_session.phys_ip), &s_session.phys_guid)) {
-		s_session.have_phys = 1;
-
-		for (i = 0; i < route_count; i++) {
-			if (via[i]) {
-				continue;
-			}
-
-			snprintf(s_session.routes[s_session.route_count].cidr, 64, "%s", routes[i]);
-			s_session.routes[s_session.route_count].via_tunnel = 0;
-			s_session.route_count++;
-		}
-
-		clear_routes();
-	}
-
-	if (iface[0] && adapter_luid(iface, &s_session.tun_luid)) {
-		s_session.have_tun = 1;
-
-		for (i = 0; i < route_count; i++) {
-			if (!via[i]) {
-				continue;
-			}
-
-			snprintf(s_session.routes[s_session.route_count].cidr, 64, "%s", routes[i]);
-			s_session.routes[s_session.route_count].via_tunnel = 1;
-			s_session.route_count++;
-		}
-
-		clear_routes();
-	}
-
-	unlock();
-
-	if (pid > 4) {
-		proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, FALSE, (DWORD)pid);
+	if (pid) {
+		proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, (DWORD)pid);
 
 		if (proc) {
 			n = MAX_PATH;
 
-			if (QueryFullProcessImageNameA(proc, 0, image, &n)) {
-				/* wireguard-go.exe is a daemon left by an older build. */
+			if (QueryFullProcessImageNameW(proc, 0, image, &n)) {
+				base = wcsrchr(image, L'\\');
+				base = base ? base + 1 : image;
 
-				if (strstr(image, "wireguard-go.exe") || strstr(image, "amneziawg-go.exe")) {
+				if (_wcsicmp(base, L"mihomo.exe") == 0) {
 					TerminateProcess(proc, 0);
-					WaitForSingleObject(proc, 3000);
-					log_line("fairlead: stopped a leftover tunnel process");
+					WaitForSingleObject(proc, 4000);
+					log_line("fairlead: ended an orphan mihomo");
 				}
 			}
 
@@ -1641,324 +1143,121 @@ void win_tun_reconcile(void) {
 		}
 	}
 
-	clear_session_file();
-	free(via);
-	free(routes);
+	DeleteFileA(path);
 }
 
 /*
 ===============
-win_tun_bypass
-Replace the route plan on the running tunnel.
+paths_init
+Resolve the paths for this session.
 ===============
 */
-int win_tun_bypass(const char **cidrs, int cidr_count, int exclude_lan, int selected, win_tun_result_t *out) {
-	doc_t	doc;
-	char		*text;
-	FILE		*f;
-	long		n;
+static int paths_init(const char *exe_dir, char *err, int err_cap) {
+	snprintf(s_session.exe, sizeof(s_session.exe), "%s\\bin\\mihomo.exe", exe_dir && exe_dir[0] ? exe_dir : ".");
 
-	text = NULL;
-
-	lock();
-
-	if (!s_session.active) {
-		unlock();
-
-		if (out) {
-			memset(out, 0, sizeof(*out));
-			snprintf(out->error, sizeof(out->error), "The tunnel is not running.");
-		}
-
+	if (!file_exists(s_session.exe)) {
+		snprintf(err, (size_t)err_cap, "mihomo.exe was not found in bin.");
 		return 0;
 	}
 
-	f = fopen(s_session.config_path, "rb");
-
-	if (f) {
-		fseek(f, 0, SEEK_END);
-		n = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		if (n > 0 && n < 256000) {
-			text = (char *)malloc((size_t)n + 1);
-
-			if (text) {
-				fread(text, 1, (size_t)n, f);
-				text[n] = '\0';
-			}
-		}
-
-		fclose(f);
+	if (!run_dir(s_session.workdir, MAX_PATH)) {
+		snprintf(err, (size_t)err_cap, "ProgramData is not available.");
+		return 0;
 	}
 
-	doc_init(&doc);
-
-	if (text) {
-		doc_parse(&doc, text);
-	}
-
-	sync_capture(&doc, !selected);
-	apply_plan(cidrs, cidr_count, exclude_lan, selected);
-	doc_free(&doc);
-	free(text);
-
-	if (out) {
-		copy_result(out);
-		read_stats(out);
-		out->ok = 1;
-	}
-
-	save_session();
-	unlock();
+	snprintf(s_session.config_path, sizeof(s_session.config_path), "%s\\config.yaml", s_session.workdir);
+	snprintf(s_session.log_path, sizeof(s_session.log_path), "%s\\mihomo.log", s_session.workdir);
+	snprintf(s_session.pid_path, sizeof(s_session.pid_path), "%s\\mihomo.pid", s_session.workdir);
 	return 1;
 }
 
 /*
 ===============
 win_tun_up
-Bring a tunnel up from a config and a CIDR list.
+Write config.yaml, start mihomo, and wait until the controller and TUN are up.
 ===============
 */
-int win_tun_up(const char *slug, const char *config, const char **cidrs, int cidr_count, int exclude_lan, int selected, const char *exe_dir, win_tun_result_t *out) {
-	doc_t	doc;
-	int			ni;
-	char		path[MAX_PATH];
-	FILE		*f;
-	const char	*binary;
-	char		*rendered;
-	char		uapi[8192];
-	const char	*endpoints[32];
-	int			peers[8];
-	int			peer_count;
-	int			i;
-	char		reply[1024];
-	char		addrs[512];
-	int			naddr;
-	WSADATA		wsa;
-	char		full[MAX_PATH];
-	int			attempt;
-	int			ready;
+int win_tun_up(const char *slug, const char *config, const char **cidrs, int cidr_count,
+	const char **domains, int domain_count, const char **apps, int app_count,
+	int exclude_lan, int selected, const char *exe_dir, win_tun_result_t *out) {
+	memset(out, 0, sizeof(*out));
 
-	char issues[8][192];
-	char items[8][256];
+	if (s_session.active || s_session.proc_open) {
+		stop_proc();
+		session_clear();
+	}
+
+	if (!paths_init(exe_dir, out->error, (int)sizeof(out->error))) {
+		return 0;
+	}
+
+	make_secret(s_session.secret, (int)sizeof(s_session.secret));
+
+	if (!write_config(config, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, selected,
+		out->error, (int)sizeof(out->error))) {
+		return 0;
+	}
+
+	/* Resolve the endpoint before TUN steals DNS. Ping uses this address only. */
+	read_endpoint(config);
+	resolve_endpoint_ip();
+
+	if (!spawn_mihomo()) {
+		snprintf(out->error, sizeof(out->error), "mihomo could not be started.");
+		return 0;
+	}
+
+	if (!wait_ready(out->error, (int)sizeof(out->error))) {
+		log_line(out->error);
+		stop_proc();
+		return 0;
+	}
+
+	snprintf(s_session.slug, sizeof(s_session.slug), "%s", slug ? slug : "");
+	s_session.wg = _strdup(config);
+	s_session.active = 1;
+	out->ok = 1;
+	/* Connected waits for the HTTP probe on status ticks — keep up() snappy for UI stages. */
+	fill_identity(out);
+	snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+	return 1;
+}
+
+/*
+===============
+win_tun_bypass
+Rewrite config.yaml with the new rules and reload mihomo. If the reload is refused, restart it.
+===============
+*/
+int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int domain_count,
+	const char **apps, int app_count, int exclude_lan, int selected, win_tun_result_t *out) {
+	char	err[256];
 
 	memset(out, 0, sizeof(*out));
-	WSAStartup(MAKEWORD(2, 2), &wsa);
-	lock();
 
-	if (s_session.active) {
-		session_down();
-	}
-
-	memset(&s_session, 0, sizeof(s_session));
-	doc_init(&doc);
-	doc_parse(&doc, config);
-	ni = config_issues(&doc, issues, 8);
-
-	if (ni > 0) {
-		snprintf(out->error, sizeof(out->error), "%s", issues[0]);
-		doc_free(&doc);
-		unlock();
+	if (!s_session.active || !s_session.wg) {
+		snprintf(out->error, sizeof(out->error), "The tunnel is not running.");
 		return 0;
 	}
 
-	binary = "amneziawg-go.exe";
-	snprintf(s_session.binary, sizeof(s_session.binary), "%s", binary);
-	{
-		snprintf(full, sizeof(full), "%s\\%s", exe_dir, binary);
+	if (!write_config(s_session.wg, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, selected,
+		out->error, (int)sizeof(out->error))) {
+		return 0;
+	}
 
-		if (!file_exists(full)) {
-			snprintf(out->error, sizeof(out->error), "%s is not included in this copy of Fairlead.", binary);
-			doc_free(&doc);
-			unlock();
+	if (!is_running() || !reload()) {
+		log_line("fairlead: mihomo reload failed, restarting");
+		stop_proc();
+
+		if (!spawn_mihomo() || !wait_ready(err, (int)sizeof(err))) {
+			snprintf(out->error, sizeof(out->error), "mihomo could not be restarted.");
+			stop_proc();
+			session_clear();
 			return 0;
 		}
 	}
 
-	if (!find_default(&s_session.phys_luid, s_session.gateway_v4, (int)sizeof(s_session.gateway_v4), s_session.gateway_iface, (int)sizeof(s_session.gateway_iface), s_session.phys_ip, (int)sizeof(s_session.phys_ip), &s_session.phys_guid)) {
-		snprintf(out->error, sizeof(out->error), "No gateway for the endpoint.");
-		doc_free(&doc);
-		unlock();
-		return 0;
-	}
-
-	s_session.have_phys = 1;
-	snprintf(s_session.slug, sizeof(s_session.slug), "%s", slug);
-	snprintf(s_session.iface, sizeof(s_session.iface), "%s", slug);
-	GetEnvironmentVariableA("ProgramData", path, MAX_PATH);
-	strncat(path, "\\Fairlead", sizeof(path) - strlen(path) - 1);
-	CreateDirectoryA(path, NULL);
-	snprintf(s_session.config_path, sizeof(s_session.config_path), "%s\\%s.conf", path, slug);
-	rendered = doc_render(&doc);
-	f = fopen(s_session.config_path, "wb");
-
-	if (!f || !rendered) {
-		snprintf(out->error, sizeof(out->error), "Could not write the config.");
-		free(rendered);
-
-		if (f) {
-			fclose(f);
-		}
-
-		doc_free(&doc);
-		unlock();
-		return 0;
-	}
-
-	fputs(rendered, f);
-	fclose(f);
-	free(rendered);
-
-	memset(endpoints, 0, sizeof(endpoints));
-	peer_count = doc_peers(&doc, peers, 8);
-	s_session.endpoint_count = 0;
-
-	for (i = 0; i < peer_count; i++) {
-		char endpoint[256];
-		char host[256];
-		char ip[64];
-		char socket[128];
-
-		doc_value(&doc, peers[i], "Endpoint", endpoint, (int)sizeof(endpoint));
-
-		if (!endpoint_host(endpoint, host, (int)sizeof(host))) {
-			continue;
-		}
-
-		if (!resolve_host(host, ip, (int)sizeof(ip))) {
-			snprintf(out->error, sizeof(out->error), "Could not resolve the endpoint.");
-			doc_free(&doc);
-			unlock();
-			return 0;
-		}
-
-		if (!socket_endpoint(ip, endpoint, socket, (int)sizeof(socket))) {
-			snprintf(out->error, sizeof(out->error), "Could not resolve the endpoint.");
-			doc_free(&doc);
-			unlock();
-			return 0;
-		}
-
-		endpoints[peers[i]] = _strdup(socket);
-
-		if (s_session.endpoint_count < 4) {
-			snprintf(s_session.endpoints[s_session.endpoint_count], 64, "%s", ip);
-			s_session.endpoint_count++;
-		}
-	}
-
-	if (!uapi_set(&doc, endpoints, uapi, (int)sizeof(uapi))) {
-		snprintf(out->error, sizeof(out->error), "The config is damaged.");
-
-		for (i = 0; i < 32; i++) {
-			free((void *)endpoints[i]);
-		}
-
-		doc_free(&doc);
-		unlock();
-		return 0;
-	}
-
-	if (!spawn_go(exe_dir, binary, s_session.iface, &s_session.proc)) {
-		snprintf(out->error, sizeof(out->error), "%s did not create an interface.", binary);
-
-		for (i = 0; i < 32; i++) {
-			free((void *)endpoints[i]);
-		}
-
-		doc_free(&doc);
-		unlock();
-		return 0;
-	}
-
-	s_session.proc_open = 1;
-
-	if (!wait_adapter(s_session.iface, &s_session.tun_luid)) {
-		snprintf(out->error, sizeof(out->error), "%s did not create an interface.", binary);
-		session_down();
-
-		for (i = 0; i < 32; i++) {
-			free((void *)endpoints[i]);
-		}
-
-		doc_free(&doc);
-		unlock();
-		return 0;
-	}
-
-	s_session.have_tun = 1;
-	{
-		ready = 0;
-
-		for (attempt = 0; attempt < 40; attempt++) {
-			reply[0] = '\0';
-
-			if (uapi_exchange(s_session.iface, uapi, reply, (int)sizeof(reply)) && strstr(reply, "errno=0")) {
-				ready = 1;
-				break;
-			}
-
-			Sleep(50);
-		}
-
-		if (!ready) {
-			snprintf(out->error, sizeof(out->error), "%s did not create an interface.", binary);
-			session_down();
-
-			for (i = 0; i < 32; i++) {
-				free((void *)endpoints[i]);
-			}
-
-			doc_free(&doc);
-			unlock();
-			return 0;
-		}
-	}
-
-	doc_addresses(&doc, addrs, (int)sizeof(addrs));
-	naddr = split_commas(addrs, items, 8);
-
-	for (i = 0; i < naddr; i++) {
-		if (!add_address(s_session.iface, items[i])) {
-			snprintf(out->error, sizeof(out->error), "Could not assign %s.", items[i]);
-			session_down();
-
-			for (i = 0; i < 32; i++) {
-				free((void *)endpoints[i]);
-			}
-
-			doc_free(&doc);
-			unlock();
-			return 0;
-		}
-	}
-
-	set_mtu(s_session.tun_luid, mtu_of(&doc));
-	fill_dns(&doc);
-	sync_capture(&doc, !selected);
-
-	for (i = 0; i < s_session.endpoint_count; i++) {
-		char dest[80];
-
-		snprintf(dest, sizeof(dest), "%s/32", s_session.endpoints[i]);
-		add_route(dest, 0);
-	}
-
-	apply_dns();
-	apply_plan(cidrs, cidr_count, exclude_lan, !selected ? 0 : 1);
-	s_session.active = 1;
-	copy_result(out);
-	read_stats(out);
 	out->ok = 1;
-	save_session();
-
-	for (i = 0; i < 32; i++) {
-		free((void *)endpoints[i]);
-	}
-
-	doc_free(&doc);
-	unlock();
-	log_line("fairlead: tunnel up");
+	fill_result(out);
 	return 1;
 }

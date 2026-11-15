@@ -11,14 +11,9 @@ import Foundation
 import FairleadCore
 
 struct TunnelRuntime: Codable, Equatable {
-    var configPath: String
-    var realInterface: String
-    var gatewayV4: String?
-    var gatewayV6: String?
-    var gatewayIface: String?
-    var lanCIDRs: [String]
-    var ownedRoutes: [String]
-    var endpointIPs: [String]
+    var pid: Int32
+    var secret: String
+    var endpoint: String
 }
 
 struct HelperState: Codable {
@@ -27,6 +22,7 @@ struct HelperState: Codable {
 
 enum HelperError: LocalizedError {
     case message(String)
+
     var errorDescription: String? {
         switch self {
         case .message(let text): return text
@@ -42,7 +38,7 @@ struct CommandResult {
 }
 
 private let stateLock = NSLock()
-/// Serializes up / down / bypass / quit so route I/O can drop `stateLock` and still answer status.
+/// Serializes up / down / bypass / quit so a reload can run while status waits its turn.
 private let controlLock = NSLock()
 private var state = HelperState(tunnels: [:])
 private var shouldQuit = false
@@ -121,8 +117,7 @@ private func readPipe(_ fd: Int32) -> Data {
 /*
 ===============
 run
-posix_spawn instead of Foundation.Process — connect/disconnect spawn dozens of
-route/ifconfig/networksetup children, and Process adds ~100ms each.
+posix_spawn instead of Foundation.Process for the short helper commands (ps, route, networksetup).
 ===============
 */
 func run(_ arguments: [String]) -> CommandResult {
@@ -247,95 +242,7 @@ private func validSlug(_ name: String) -> Bool {
     return name.dropFirst(3).allSatisfy(\.isHexDigit)
 }
 
-/*
-===============
-hardwareInterfaces
-===============
-*/
-private func hardwareInterfaces() -> [String] {
-    let listed = run(["/sbin/ifconfig", "-l"]).out
-    return listed.split(whereSeparator: \.isWhitespace).map(String.init).filter {
-        $0.hasPrefix("en") || $0.hasPrefix("bridge")
-    }
-}
-
-/*
-===============
-defaultGateway
-Prefer the unscoped default route. Fall back to per-interface probes only when
-needed — probing every hardware iface on connect cost a second or more.
-===============
-*/
-private func defaultGateway(family: String) -> (iface: String, gateway: String)? {
-    let parsed = RouteText.parseRouteGet(run(["/sbin/route", "-n", "get", "-\(family)", "default"]).out)
-    if let gateway = parsed.gateway,
-       let iface = parsed.interface,
-       !iface.isEmpty,
-       IPAddress.parse(gateway) != nil,
-       !iface.hasPrefix("utun") {
-        return (iface, gateway)
-    }
-
-    var best: (iface: String, gateway: String, score: Int)?
-    for iface in hardwareInterfaces() {
-        let result = run(["/sbin/route", "-n", "get", "-\(family)", "default", "-ifscope", iface])
-        let scoped = RouteText.parseRouteGet(result.out)
-        guard let gateway = scoped.gateway, scoped.interface == iface else { continue }
-        guard IPAddress.parse(gateway) != nil else { continue }
-        let info = run(["/sbin/ifconfig", iface]).out
-        var score = 0
-        if info.contains("status: active") { score += 5 }
-        if family == "inet", info.contains("inet ") { score += 3 }
-        if family == "inet6", info.contains("inet6 ") { score += 3 }
-        if iface == "en0" { score += 1 }
-        if best == nil || score > best!.score {
-            best = (iface, gateway, score)
-        }
-    }
-
-    return best.map { ($0.iface, $0.gateway) }
-}
-
-/*
-===============
-captureNetwork
-===============
-*/
-private func captureNetwork() -> (v4: (String, String)?, v6: (String, String)?, lan: [String]) {
-    let v4 = defaultGateway(family: "inet")
-    let v6 = defaultGateway(family: "inet6")
-    let iface = v4?.0 ?? v6?.0
-    let lan = iface.map { RouteText.networks(fromIfconfig: run(["/sbin/ifconfig", $0]).out) } ?? []
-    return (v4, v6, lan)
-}
-
-/*
-===============
-interfaceExists
-===============
-*/
-func interfaceExists(_ name: String) -> Bool {
-    guard !name.isEmpty else { return false }
-    return if_nametoindex(name) != 0
-}
-
-/*
-===============
-endpointIPs
-===============
-*/
-private func endpointIPs(realInterface: String) -> [String] {
-    guard let device = userspaceStatus(realInterface) else { return [] }
-    var ips: [String] = []
-    for peer in device.peers {
-        guard let host = EndpointParse.host(from: peer.endpoint), let ip = IPAddress.parse(host) else { continue }
-        ips.append(ip.string)
-    }
-
-    return RouteText.unique(ips)
-}
-
-private struct ListedProcess {
+struct ListedProcess {
     var pid: Int32
     var ppid: Int32
     var command: String
@@ -346,7 +253,7 @@ private struct ListedProcess {
 processList
 ===============
 */
-private func processList() -> [ListedProcess] {
+func processList() -> [ListedProcess] {
     let result = run(["/bin/ps", "-axww", "-o", "pid=,ppid=,command="])
     var list: [ListedProcess] = []
     for line in result.out.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -362,279 +269,12 @@ private func processList() -> [ListedProcess] {
 
 /*
 ===============
-isFairleadUserspace
+configFile
+The sanitized WireGuard text for one tunnel. It stays on disk while the tunnel is up, so a reload can rebuild config.yaml.
 ===============
 */
-private func isFairleadUserspace(_ command: String) -> Bool {
-    if command.contains("fairlead-helper") || command.contains("harbor-helper") { return false }
-    if command.contains("FAIRLEAD_MANAGED=1") || command.contains("HARBOR_MANAGED=1") { return true }
-    if command.contains("/usr/local/libexec/fairlead-wireguard-go")
-        || command.contains("/usr/local/libexec/harbor-wireguard-go")
-        || command.contains("/usr/local/libexec/fairlead-amneziawg-go")
-        || command.contains("/usr/local/libexec/fairlead-wg-go")
-        || command.contains("/usr/local/libexec/harbor-wg-go") {
-        return true
-    }
-
-    if command.contains("WG_TUN_NAME_FILE=/var/run/wireguard/fld")
-        || command.contains("WG_TUN_NAME_FILE=/var/run/wireguard/hbr") {
-        return true
-    }
-
-    if (command.contains("/var/run/fairlead/") || command.contains("/var/run/harbor/"))
-        && (command.contains("wg-quick") || command.contains("wireguard-go") || command.contains("amneziawg-go")) {
-        return true
-    }
-
-    return false
-}
-
-/*
-===============
-fairleadProcessTree
-===============
-*/
-private func fairleadProcessTree() -> [ListedProcess] {
-    let list = processList()
-    var seeds = Set<Int32>()
-    for proc in list where proc.pid != getpid() && isFairleadUserspace(proc.command) {
-        seeds.insert(proc.pid)
-    }
-
-    if let text = try? String(contentsOfFile: "/var/run/fairlead/wireguard-go.pid", encoding: .utf8),
-       let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-       pid != getpid(),
-       let proc = list.first(where: { $0.pid == pid }),
-       proc.command.contains("wireguard-go") || proc.command.contains("amneziawg-go") {
-        seeds.insert(pid)
-    }
-
-    var keep = seeds
-    var grew = true
-    while grew {
-        grew = false
-        for proc in list where proc.pid != getpid() && !keep.contains(proc.pid) && keep.contains(proc.ppid) {
-            keep.insert(proc.pid)
-            grew = true
-        }
-    }
-
-    return list.filter { keep.contains($0.pid) }
-}
-
-/*
-===============
-isTunnelBlocker
-===============
-*/
-private func isTunnelBlocker(_ command: String) -> Bool {
-    command.contains("networksetup") || (command.contains("route") && command.contains("monitor"))
-}
-
-// The route monitor keeps running after wg-quick returns. On the next connect
-// its exit trap deletes the new interface, and wg-quick still exits 0.
-
-/*
-===============
-pidAlive
-===============
-*/
-private func pidAlive(_ pid: Int32) -> Bool {
-    pid > 1 && kill(pid, 0) == 0
-}
-
-/*
-===============
-stopManagedProcesses
-===============
-*/
-func stopManagedProcesses() {
-    let targets = fairleadProcessTree()
-    guard !targets.isEmpty else { return }
-    fputs("fairlead-helper: stopping \(targets.count) leftover tunnel processes\n", stderr)
-    for proc in targets where isTunnelBlocker(proc.command) {
-        kill(proc.pid, SIGKILL)
-    }
-
-    let workers = targets.filter { !isTunnelBlocker($0.command) }
-    for proc in workers {
-        kill(proc.pid, SIGTERM)
-    }
-
-    // amneziawg-go usually exits immediately; don't burn seconds re-parsing `ps`.
-    let deadline = Date().addingTimeInterval(0.6)
-    while Date() < deadline {
-        if workers.allSatisfy({ !pidAlive($0.pid) }) { break }
-        usleep(20_000)
-    }
-
-    for proc in workers where pidAlive(proc.pid) {
-        kill(proc.pid, SIGKILL)
-    }
-}
-
-/*
-===============
-removeInterfaceFiles
-===============
-*/
-func removeInterfaceFiles(slug: String) {
-    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
-    var iface: String?
-    if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
-        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { iface = name }
-    }
-
-    if let iface, iface.allSatisfy({ $0.isLetter || $0.isNumber }) {
-        unlink("\(FairleadPaths.wireguardRun)/\(iface).sock")
-    }
-
-    unlink(nameFile)
-    unlink("/var/run/fairlead/wireguard-go.pid")
-}
-
-/*
-===============
-routeSnapshot
-===============
-*/
-private func routeSnapshot(_ cidr: CIDR) -> RouteSnapshot {
-    let family = cidr.family == .v4 ? "inet" : "inet6"
-    return RouteText.snapshot(from: run(["/sbin/route", "-n", "get", "-\(family)", cidr.string]).out)
-}
-
-/*
-===============
-addOwnedRoute
-===============
-*/
-private func addOwnedRoute(_ cidr: CIDR, viaTunnel: Bool, runtime: TunnelRuntime) -> String? {
-    let family = cidr.family == .v4 ? "inet" : "inet6"
-    let result: CommandResult
-    if viaTunnel {
-        result = run(["/sbin/route", "-q", "-n", "add", "-\(family)", cidr.string, "-interface", runtime.realInterface])
-    } else {
-        guard let gateway = cidr.family == .v4 ? runtime.gatewayV4 : runtime.gatewayV6 else {
-            return FairleadL10n.format("No gateway for %@.", cidr.string)
-        }
-
-        result = run(["/sbin/route", "-q", "-n", "add", "-\(family)", cidr.string, gateway])
-    }
-
-    let blob = result.blob
-    if result.code == 0
-        || blob.localizedCaseInsensitiveContains("file exists")
-        || blob.localizedCaseInsensitiveContains("exists")
-        || blob.localizedCaseInsensitiveContains("существует") {
-        return nil
-    }
-
-    let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-    return detail.isEmpty ? FairleadL10n.format("Could not add route %@.", cidr.string) : detail
-}
-
-/*
-===============
-deleteOwnedRoute
-===============
-*/
-private func deleteOwnedRoute(_ cidrString: String) {
-    guard let cidr = CIDR.parse(cidrString) else { return }
-    let family = cidr.family == .v4 ? "inet" : "inet6"
-    // Skip `route get` — these are routes we installed; a missing one is fine.
-    _ = run(["/sbin/route", "-q", "-n", "delete", "-\(family)", cidr.string])
-}
-
-/*
-===============
-applyBypass
-Caller holds `stateLock`. Route process work drops it so status/ping still answer
-while a long list is applied; `controlLock` keeps a second up/down/bypass out.
-===============
-*/
-private func applyBypass(slug: String, cidrs: [String], excludeLAN: Bool, policy: RoutePolicy) -> (warnings: [String], error: String?) {
-    guard let runtime = state.tunnels[slug] else {
-        return ([], FairleadL10n.text("The tunnel is not running."))
-    }
-
-    let configPath = runtime.configPath
-    let lanCIDRs = runtime.lanCIDRs
-    let endpointIPs = runtime.endpointIPs
-    let previousOwned = runtime.ownedRoutes
-    let working = runtime
-
-    stateLock.unlock()
-    syncInternetCapture(slug: slug, configPath: configPath, capture: policy != .selected)
-    let planned = BypassPlanner.routes(
-        BypassInput(
-            rules: cidrs,
-            learned: [],
-            lan: lanCIDRs,
-            excludeLAN: excludeLAN,
-            endpoints: endpointIPs,
-            policy: policy
-        )
-    )
-    let tunnelSet = policy == .selected ? Set(planned.routes) : Set<String>()
-    let directSet = policy == .selected ? Set(planned.direct) : Set(planned.routes)
-    let desired = tunnelSet.union(directSet)
-    let automatic = Set(lanCIDRs.compactMap { CIDR.parse($0)?.string })
-    for existing in previousOwned where !desired.contains(existing) {
-        deleteOwnedRoute(existing)
-    }
-
-    var owned: [String] = []
-    var failures: [String] = []
-    for route in desired.sorted() {
-        guard let cidr = CIDR.parse(route) else { continue }
-        let wantTunnel = tunnelSet.contains(route)
-        let snapshot = routeSnapshot(cidr)
-        let exact = RouteText.isExact(cidr, snapshot: snapshot)
-        let onTunnel = snapshot.interface == working.realInterface
-        let weOwned = previousOwned.contains(route)
-        if exact && onTunnel == wantTunnel && (weOwned || !wantTunnel) {
-            if weOwned { owned.append(route) }
-            continue
-        }
-
-        if exact { deleteOwnedRoute(route) }
-        // No IPv6 (or IPv4) gateway on this network — skip that family instead of
-        // failing the whole connect with "direct routes were not applied".
-        if !wantTunnel {
-            let hasGateway = (cidr.family == .v4 && working.gatewayV4 != nil)
-                || (cidr.family == .v6 && working.gatewayV6 != nil)
-            if !hasGateway { continue }
-        }
-
-        if let error = addOwnedRoute(cidr, viaTunnel: wantTunnel, runtime: working) {
-            let now = routeSnapshot(cidr)
-            let nowExact = RouteText.isExact(cidr, snapshot: now)
-            let nowOnTunnel = now.interface == working.realInterface
-            if nowExact && nowOnTunnel == wantTunnel {
-                owned.append(route)
-            } else if automatic.contains(route) && !wantTunnel {
-                continue
-            } else {
-                failures.append("\(route): \(error)")
-            }
-        } else {
-            owned.append(route)
-        }
-    }
-
-    stateLock.lock()
-    guard state.tunnels[slug] != nil else {
-        return (planned.warnings, FairleadL10n.text("The tunnel is not running."))
-    }
-
-    state.tunnels[slug]?.ownedRoutes = owned
-    saveState()
-    if failures.isEmpty {
-        return (planned.warnings, nil)
-    }
-
-    return (planned.warnings, failures.joined(separator: "\n"))
+private func configFile(_ slug: String) -> String {
+    "\(FairleadPaths.directory)/\(slug).conf"
 }
 
 /*
@@ -651,7 +291,7 @@ private func writeConfig(slug: String, config: String) throws -> String {
         throw HelperError.message(first.message)
     }
 
-    // Hooks run as root inside wg-quick. Fairlead never executes them.
+    // Hooks would run as root. Fairlead never executes them.
     let hooks: Set<String> = ["preup", "postup", "predown", "postdown", "saveconfig"]
     for index in document.sections.indices {
         document.sections[index].entries.removeAll { entry in
@@ -660,7 +300,7 @@ private func writeConfig(slug: String, config: String) throws -> String {
         }
     }
 
-    let path = "\(FairleadPaths.directory)/\(slug).conf"
+    let path = configFile(slug)
     do {
         try document.render().write(toFile: path, atomically: true, encoding: .utf8)
     } catch {
@@ -673,19 +313,35 @@ private func writeConfig(slug: String, config: String) throws -> String {
 
 /*
 ===============
+rules
+The route rules from an up or bypass request. Domains and apps go to mihomo by name and path.
+===============
+*/
+private func rules(_ request: RPCRequest) -> MihomoRules {
+    let domains = (request.domains ?? []).compactMap { DomainName.normalize($0) }
+    let apps = (request.apps ?? []).filter { path in
+        path.hasPrefix("/") && !path.contains(",") && !path.unicodeScalars.contains { $0.value < 32 }
+    }
+
+    return MihomoRules(
+        cidrs: Array((request.cidrs ?? []).prefix(4096)),
+        domains: Array(domains.prefix(4096)),
+        apps: Array(apps.prefix(64)),
+        excludeLAN: request.excludeLAN ?? false,
+        selected: (RoutePolicy(rawValue: request.policy ?? "") ?? .exceptions) == .selected
+    )
+}
+
+/*
+===============
 bringDown
 ===============
 */
 private func bringDown(slug: String) -> String? {
-    let path = state.tunnels[slug]?.configPath ?? "\(FairleadPaths.directory)/\(slug).conf"
-    let realBefore = state.tunnels[slug]?.realInterface
-    let owned = state.tunnels[slug]?.ownedRoutes ?? []
-    // Drop owned routes before tearing the interface so we don't wait on gets.
-    for route in owned { deleteOwnedRoute(route) }
-    bringUserspaceDown(slug: slug, interfaceName: realBefore)
+    mihomoDown()
     state.tunnels[slug] = nil
     saveState()
-    try? FileManager.default.removeItem(atPath: path)
+    try? FileManager.default.removeItem(atPath: configFile(slug))
     fputs("fairlead-helper: tunnel down \(slug)\n", stderr)
     return nil
 }
@@ -693,21 +349,19 @@ private func bringDown(slug: String) -> String? {
 /*
 ===============
 bringUp
+There is one mihomo process, so any tunnel that is up comes down first.
 ===============
 */
-private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: Bool, policy: RoutePolicy) -> RPCResponse {
+private func bringUp(slug: String, config: String, rules: MihomoRules) -> RPCResponse {
     let tools = ToolLocator.locate()
     guard tools.ready else {
-        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."), tools: tools)
+        return RPCResponse(id: "", ok: false, error: FairleadL10n.text("mihomo is not included in this copy of Fairlead."), tools: tools)
     }
 
-    if state.tunnels[slug] != nil {
-        if let error = bringDown(slug: slug) {
-            return RPCResponse(id: "", ok: false, error: error, tools: tools)
-        }
+    for other in Array(state.tunnels.keys) {
+        _ = bringDown(slug: other)
     }
 
-    let network = captureNetwork()
     let path: String
     do {
         path = try writeConfig(slug: slug, config: config)
@@ -715,59 +369,47 @@ private func bringUp(slug: String, config: String, cidrs: [String], excludeLAN: 
         return RPCResponse(id: "", ok: false, error: error.localizedDescription, tools: tools)
     }
 
-    let document = WGDocument.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? config)
-    stopManagedProcesses()
-    removeInterfaceFiles(slug: slug)
-    let raised = bringUserspaceUp(
-        slug: slug,
-        document: document,
-        gatewayV4: network.v4?.1,
-        gatewayV6: network.v6?.1,
-        gatewayIface: network.v4?.0 ?? network.v6?.0,
-        captureInternet: policy != .selected
-    )
-    guard let real = raised.interface else {
-        bringUserspaceDown(slug: slug, interfaceName: nil)
+    let wg = (try? String(contentsOfFile: path, encoding: .utf8)) ?? config
+    let raised = mihomoUp(wg: wg, rules: rules)
+    if let error = raised.error {
+        mihomoDown()
         try? FileManager.default.removeItem(atPath: path)
-        let message = raised.error ?? FairleadL10n.text("amneziawg-go did not create an interface.")
-        return RPCResponse(id: "", ok: false, error: message, tools: tools)
+        return RPCResponse(id: "", ok: false, error: error, tools: tools)
     }
 
-    var runtime = TunnelRuntime(
-        configPath: path,
-        realInterface: real,
-        gatewayV4: network.v4?.1,
-        gatewayV6: network.v6?.1,
-        gatewayIface: network.v4?.0 ?? network.v6?.0,
-        lanCIDRs: network.lan,
-        ownedRoutes: [],
-        endpointIPs: endpointIPs(realInterface: real)
-    )
+    let runtime = TunnelRuntime(pid: raised.pid, secret: raised.secret, endpoint: raised.endpoint)
     state.tunnels[slug] = runtime
     saveState()
-    let applied = applyBypass(slug: slug, cidrs: cidrs, excludeLAN: excludeLAN, policy: policy)
-    runtime = state.tunnels[slug] ?? runtime
-    let devices = currentDevices()
-    if let error = applied.error {
-        return RPCResponse(
-            id: "",
-            ok: false,
-            error: FairleadL10n.format("The tunnel is up, but some direct routes were not applied.\n%@", error),
-            warnings: applied.warnings,
-            tools: tools,
-            managed: [managed(slug, runtime)],
-            devices: devices
-        )
-    }
-
     return RPCResponse(
         id: "",
         ok: true,
-        warnings: applied.warnings,
         tools: tools,
         managed: [managed(slug, runtime)],
-        devices: devices
+        devices: currentDevices(probe: false)
     )
+}
+
+/*
+===============
+applyBypass
+Rewrite config.yaml with the new rules and reload mihomo.
+===============
+*/
+private func applyBypass(slug: String, rules: MihomoRules) -> String? {
+    guard state.tunnels[slug] != nil,
+          let wg = try? String(contentsOfFile: configFile(slug), encoding: .utf8) else {
+        return FairleadL10n.text("The tunnel is not running.")
+    }
+
+    if let error = mihomoReload(wg: wg, rules: rules) {
+        if !mihomoRunning() { _ = bringDown(slug: slug) }
+        return error
+    }
+
+    // A restart inside the reload gives mihomo a new pid.
+    state.tunnels[slug]?.pid = mihomoCurrentPID()
+    saveState()
+    return nil
 }
 
 /*
@@ -776,15 +418,13 @@ managed
 ===============
 */
 private func managed(_ slug: String, _ runtime: TunnelRuntime) -> ManagedTunnel {
-    ManagedTunnel(
+    _ = runtime
+    let wg = (try? String(contentsOfFile: configFile(slug), encoding: .utf8)) ?? ""
+    return ManagedTunnel(
         name: slug,
-        realInterface: runtime.realInterface,
-        gatewayV4: runtime.gatewayV4,
-        gatewayV6: runtime.gatewayV6,
-        gatewayIface: runtime.gatewayIface,
-        lanCIDRs: runtime.lanCIDRs,
-        bypass: runtime.ownedRoutes.sorted(),
-        endpointIPs: runtime.endpointIPs
+        realInterface: mihomoProtocolLabel(wg),
+        gatewayV4: mihomoPeerHost(),
+        lanCIDRs: mihomoLANRanges
     )
 }
 
@@ -793,29 +433,47 @@ private func managed(_ slug: String, _ runtime: TunnelRuntime) -> ManagedTunnel 
 currentDevices
 ===============
 */
-private func currentDevices() -> [WGDeviceStatus] {
-    state.tunnels.values.compactMap { userspaceStatus($0.realInterface) }
+private func currentDevices(probe: Bool = true) -> [WGDeviceStatus] {
+    guard !state.tunnels.isEmpty, let device = mihomoStatus(probe: probe) else { return [] }
+    return [device]
+}
+
+/*
+===============
+reapDead
+A tunnel whose mihomo is gone is dropped, so the app sees it as off.
+===============
+*/
+private func reapDead() {
+    guard !state.tunnels.isEmpty, !mihomoRunning() else { return }
+    for slug in Array(state.tunnels.keys) {
+        _ = bringDown(slug: slug)
+    }
 }
 
 /*
 ===============
 reconcile
+On helper start: clear the old userspace tunnel, take over a mihomo that is still running, end any other.
 ===============
 */
 private func reconcile() {
+    cleanupLegacyTunnels()
     loadState()
-    let alive = state.tunnels.filter { interfaceExists($0.value.realInterface) }
-    let dead = state.tunnels.filter { !interfaceExists($0.value.realInterface) }
-    for (slug, runtime) in dead {
-        for route in runtime.ownedRoutes { deleteOwnedRoute(route) }
-        bringUserspaceDown(slug: slug, interfaceName: runtime.realInterface)
+    var kept: [String: TunnelRuntime] = [:]
+    for (slug, runtime) in state.tunnels.sorted(by: { $0.key < $1.key }) where kept.isEmpty {
+        let hasConfig = FileManager.default.fileExists(atPath: configFile(slug))
+        if hasConfig, mihomoAdopt(pid: runtime.pid, secret: runtime.secret, endpoint: runtime.endpoint) {
+            kept[slug] = runtime
+        }
     }
 
-    state.tunnels = alive
-    for slug in Array(state.tunnels.keys) {
-        let interface = state.tunnels[slug]?.realInterface ?? ""
-        let ips = endpointIPs(realInterface: interface)
-        state.tunnels[slug]?.endpointIPs = ips
+    state.tunnels = kept
+    mihomoReapOrphans()
+    if let files = try? FileManager.default.contentsOfDirectory(atPath: FairleadPaths.directory) {
+        for file in files where file.hasSuffix(".conf") && !kept.keys.contains(String(file.dropLast(5))) {
+            try? FileManager.default.removeItem(atPath: "\(FairleadPaths.directory)/\(file)")
+        }
     }
 
     saveState()
@@ -827,6 +485,7 @@ snapshotResponse
 ===============
 */
 private func snapshotResponse(id: String) -> RPCResponse {
+    reapDead()
     let tunnels = state.tunnels.map { managed($0.key, $0.value) }.sorted { $0.name < $1.name }
     return RPCResponse(id: id, ok: true, tools: ToolLocator.locate(), managed: tunnels, devices: currentDevices())
 }
@@ -844,17 +503,6 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
     case "tools":
         return RPCResponse(id: request.id, ok: true, tools: ToolLocator.locate())
     case "status":
-        var changed = false
-        for slug in Array(state.tunnels.keys) {
-            guard let real = state.tunnels[slug]?.realInterface else { continue }
-            let ips = endpointIPs(realInterface: real)
-            if state.tunnels[slug]?.endpointIPs != ips {
-                state.tunnels[slug]?.endpointIPs = ips
-                changed = true
-            }
-        }
-
-        if changed { saveState() }
         return snapshotResponse(id: request.id)
     case "up":
         guard let name = request.name, validSlug(name) else {
@@ -865,13 +513,7 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
             return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("The config is empty."))
         }
 
-        var response = bringUp(
-            slug: name,
-            config: config,
-            cidrs: request.cidrs ?? [],
-            excludeLAN: request.excludeLAN ?? false,
-            policy: RoutePolicy(rawValue: request.policy ?? "") ?? .exceptions
-        )
+        var response = bringUp(slug: name, config: config, rules: rules(request))
         response.id = request.id
         return response
     case "down":
@@ -889,15 +531,9 @@ private func handle(_ request: RPCRequest) -> RPCResponse {
             return RPCResponse(id: request.id, ok: false, error: FairleadL10n.text("Invalid tunnel name."))
         }
 
-        let applied = applyBypass(
-            slug: name,
-            cidrs: request.cidrs ?? [],
-            excludeLAN: request.excludeLAN ?? false,
-            policy: RoutePolicy(rawValue: request.policy ?? "") ?? .exceptions
-        )
+        let error = applyBypass(slug: name, rules: rules(request))
         var response = snapshotResponse(id: request.id)
-        response.warnings = applied.warnings
-        if let error = applied.error {
+        if let error {
             response.ok = false
             response.error = error
         }
@@ -948,7 +584,7 @@ private func reapHarborHelpers() {
 /*
 ===============
 isControlOp
-up / down / bypass / quit must not interleave; status stays responsive during bypass.
+up / down / bypass / quit must not interleave; status stays responsive between them.
 ===============
 */
 private func isControlOp(_ op: String) -> Bool {

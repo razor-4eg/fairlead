@@ -113,10 +113,6 @@ std::string ago_of(int stamp) {
 	return "a while ago";
 }
 
-bool contains_id(std::vector<std::string> const& list, std::string const& id) {
-	return std::find(list.begin(), list.end(), id) != list.end();
-}
-
 std::wstring module_dir() {
 	wchar_t self[MAX_PATH];
 	if (!GetModuleFileNameW(nullptr, self, MAX_PATH)) {
@@ -193,44 +189,6 @@ bool write_full(HANDLE pipe, void const* buf, int n) {
 	return true;
 }
 
-std::string image_path(DWORD pid) {
-	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-	if (!process) {
-		return {};
-	}
-
-	wchar_t name[1024];
-	DWORD size = 1024;
-	bool ok = QueryFullProcessImageNameW(process, 0, name, &size) != 0;
-	CloseHandle(process);
-	return ok ? narrow(name) : "";
-}
-
-bool belongs_to(std::string const& process_path, std::string const& app_path) {
-	auto process = widen(process_path);
-	auto app = widen(app_path);
-	if (process.empty() || app.empty()) {
-		return false;
-	}
-
-	if (iequals(process, app)) {
-		return true;
-	}
-
-	auto slash = app.find_last_of(L"\\/");
-	if (slash == std::wstring::npos) {
-		return false;
-	}
-
-	auto root = app.substr(0, slash);
-	while (!root.empty() && (root.back() == L'\\' || root.back() == L'/')) {
-		root.pop_back();
-	}
-
-	root.push_back(L'\\');
-	return process.size() >= root.size() && iequals(process.substr(0, root.size()), root);
-}
-
 void read_lists(json_t* item, Tunnel* tunnel) {
 	if (json_t* lists = json_get(item, "routeLists")) {
 		for (json_t* one = lists->child; one; one = one->next) {
@@ -250,14 +208,6 @@ void read_lists(json_t* item, Tunnel* tunnel) {
 					row.value = json_str(entry, "value");
 					if (row.id.empty()) {
 						row.id = hex_id(8);
-					}
-
-					if (json_t* addresses = json_get(entry, "addresses")) {
-						for (json_t* address = addresses->child; address; address = address->next) {
-							if (char const* text = json_string(address)) {
-								row.addresses.push_back(text);
-							}
-						}
 					}
 
 					list->entries.push_back(std::move(row));
@@ -307,14 +257,6 @@ void read_lists(json_t* item, Tunnel* tunnel) {
 			row.id = hex_id(8);
 			row.kind = "domain";
 			row.value = domain;
-			if (json_t* addresses = json_get(one, "addresses")) {
-				for (json_t* address = addresses->child; address; address = address->next) {
-					if (char const* text = json_string(address)) {
-						row.addresses.push_back(text);
-					}
-				}
-			}
-
 			list->entries.push_back(std::move(row));
 			tunnel->lists.push_back(std::move(list));
 		}
@@ -331,36 +273,6 @@ std::unique_ptr<Tunnel> new_tunnel(std::string const& name, std::string const& c
 	return tunnel;
 }
 
-}
-
-std::vector<std::string> lookup_host(std::string const& host) {
-	addrinfo hints{};
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	addrinfo* result = nullptr;
-	if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0) {
-		return {};
-	}
-
-	std::vector<std::string> ips;
-	for (addrinfo* item = result; item && ips.size() < 8; item = item->ai_next) {
-		if (!item->ai_addr || item->ai_family != AF_INET) {
-			continue;
-		}
-
-		char text[64];
-		auto* address = (sockaddr_in*)item->ai_addr;
-		if (!inet_ntop(AF_INET, &address->sin_addr, text, sizeof(text))) {
-			continue;
-		}
-
-		if (std::find(ips.begin(), ips.end(), text) == ips.end()) {
-			ips.emplace_back(text);
-		}
-	}
-
-	freeaddrinfo(result);
-	return ips;
 }
 
 Session::Session() {
@@ -447,17 +359,17 @@ void Session::RefreshTools() {
 	if (!coreabi::ready()) {
 		notice = "fairlead-core.dll is missing from " + narrow(coreabi::dll_path());
 		awg_ok = false;
-		awg_text = "amneziawg-go  not found";
+		awg_text = "mihomo  not found";
 		return;
 	}
 
-	std::wstring awg = widen(exe_dir) + L"\\amneziawg-go.exe";
-	awg_ok = std::filesystem::exists(std::filesystem::path(awg));
-	awg_text = awg_ok ? narrow(awg) : "amneziawg-go  not found";
+	std::filesystem::path awg = std::filesystem::path(widen(exe_dir)) / L"bin" / L"mihomo.exe";
+	awg_ok = std::filesystem::exists(awg);
+	awg_text = awg_ok ? narrow(awg.wstring()) : "mihomo  not found";
 	if (!helper_online) {
 		notice = "The system helper is not running. A tunnel cannot start without it.";
 	} else if (selected && !awg_ok) {
-		notice = "amneziawg-go is not included in this copy of Fairlead.";
+		notice = "mihomo is not included in this copy of Fairlead.";
 	} else {
 		notice.clear();
 	}
@@ -502,44 +414,55 @@ std::string Session::Rpc(char const* op, Tunnel* tunnel, bool with_config) {
 	if (strcmp(op, "up") == 0 || strcmp(op, "bypass") == 0) {
 		body += tunnel->selected_policy ? ",\"policy\":\"selected\"" : ",\"policy\":\"exceptions\"";
 		body += tunnel->exclude_lan ? ",\"excludeLAN\":true" : ",\"excludeLAN\":false";
-		body += ",\"cidrs\":[";
-		bool first = true;
-		auto add = [&](std::string const& value) {
-			if (!first) {
-				body += ',';
-			}
+		/* mihomo resolves domains and matches processes itself. Only literal addresses go as cidrs. */
+		auto emit = [&](char const* key, auto&& fill) {
+			bool first = true;
+			body += ",\"";
+			body += key;
+			body += "\":[";
+			fill([&](std::string const& value) {
+				if (!first) {
+					body += ',';
+				}
 
-			first = false;
-			body += json_quote(value);
+				first = false;
+				body += json_quote(value);
+			});
+			body += "]";
 		};
-		for (auto const& list : tunnel->lists) {
-			if (!list->enabled) {
-				continue;
-			}
-
-			for (auto const& entry : list->entries) {
-				if (entry.kind == "ip") {
-					add(entry.value);
+		emit("cidrs", [&](auto&& add) {
+			for (auto const& list : tunnel->lists) {
+				if (!list->enabled) {
 					continue;
 				}
 
-				for (auto const& ip : entry.addresses) {
-					add(ip);
+				for (auto const& entry : list->entries) {
+					if (entry.kind == "ip") {
+						add(entry.value);
+					}
 				}
 			}
-		}
+		});
+		emit("domains", [&](auto&& add) {
+			for (auto const& list : tunnel->lists) {
+				if (!list->enabled) {
+					continue;
+				}
 
-		for (auto const& app : tunnel->apps) {
-			if (!app->enabled) {
-				continue;
+				for (auto const& entry : list->entries) {
+					if (entry.kind == "domain") {
+						add(entry.value);
+					}
+				}
 			}
-
-			for (auto const& ip : app->learned) {
-				add(ip);
+		});
+		emit("apps", [&](auto&& add) {
+			for (auto const& app : tunnel->apps) {
+				if (app->enabled && !app->path.empty()) {
+					add(app->path);
+				}
 			}
-		}
-
-		body += "]";
+		});
 	}
 
 	body += "}";
@@ -599,11 +522,14 @@ void Session::ApplyStatus(std::string const& reply) {
 			uint64_t tx = json_u64(peer, "tx");
 			int64_t now = (int64_t)GetTickCount64();
 			live->handshake = json_int(peer, "handshake");
+			live->delay_ms = json_int(peer, "delay");
+			live->ping_ms = json_int(peer, "ping");
 			std::string endpoint = json_str(peer, "endpoint");
 			if (!endpoint.empty()) {
 				live->endpoint = endpoint;
 			}
 
+			/* Connected when the HTTP probe through the tunnel succeeded. Ping is display only. */
 			if (live->handshake > 0) {
 				if (live->sample_tick != 0 && now > live->sample_tick) {
 					double dt = (now - live->sample_tick) / 1000.0;
@@ -618,11 +544,15 @@ void Session::ApplyStatus(std::string const& reply) {
 				live->tx = bytes_of((double)tx);
 				live->connected = true;
 				live->phase = "Connected";
-				live->detail = "Handshake " + ago_of(live->handshake);
+				live->detail = live->ping_ms > 0
+					? ("Reachable · " + std::to_string(live->ping_ms) + " ms")
+					: "Reachable";
 			} else if (live->phase == "Connecting" || live->connected) {
 				live->connected = false;
 				live->phase = "Connecting";
-				live->detail = "Waiting for the handshake";
+				std::string stage = json_str(peer, "stage");
+				live->detail = stage.empty() ? "Checking the tunnel…" : stage;
+				live->delay_ms = 0;
 				live->down = "0 B/s";
 				live->up = "0 B/s";
 				live->rx = "0 B";
@@ -638,7 +568,8 @@ void Session::ApplyStatus(std::string const& reply) {
 		json_t* item = managed->child;
 		std::string iface = json_str(item, "realInterface");
 		std::string gateway = json_str(item, "gatewayV4");
-		live->iface = iface.empty() ? "" : iface + "  \xC2\xB7  gateway " + (gateway.empty() ? "\xE2\x80\x94" : gateway);
+		/* iface is WireGuard/AmneziaWG; gatewayV4 carries the peer endpoint IP. */
+		live->iface = iface.empty() ? "" : (gateway.empty() ? iface : iface + "  \xC2\xB7  " + gateway);
 		if (json_t* lans = json_get(item, "lanCIDRs"); lans && lans->child) {
 			std::string joined;
 			for (json_t* lan = lans->child; lan; lan = lan->next) {
@@ -663,7 +594,7 @@ void Session::ApplyStatus(std::string const& reply) {
 void Session::BeginConnect(Tunnel* tunnel) {
 	banner.clear();
 	tunnel->phase = "Connecting";
-	tunnel->detail = "Bringing up the interface and routes";
+	tunnel->detail = "Opening the tunnel…";
 	tunnel->connected = false;
 	tunnel->handshake = 0;
 	tunnel->down = "0 B/s";
@@ -679,7 +610,7 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 	if (reply.empty() || !ReplyOk(reply)) {
 		tunnel->phase = "Off";
 		tunnel->connected = false;
-		tunnel->detail = "Traffic is bypassing WireGuard";
+		tunnel->detail = "Tunnel is off";
 		banner = ErrorOf(reply);
 		if (banner.empty()) {
 			banner = "The tunnel did not start.";
@@ -690,7 +621,7 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 
 	tunnel->connected = false;
 	tunnel->phase = "Connecting";
-	tunnel->detail = "Waiting for the handshake";
+	tunnel->detail = "Opening the tunnel…";
 	ApplyStatus(reply);
 	RememberLast(tunnel->id);
 	return true;
@@ -698,13 +629,13 @@ bool Session::FinishConnect(Tunnel* tunnel, std::string const& reply) {
 
 void Session::BeginDisconnect(Tunnel* tunnel) {
 	tunnel->phase = "Disconnecting";
-	tunnel->detail = "Restoring the previous routes";
+	tunnel->detail = "Stopping mihomo…";
 }
 
 void Session::FinishDisconnect(Tunnel* tunnel) {
 	tunnel->connected = false;
 	tunnel->phase = "Off";
-	tunnel->detail = "Traffic is bypassing WireGuard";
+	tunnel->detail = "Tunnel is off";
 	tunnel->iface.clear();
 	tunnel->handshake = 0;
 	tunnel->down = "0 B/s";
@@ -824,32 +755,6 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 		return built;
 	}
 
-	struct Kept {
-		std::string key;
-		std::vector<std::string> addresses;
-		std::string status;
-	};
-	std::vector<Kept> kept;
-	if (replacing) {
-		for (auto const& entry : replacing->entries) {
-			if (entry.kind != "domain") {
-				continue;
-			}
-
-			bool found = false;
-			for (auto const& one : kept) {
-				if (iequals(widen(one.key), widen(entry.value))) {
-					found = true;
-					break;
-				}
-			}
-
-			if (!found) {
-				kept.push_back({ entry.value, entry.addresses, entry.status });
-			}
-		}
-	}
-
 	auto list = std::make_unique<RouteList>();
 	list->id = replacing ? replacing->id : hex_id(8);
 	list->name = title;
@@ -906,16 +811,6 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 		entry.id = hex_id(8);
 		entry.kind = kind;
 		entry.value = value;
-		if (kind == "domain") {
-			for (auto const& one : kept) {
-				if (iequals(widen(one.key), widen(value))) {
-					entry.addresses = one.addresses;
-					entry.status = one.status;
-					break;
-				}
-			}
-		}
-
 		list->entries.push_back(std::move(entry));
 	}
 
@@ -925,12 +820,6 @@ BuiltList Session::BuildList(std::string const& name, std::string const& text, R
 		}
 
 		return built;
-	}
-
-	for (auto& entry : list->entries) {
-		if (entry.kind == "domain" && entry.addresses.empty() && entry.status.empty()) {
-			built.pending.push_back(&entry);
-		}
 	}
 
 	built.list = std::move(list);
@@ -956,119 +845,6 @@ void Session::CommitUpdate(RouteList* list, std::string name, std::vector<RouteE
 	Save();
 }
 
-bool Session::BeginResolve(std::string const& id) {
-	if (contains_id(resolving, id)) {
-		return false;
-	}
-
-	resolving.push_back(id);
-	return true;
-}
-
-void Session::EndResolve(std::string const& id) {
-	std::erase(resolving, id);
-}
-
-std::vector<ProcHit> Session::SnapshotTcp() const {
-	std::vector<ProcHit> found;
-	DWORD size = 0;
-	GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-	if (size == 0) {
-		return found;
-	}
-
-	std::vector<unsigned char> buf(size);
-	if (GetExtendedTcpTable(buf.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != NO_ERROR) {
-		return found;
-	}
-
-	auto* table = (MIB_TCPTABLE_OWNER_PID*)buf.data();
-	for (DWORD i = 0; i < table->dwNumEntries; i++) {
-		auto const& row = table->table[i];
-		if (row.dwRemoteAddr == 0 || row.dwOwningPid == 0) {
-			continue;
-		}
-
-		char ip[64];
-		IN_ADDR address{};
-		address.S_un.S_addr = row.dwRemoteAddr;
-		if (!inet_ntop(AF_INET, &address, ip, sizeof(ip))) {
-			continue;
-		}
-
-		std::string image = image_path(row.dwOwningPid);
-		if (image.empty()) {
-			continue;
-		}
-
-		ProcHit* hit = nullptr;
-		for (auto& one : found) {
-			if (iequals(widen(one.path), widen(image))) {
-				hit = &one;
-				break;
-			}
-		}
-
-		if (!hit) {
-			found.push_back({ image, {} });
-			hit = &found.back();
-		}
-
-		if (std::find(hit->ips.begin(), hit->ips.end(), ip) == hit->ips.end()) {
-			hit->ips.emplace_back(ip);
-		}
-	}
-
-	return found;
-}
-
-bool Session::ApplyLearn(std::vector<ProcHit> const& found) {
-	Tunnel* live = nullptr;
-	for (auto const& tunnel : tunnels) {
-		if (tunnel->connected) {
-			live = tunnel.get();
-			break;
-		}
-	}
-
-	if (!live) {
-		return false;
-	}
-
-	bool changed = false;
-	for (auto const& app : live->apps) {
-		if (!app->enabled || !app->learn) {
-			continue;
-		}
-
-		for (auto const& hit : found) {
-			if (!belongs_to(hit.path, app->path)) {
-				continue;
-			}
-
-			for (auto const& ip : hit.ips) {
-				std::string cidr = ip + "/32";
-				if (app->learned.size() >= 400) {
-					continue;
-				}
-
-				if (std::find(app->learned.begin(), app->learned.end(), cidr) != app->learned.end()) {
-					continue;
-				}
-
-				app->learned.push_back(cidr);
-				changed = true;
-			}
-		}
-	}
-
-	if (changed) {
-		Save();
-	}
-
-	return changed;
-}
-
 bool Session::AddProgram(std::string const& path, std::string const& name) {
 	if (!selected || selected->apps.size() >= 12 || path.empty()) {
 		return false;
@@ -1089,7 +865,6 @@ bool Session::AddProgram(std::string const& path, std::string const& name) {
 	}
 
 	rule->enabled = true;
-	rule->learn = true;
 	selected->apps.push_back(std::move(rule));
 	Save();
 	return true;
@@ -1313,17 +1088,8 @@ void Session::Load() {
 					rule->path = json_str(one, "path");
 					rule->name = json_str(one, "name");
 					rule->enabled = json_bool(one, "enabled", true);
-					rule->learn = json_bool(one, "learn", true);
 					if (rule->id.empty()) {
 						rule->id = hex_id(8);
-					}
-
-					if (json_t* learned = json_get(one, "learned")) {
-						for (json_t* ip = learned->child; ip; ip = ip->next) {
-							if (char const* value = json_string(ip)) {
-								rule->learned.push_back(value);
-							}
-						}
 					}
 
 					tunnel->apps.push_back(std::move(rule));
@@ -1371,16 +1137,7 @@ void Session::Save() {
 
 				auto const& entry = list->entries[n];
 				out += "{\"id\":" + json_quote(entry.id) + ",\"kind\":" + json_quote(entry.kind);
-				out += ",\"value\":" + json_quote(entry.value) + ",\"addresses\":[";
-				for (size_t a = 0; a < entry.addresses.size(); a++) {
-					if (a) {
-						out += ',';
-					}
-
-					out += json_quote(entry.addresses[a]);
-				}
-
-				out += "]}";
+				out += ",\"value\":" + json_quote(entry.value) + "}";
 			}
 
 			out += "]}";
@@ -1394,18 +1151,7 @@ void Session::Save() {
 
 			auto const& rule = tunnel->apps[k];
 			out += "{\"id\":" + json_quote(rule->id) + ",\"path\":" + json_quote(rule->path) + ",\"name\":" + json_quote(rule->name);
-			out += rule->enabled ? ",\"enabled\":true" : ",\"enabled\":false";
-			out += rule->learn ? ",\"learn\":true" : ",\"learn\":false";
-			out += ",\"learned\":[";
-			for (size_t a = 0; a < rule->learned.size(); a++) {
-				if (a) {
-					out += ',';
-				}
-
-				out += json_quote(rule->learned[a]);
-			}
-
-			out += "]}";
+			out += rule->enabled ? ",\"enabled\":true}" : ",\"enabled\":false}";
 		}
 
 		out += "]}";

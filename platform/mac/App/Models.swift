@@ -14,30 +14,21 @@ enum RouteKind: String, Codable, Equatable {
     case domain
 }
 
+/// Older tunnels.json files also carry resolved addresses and a refresh time. They decode and are dropped.
 struct RouteEntry: Codable, Identifiable, Equatable {
     var id: UUID
     var kind: RouteKind
     var value: String
-    var addresses: [String]
-    var refreshAt: Date?
 
 /*
 ===============
 init
 ===============
 */
-    init(
-        id: UUID = UUID(),
-        kind: RouteKind,
-        value: String,
-        addresses: [String] = [],
-        refreshAt: Date? = nil
-    ) {
+    init(id: UUID = UUID(), kind: RouteKind, value: String) {
         self.id = id
         self.kind = kind
         self.value = value
-        self.addresses = addresses
-        self.refreshAt = refreshAt
     }
 }
 
@@ -84,18 +75,15 @@ private struct LegacyDomainRule: Codable {
     var name: String
     var note: String?
     var enabled: Bool?
-    var addresses: [String]?
-    var refreshAt: Date?
 }
 
+/// App path for mihomo PROCESS-PATH. Unknown keys from older tunnels.json are ignored.
 struct AppRule: Codable, Identifiable, Equatable {
     var id: UUID
     var path: String
     var bundleIdentifier: String
     var name: String
     var enabled: Bool
-    var learn: Bool
-    var learned: [String]
 
 /*
 ===============
@@ -107,17 +95,13 @@ init
         path: String,
         bundleIdentifier: String,
         name: String,
-        enabled: Bool = true,
-        learn: Bool = true,
-        learned: [String] = []
+        enabled: Bool = true
     ) {
         self.id = id
         self.path = path
         self.bundleIdentifier = bundleIdentifier
         self.name = name
         self.enabled = enabled
-        self.learn = learn
-        self.learned = learned
     }
 }
 
@@ -224,7 +208,7 @@ One old rule becomes one list. The note, when it had one, is the list name.
                 id: rule.id,
                 name: note.isEmpty ? rule.name : note,
                 enabled: rule.enabled ?? true,
-                entries: [RouteEntry(kind: .domain, value: rule.name, addresses: rule.addresses ?? [], refreshAt: rule.refreshAt)]
+                entries: [RouteEntry(kind: .domain, value: rule.name)]
             ))
         }
 
@@ -269,22 +253,43 @@ blank
 /*
 ===============
 directCIDRs
+Literal addresses and networks only. mihomo resolves the domains itself.
 ===============
 */
     func directCIDRs() -> [String] {
+        entryValues(.ip)
+    }
+
+/*
+===============
+directDomains
+===============
+*/
+    func directDomains() -> [String] {
+        entryValues(.domain)
+    }
+
+/*
+===============
+directApps
+Process paths of the enabled apps. mihomo matches them by path.
+===============
+*/
+    func directApps() -> [String] {
+        appRules.filter { $0.enabled && !$0.path.isEmpty }.map(\.path)
+    }
+
+/*
+===============
+entryValues
+===============
+*/
+    private func entryValues(_ kind: RouteKind) -> [String] {
         var values: [String] = []
         for list in routeLists where list.enabled {
-            for entry in list.entries {
-                if entry.kind == .ip {
-                    values.append(entry.value)
-                } else {
-                    values.append(contentsOf: entry.addresses)
-                }
+            for entry in list.entries where entry.kind == kind {
+                values.append(entry.value)
             }
-        }
-
-        for app in appRules where app.enabled {
-            values.append(contentsOf: app.learned)
         }
 
         return values
@@ -302,18 +307,19 @@ struct LiveTunnel: Equatable {
     var phase: Phase = .idle
     var realInterface: String?
     var gateway: String?
-    var gatewayIface: String?
-    var resolvers: [String] = []
-    var resolverIface: String?
     var lanCIDRs: [String] = []
-    var endpointIPs: [String] = []
-    var appliedRoutes: [String] = []
     var warnings: [String] = []
     var rx: UInt64 = 0
     var tx: UInt64 = 0
     var rateDown: Double = 0
     var rateUp: Double = 0
     var handshake: Date?
+    /// Last successful HTTP probe RTT through the tunnel (liveness only).
+    var delayMs: Int = 0
+    /// ICMP echo RTT to the WireGuard endpoint, shown in the status line.
+    var pingMs: Int = 0
+    /// Progress while Connecting. Empty once Connected.
+    var stage: String?
     var endpoint: String?
     var sampleDate: Date?
     var sampleRx: UInt64 = 0

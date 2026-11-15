@@ -63,8 +63,8 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build amneziawg-go
-        run: ./scripts/build-amneziawg-go.sh
+      - name: Build mihomo
+        run: ./scripts/build-mihomo.sh
 
       - name: Build Fairlead.app
         run: ./scripts/build-app.sh
@@ -102,7 +102,7 @@ jobs:
             mingw-w64-x86_64-zlib
           path-type: minimal
 
-      - name: Build amneziawg-go + wintun
+      - name: Build mihomo + wintun
         shell: pwsh
         run: .\scripts\build-win-userspace.ps1
 
@@ -122,11 +122,11 @@ jobs:
           if (-not (Test-Path dist\win\fairlead-helper.exe)) {
             throw "dist\win\fairlead-helper.exe missing"
           }
-          if (-not (Test-Path dist\win\amneziawg-go.exe)) {
-            throw "dist\win\amneziawg-go.exe missing"
+          if (-not (Test-Path dist\win\bin\mihomo.exe)) {
+            throw "dist\win\bin\mihomo.exe missing"
           }
-          if (-not (Test-Path dist\win\wintun.dll)) {
-            throw "dist\win\wintun.dll missing"
+          if (-not (Test-Path dist\win\bin\wintun.dll)) {
+            throw "dist\win\bin\wintun.dll missing"
           }
 
       - name: Package zip

@@ -189,14 +189,14 @@ so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
           tail -n 20 "$LOG" >&2 || true
           exit 1
         fi
-        # amneziawg-go carries plain WireGuard too. Drop the old wireguard-go helper copy.
-        rm -f /usr/local/libexec/fairlead-wireguard-go
-        AWG_SRC="$(dirname "$SRC")/amneziawg-go"
-        if [[ -x "$AWG_SRC" ]]; then
-          cp "$AWG_SRC" /usr/local/libexec/fairlead-amneziawg-go
-          chmod 755 /usr/local/libexec/fairlead-amneziawg-go
+        # mihomo carries WireGuard and AmneziaWG. Drop the old userspace daemon copies.
+        rm -f /usr/local/libexec/fairlead-wireguard-go /usr/local/libexec/fairlead-amneziawg-go
+        MIHOMO_SRC="$(dirname "$SRC")/mihomo"
+        if [[ -x "$MIHOMO_SRC" ]]; then
+          cp "$MIHOMO_SRC" /usr/local/libexec/fairlead-mihomo
+          chmod 755 /usr/local/libexec/fairlead-mihomo
         else
-          echo \(shellQuote(FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."))) >&2
+          echo \(shellQuote(FairleadL10n.text("mihomo is not included in this copy of Fairlead."))) >&2
           exit 1
         fi
         printf '%s\n' \(shellQuote(fingerprint)) > \(shellQuote(stampPath))

@@ -2,7 +2,7 @@
 //
 // copyright (c) 2026 razor-4eg.
 //
-// Engine.swift -- Bring a userspace tunnel up and down.
+// Engine.swift -- One mihomo process. mihomo owns the TUN, routes, DNS, WireGuard, and process rules.
 //
 //===============================================================
 
@@ -10,274 +10,210 @@ import Darwin
 import Foundation
 import FairleadCore
 
-struct DNSBackup: Codable, Equatable {
-    var service: String
-    var servers: [String]
-    var search: [String]
+let mihomoInterface = "mihomo"
+
+/// The private ranges the Exclude LAN switch keeps off the tunnel. Same list as the shared config builder.
+let mihomoLANRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"]
+
+struct MihomoRules {
+    var cidrs: [String]
+    var domains: [String]
+    var apps: [String]
+    var excludeLAN: Bool
+    var selected: Bool
 }
 
-struct EndpointHop: Codable, Equatable {
-    var family: String
-    var ip: String
-    var gateway: String
-}
-
-struct TunnelMeta: Codable, Equatable {
-    var routes: [String]
-    var dns: [DNSBackup]
-    var interfaceName: String
-    var dnsServers: [String]
-    var dnsSearch: [String]
-    var endpoints: [EndpointHop]
-}
-
-struct UserspaceUp {
-    var interface: String?
+struct MihomoUp {
+    var pid: Int32 = 0
+    var secret = ""
+    var endpoint = ""
     var error: String?
 }
 
-private struct RouteDest {
-    var family: String
-    var destination: String
+private final class ApiBox: @unchecked Sendable {
+    var ok = false
+    var status = 0
+    var data = Data()
 }
 
-private final class MonitorState {
-    let lock = NSLock()
-    var stop = false
-    var iface = ""
-    var endpoints: [EndpointHop] = []
-    var servers: [String] = []
-    var search: [String] = []
-}
+private let apiSession: URLSession = {
+    let config = URLSessionConfiguration.ephemeral
+    config.connectionProxyDictionary = [:]
+    config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    return URLSession(configuration: config)
+}()
 
-private let monitorState = MonitorState()
-private var monitorThread: Thread?
-private var userspaceProcess: Process?
-private var userspaceLog: FileHandle?
+private var mihomoProcess: Process?
+private var mihomoPID: Int32 = 0
+private var mihomoSecret = ""
+private var mihomoEndpoint = ""
+private var mihomoEndpointIP = ""
+private var lastProbeAt: Date?
+private var lastOkAt: Date?
+private var lastPingAt: Date?
+private var lastDelayMs = 0
+private var lastPingMs = 0
+private var probeFails = 0
+private var recovered = false
+
+private let probePath = "/proxies/\(MihomoConfig.proxyName)/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=1500&expected=204"
+private let probeEvery: TimeInterval = 15
+private let probeRetry: TimeInterval = 1
+private let probeStale: TimeInterval = 45
+private let pingEvery: TimeInterval = 5
+private let probeFailRestart = 6
+
+private var configPath: String { FairleadPaths.mihomoDirectory + "/config.yaml" }
+private var logPath: String { FairleadPaths.mihomoDirectory + "/mihomo.log" }
 
 /*
 ===============
-userspaceStatus
+makeSecret
+Random hex for the controller. It lives in config.yaml and state.json, both root only.
 ===============
 */
-func userspaceStatus(_ iface: String) -> WGDeviceStatus? {
-    guard !iface.isEmpty, let text = uapiExchange(iface: iface, message: "get=1\n\n") else { return nil }
-    let device = WireGuardUAPI.parseGet(text, interface: iface)
-    return device.publicKey.isEmpty && device.peers.isEmpty ? nil : device
+private func makeSecret() -> String {
+    var bytes = [UInt8](repeating: 0, count: 16)
+    arc4random_buf(&bytes, bytes.count)
+    return bytes.map { String(format: "%02x", $0) }.joined()
 }
 
 /*
 ===============
-bringUserspaceUp
+mihomoAPI
+One controller request. Nil when nothing answered.
 ===============
 */
-func bringUserspaceUp(
-    slug: String,
-    document: WGDocument,
-    gatewayV4: String?,
-    gatewayV6: String?,
-    gatewayIface: String?,
-    captureInternet: Bool = true
-) -> UserspaceUp {
-    let tools = ToolLocator.locate()
-    // Same as Windows: amneziawg-go carries plain WireGuard and AmneziaWG.
-    guard let binary = tools.amneziaWG else {
-        return UserspaceUp(interface: nil, error: FairleadL10n.text("amneziawg-go is not included in this copy of Fairlead."))
-    }
-    let failure = FairleadL10n.text("amneziawg-go did not create an interface.")
-
-    guard let ifaceIndex = document.interfaceIndex else {
-        return UserspaceUp(interface: nil, error: FairleadL10n.text("The config has no Interface section."))
+private func mihomoAPI(_ method: String, _ path: String, secret: String, body: String? = nil, timeout: TimeInterval = 2) -> (status: Int, data: Data)? {
+    guard let url = URL(string: MihomoConfig.controllerURL + path) else { return nil }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+    request.httpMethod = method
+    request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+    if let body {
+        request.httpBody = Data(body.utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     }
 
-    var endpoints: [Int: String] = [:]
-    var hops: [EndpointHop] = []
-    for peer in document.peerIndexes {
-        let original = document.peerEndpoint(peer)
-        guard let host = EndpointParse.host(from: original), !host.isEmpty else { continue }
-        guard let ip = resolveHost(host), let socket = WireGuardUAPI.socketEndpoint(ip: ip, original: original) else {
-            return UserspaceUp(interface: nil, error: FairleadL10n.text("Could not resolve the endpoint."))
+    let box = ApiBox()
+    let done = DispatchSemaphore(value: 0)
+    let task = apiSession.dataTask(with: request) { data, response, error in
+        if error == nil, let http = response as? HTTPURLResponse {
+            box.ok = true
+            box.status = http.statusCode
+            box.data = data ?? Data()
         }
 
-        endpoints[peer] = socket
-        let family = ip.contains(":") ? "inet6" : "inet"
-        let gateway = family == "inet" ? gatewayV4 : gatewayV6
-        if let gateway {
-            hops.append(EndpointHop(family: family, ip: ip, gateway: gateway))
-        }
+        done.signal()
     }
 
-    guard let message = WireGuardUAPI.setMessage(document: document, endpoints: endpoints) else {
-        return UserspaceUp(interface: nil, error: FairleadL10n.text("The config is damaged."))
+    task.resume()
+    if done.wait(timeout: .now() + timeout + 1) == .timedOut {
+        task.cancel()
+        return nil
     }
 
-    if let error = startUserspace(slug: slug, binary: binary, failure: failure) {
-        return UserspaceUp(interface: nil, error: error)
-    }
+    return box.ok ? (box.status, box.data) : nil
+}
 
-    guard let real = waitForUserspace(slug: slug) else {
-        let detail = userspaceLogTail()
-        abortUserspace(slug: slug, routes: [], dns: [])
-        let error = detail.isEmpty ? failure : failure + "\n" + detail
-        return UserspaceUp(interface: nil, error: error)
-    }
+/*
+===============
+pidAlive
+===============
+*/
+private func pidAlive(_ pid: Int32) -> Bool {
+    pid > 1 && kill(pid, 0) == 0
+}
 
-    guard let response = uapiExchange(iface: real, message: message), response.contains("errno=0") else {
-        let detail = userspaceLogTail()
-        abortUserspace(slug: slug, routes: [], dns: [])
-        let error = detail.isEmpty ? failure : failure + "\n" + detail
-        return UserspaceUp(interface: nil, error: error)
-    }
+/*
+===============
+pidIsMihomo
+===============
+*/
+private func pidIsMihomo(_ pid: Int32) -> Bool {
+    guard pidAlive(pid) else { return false }
+    let path = run(["/bin/ps", "-p", "\(pid)", "-o", "comm="]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (path as NSString).lastPathComponent.contains("mihomo")
+}
 
-    let addresses = document.interfaceAddresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-    for address in addresses where !address.isEmpty {
-        let result: CommandResult
-        if address.contains(":") {
-            result = run(["/sbin/ifconfig", real, "inet6", address, "alias"])
-        } else {
-            let host = String(address.split(separator: "/").first ?? Substring(address))
-            result = run(["/sbin/ifconfig", real, "inet", address, host, "alias"])
-        }
+/*
+===============
+mihomoRunning
+===============
+*/
+func mihomoRunning() -> Bool {
+    if let process = mihomoProcess { return process.isRunning }
+    return pidAlive(mihomoPID)
+}
 
-        if result.code != 0 {
-            abortUserspace(slug: slug, routes: [], dns: [])
-            let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-            return UserspaceUp(interface: nil, error: detail.isEmpty ? failure : detail)
-        }
-    }
+/*
+===============
+mihomoCurrentPID
+===============
+*/
+func mihomoCurrentPID() -> Int32 {
+    mihomoPID
+}
 
-    let mtu = tunnelMTU(document: document, iface: gatewayIface)
-    _ = run(["/sbin/ifconfig", real, "mtu", "\(mtu)"])
-    let up = run(["/sbin/ifconfig", real, "up"])
-    if up.code != 0 {
-        abortUserspace(slug: slug, routes: [], dns: [])
-        return UserspaceUp(interface: nil, error: up.blob.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
+/*
+===============
+logTail
+The last non-empty line of mihomo.log, for an error message.
+===============
+*/
+private func logTail() -> String {
+    guard let data = FileManager.default.contents(atPath: logPath) else { return "" }
+    let text = String(decoding: data.suffix(4096), as: UTF8.self)
+    return text.split(separator: "\n").last.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+}
 
-    var stored: [String] = []
-    let table = document.value(section: ifaceIndex, key: "Table")
-    if table.caseInsensitiveCompare("off") != .orderedSame {
-        let destinations = tunnelDestinations(document).filter { captureInternet || !isInternetHalf($0.destination) }
-        let coversInternet = destinations.contains { $0.destination == "0.0.0.0/1" || $0.destination == "::/1" }
-        if coversInternet {
-            let needsV4 = destinations.contains { $0.family == "inet" }
-            let needsV6 = destinations.contains { $0.family == "inet6" }
-            if needsV4 && hops.first(where: { $0.family == "inet" }) == nil && endpoints.values.contains(where: { !$0.contains("[") }) {
-                abortUserspace(slug: slug, routes: [], dns: [])
-                let sample = endpoints.values.first ?? ""
-                return UserspaceUp(interface: nil, error: FairleadL10n.format("No gateway for %@.", sample))
-            }
-
-            if needsV6 && hops.first(where: { $0.family == "inet6" }) == nil && endpoints.values.contains(where: { $0.hasPrefix("[") }) {
-                abortUserspace(slug: slug, routes: [], dns: [])
-                let sample = endpoints.values.first ?? ""
-                return UserspaceUp(interface: nil, error: FairleadL10n.format("No gateway for %@.", sample))
-            }
-        }
-
-        for route in destinations {
-            if addInterfaceRoute(family: route.family, destination: route.destination, interfaceName: real) {
-                stored.append("\(route.family) \(route.destination)")
-            } else {
-                let result = run(["/sbin/route", "-q", "-n", "add", "-\(route.family)", route.destination, "-interface", real])
-                abortUserspace(slug: slug, routes: stored, dns: [])
-                let detail = result.blob.trimmingCharacters(in: .whitespacesAndNewlines)
-                return UserspaceUp(interface: nil, error: detail.isEmpty ? FairleadL10n.format("Could not add route %@.", route.destination) : detail)
-            }
-        }
-
-        for hop in hops {
-            let result = run(["/sbin/route", "-q", "-n", "add", "-\(hop.family)", hop.ip, "-gateway", hop.gateway])
-            if result.code == 0 || result.blob.localizedCaseInsensitiveContains("exists") {
-                stored.append("\(hop.family) \(hop.ip)")
-            }
-        }
-    }
-
-    let wanted = splitDNS(document)
-    let saved = applyDNS(servers: wanted.servers, search: wanted.search)
-    let meta = TunnelMeta(
-        routes: stored,
-        dns: saved,
-        interfaceName: real,
-        dnsServers: wanted.servers,
-        dnsSearch: wanted.search,
-        endpoints: hops
+/*
+===============
+writeYAML
+Build config.yaml from the WireGuard text and the rules. Returns an error message on failure.
+===============
+*/
+private func writeYAML(wg: String, rules: MihomoRules, secret: String) -> String? {
+    let built = MihomoConfig.build(
+        wg: wg,
+        selected: rules.selected,
+        excludeLAN: rules.excludeLAN,
+        cidrs: rules.cidrs,
+        domains: rules.domains,
+        apps: rules.apps,
+        secret: secret
     )
-    saveTunnelMeta(slug: slug, meta)
-    startMonitor(meta)
-    fputs("fairlead-helper: tunnel \(real) up\n", stderr)
-    return UserspaceUp(interface: real, error: nil)
+    guard let yaml = built.yaml else { return built.error }
+    do {
+        try yaml.write(toFile: configPath, atomically: true, encoding: .utf8)
+    } catch {
+        return FairleadL10n.text("Could not write the config.")
+    }
+
+    chmod(configPath, 0o600)
+    return nil
 }
 
 /*
 ===============
-bringUserspaceDown
+spawn
+mihomo -d workdir -f config.yaml. Output goes to mihomo.log.
 ===============
 */
-func bringUserspaceDown(slug: String, interfaceName: String?) {
-    stopMonitor()
-    stopManagedProcesses()
-    let meta = loadTunnelMeta(slug: slug)
-    if let meta {
-        restoreDNS(meta.dns)
-        for route in meta.routes { deleteStoredRoute(route) }
-    }
-
-    stopUserspaceProcess()
-    let name = meta?.interfaceName ?? interfaceName
-    if let name, name.allSatisfy({ $0.isLetter || $0.isNumber }) {
-        unlink("\(FairleadPaths.wireguardRun)/\(name).sock")
-    }
-
-    removeInterfaceFiles(slug: slug)
-    removeTunnelMeta(slug: slug)
-}
-
-/*
-===============
-abortUserspace
-===============
-*/
-private func abortUserspace(slug: String, routes: [String], dns: [DNSBackup]) {
-    stopMonitor()
-    restoreDNS(dns)
-    for route in routes { deleteStoredRoute(route) }
-    stopUserspaceProcess()
-    removeInterfaceFiles(slug: slug)
-    removeTunnelMeta(slug: slug)
-}
-
-/*
-===============
-startUserspace
-===============
-*/
-private func startUserspace(slug: String, binary: String, failure: String) -> String? {
-    stopUserspaceProcess()
-    try? FileManager.default.createDirectory(atPath: FairleadPaths.wireguardRun, withIntermediateDirectories: true)
-    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
-    unlink(nameFile)
-    let logPath = "/var/log/fairlead-wireguard-go.log"
-    if !FileManager.default.fileExists(atPath: logPath) {
-        FileManager.default.createFile(atPath: logPath, contents: nil)
-    }
-
-    guard let log = FileHandle(forWritingAtPath: logPath) else {
+private func spawn(binary: String) -> String? {
+    let failure = FairleadL10n.text("mihomo could not be started.")
+    unlink(logPath)
+    guard FileManager.default.createFile(atPath: logPath, contents: nil, attributes: [.posixPermissions: 0o600]),
+          let log = FileHandle(forWritingAtPath: logPath) else {
         return failure
     }
 
-    log.seekToEndOfFile()
     let process = Process()
     process.executableURL = URL(fileURLWithPath: binary)
-    process.arguments = ["-f", "utun"]
-    var environment = ProcessInfo.processInfo.environment
-    environment["WG_TUN_NAME_FILE"] = nameFile
-    environment["LOG_LEVEL"] = "error"
-    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-    process.environment = environment
+    process.arguments = ["-d", FairleadPaths.mihomoDirectory, "-f", configPath]
+    process.currentDirectoryURL = URL(fileURLWithPath: FairleadPaths.mihomoDirectory)
+    process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
     process.standardInput = FileHandle.nullDevice
-    process.standardOutput = FileHandle.nullDevice
+    process.standardOutput = log
     process.standardError = log
     do {
         try process.run()
@@ -286,524 +222,496 @@ private func startUserspace(slug: String, binary: String, failure: String) -> St
         return error.localizedDescription
     }
 
-    userspaceProcess = process
-    userspaceLog = log
-    try? "\(process.processIdentifier)\n".write(toFile: "/var/run/fairlead/wireguard-go.pid", atomically: true, encoding: .utf8)
+    // The child holds its own copy of the descriptor.
+    try? log.close()
+    mihomoProcess = process
+    mihomoPID = process.processIdentifier
+    try? "\(mihomoPID)\n".write(toFile: FairleadPaths.mihomoPID, atomically: true, encoding: .utf8)
+    chmod(FairleadPaths.mihomoPID, 0o600)
     return nil
 }
 
 /*
 ===============
-stopUserspaceProcess
+waitReady
+Wait for the controller, then give the TUN a moment to fail loudly. Returns an error message on failure.
 ===============
 */
-private func stopUserspaceProcess() {
-    let tracked = userspaceProcess?.processIdentifier
-    if let process = userspaceProcess, process.isRunning {
-        let pid = process.processIdentifier
-        process.terminate()
-        let deadline = Date().addingTimeInterval(0.4)
-        while process.isRunning, Date() < deadline {
-            usleep(20_000)
-        }
-        if process.isRunning {
-            kill(pid, SIGKILL)
-            process.waitUntilExit()
-        }
-    }
-
-    userspaceProcess = nil
-    try? userspaceLog?.close()
-    userspaceLog = nil
-    guard let text = try? String(contentsOfFile: "/var/run/fairlead/wireguard-go.pid", encoding: .utf8),
-          let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-          pid > 1, pid != tracked else { return }
-    if kill(pid, 0) == 0 {
-        kill(pid, SIGTERM)
-        usleep(100_000)
-        if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
-    }
-    unlink("/var/run/fairlead/wireguard-go.pid")
-}
-
-/*
-===============
-waitForUserspace
-===============
-*/
-private func waitForUserspace(slug: String) -> String? {
-    let nameFile = "\(FairleadPaths.wireguardRun)/\(slug).name"
-    for _ in 0..<80 {
-        if let process = userspaceProcess, !process.isRunning { return nil }
-        if let text = try? String(contentsOfFile: nameFile, encoding: .utf8) {
-            let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let sock = "\(FairleadPaths.wireguardRun)/\(name).sock"
-            if !name.isEmpty,
-               name.allSatisfy({ $0.isLetter || $0.isNumber }),
-               FileManager.default.fileExists(atPath: sock),
-               interfaceExists(name) {
-                return name
-            }
+private func waitReady() -> String? {
+    var answered = false
+    for _ in 0..<60 {
+        if !mihomoRunning() {
+            return FairleadL10n.format("mihomo exited. %@", logTail())
         }
 
-        usleep(25_000)
-    }
-
-    return nil
-}
-
-/*
-===============
-userspaceLogTail
-===============
-*/
-private func userspaceLogTail() -> String {
-    guard let data = FileManager.default.contents(atPath: "/var/log/fairlead-wireguard-go.log"),
-          let text = String(data: data, encoding: .utf8) else { return "" }
-    return text.split(separator: "\n").suffix(8).joined(separator: "\n")
-}
-
-/*
-===============
-uapiExchange
-===============
-*/
-private func uapiExchange(iface: String, message: String) -> String? {
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { return nil }
-    defer { close(fd) }
-    SocketFrame.setNoSigPipe(fd)
-    var timeout = timeval(tv_sec: 3, tv_usec: 0)
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let path = "\(FairleadPaths.wireguardRun)/\(iface).sock"
-    guard SocketFrame.setUnixPath(path, into: &addr) else { return nil }
-    let length = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let connected = withUnsafePointer(to: &addr) { pointer in
-        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-            Darwin.connect(fd, sa, length)
-        }
-    }
-
-    guard connected == 0 else { return nil }
-    let bytes = Array(message.utf8)
-    var sent = 0
-    while sent < bytes.count {
-        let wrote = bytes[sent...].withUnsafeBytes { raw -> Int in
-            guard let base = raw.baseAddress else { return -1 }
-            return Darwin.write(fd, base, bytes.count - sent)
-        }
-
-        if wrote < 0 {
-            if errno == EINTR { continue }
-            return nil
-        }
-
-        if wrote == 0 { return nil }
-        sent += wrote
-    }
-
-    var response = Data()
-    var buffer = [UInt8](repeating: 0, count: 8192)
-    while response.count < 1_000_000 {
-        let count = buffer.withUnsafeMutableBytes { raw -> Int in
-            guard let base = raw.baseAddress else { return -1 }
-            return Darwin.read(fd, base, raw.count)
-        }
-
-        if count == 0 { break }
-        if count < 0 {
-            if errno == EINTR { continue }
+        if let reply = mihomoAPI("GET", "/version", secret: mihomoSecret, timeout: 1), reply.status == 200 {
+            answered = true
             break
         }
 
-        response.append(buffer, count: count)
-        if let text = String(data: response, encoding: .utf8), text.contains("errno=") { break }
+        usleep(250_000)
     }
 
-    return String(data: response, encoding: .utf8)
+    guard answered else {
+        return FairleadL10n.format("mihomo did not answer on %@.", MihomoConfig.controller)
+    }
+
+    /* Brief pause so a TUN that fails immediately shows up in the log. */
+    usleep(400_000)
+    if !mihomoRunning() {
+        return FairleadL10n.format("mihomo exited. %@", logTail())
+    }
+
+    let log = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+    if log.contains("TUN listening error") || log.contains("Start TUN") {
+        return FairleadL10n.format("mihomo could not start the TUN adapter. %@", logTail())
+    }
+
+    return nil
 }
 
 /*
 ===============
-resolveHost
+controllerUp
+True when something still answers on the external-controller port.
 ===============
 */
-private func resolveHost(_ host: String) -> String? {
-    if IPAddress.parse(host) != nil { return host }
-    var hints = addrinfo()
-    hints.ai_socktype = SOCK_DGRAM
-    hints.ai_family = AF_UNSPEC
-    var info: UnsafeMutablePointer<addrinfo>?
-    guard getaddrinfo(host, nil, &hints, &info) == 0, let info else { return nil }
-    defer { freeaddrinfo(info) }
-    var v4: String?
-    var v6: String?
-    var node: UnsafeMutablePointer<addrinfo>? = info
-    while let current = node {
-        if current.pointee.ai_family == AF_INET, let addr = current.pointee.ai_addr {
-            var sin = sockaddr_in()
-            memcpy(&sin, addr, MemoryLayout<sockaddr_in>.size)
-            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-            var raw = sin.sin_addr
-            if inet_ntop(AF_INET, &raw, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil, v4 == nil {
-                v4 = String(cString: buffer)
-            }
-        } else if current.pointee.ai_family == AF_INET6, let addr = current.pointee.ai_addr {
-            var sin = sockaddr_in6()
-            memcpy(&sin, addr, MemoryLayout<sockaddr_in6>.size)
-            var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-            var raw = sin.sin6_addr
-            if inet_ntop(AF_INET6, &raw, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil, v6 == nil {
-                v6 = String(cString: buffer)
-            }
+private func controllerUp() -> Bool {
+    guard let url = URL(string: MihomoConfig.controllerURL + "/version") else { return false }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 0.2)
+    request.httpMethod = "GET"
+    let box = ApiBox()
+    let lock = DispatchSemaphore(value: 0)
+    let task = apiSession.dataTask(with: request) { _, response, _ in
+        if let http = response as? HTTPURLResponse {
+            box.ok = true
+            box.status = http.statusCode
         }
-
-        node = current.pointee.ai_next
+        lock.signal()
     }
-
-    return v4 ?? v6
+    task.resume()
+    _ = lock.wait(timeout: .now() + 0.3)
+    task.cancel()
+    return box.ok
 }
 
 /*
 ===============
-tunnelMTU
+waitControllerGone
+After a kill, wait until the old controller releases the port so the next spawn can bind.
 ===============
 */
-private func tunnelMTU(document: WGDocument, iface: String?) -> Int {
-    if let index = document.interfaceIndex, let value = Int(document.value(section: index, key: "MTU")), value >= 1280 {
-        return value
+private func waitControllerGone(maxSeconds: TimeInterval = 3) {
+    let deadline = Date().addingTimeInterval(maxSeconds)
+    while Date() < deadline {
+        if !controllerUp() { return }
+        usleep(100_000)
     }
-
-    guard let iface else { return 1420 }
-    let info = run(["/sbin/ifconfig", iface]).out
-    guard let match = info.range(of: #"mtu [0-9]+"#, options: .regularExpression) else { return 1420 }
-    let digits = info[match].filter(\.isNumber)
-    guard let mtu = Int(digits), mtu > 80 else { return 1420 }
-    return max(1280, mtu - 80)
 }
 
 /*
 ===============
-syncInternetCapture
+stopProcess
+Turn the TUN off through the controller so mihomo drops the adapter and routes, then end the process.
 ===============
 */
-func syncInternetCapture(slug: String, configPath: String, capture: Bool) {
-    guard var meta = loadTunnelMeta(slug: slug) else { return }
-    let config = (try? String(contentsOfFile: configPath, encoding: .utf8)) ?? ""
-    let document = WGDocument.parse(config)
-    let halves = tunnelDestinations(document).filter { isInternetHalf($0.destination) }
-    if capture {
-        for dest in halves {
-            let key = "\(dest.family) \(dest.destination)"
-            if meta.routes.contains(key) { continue }
-            if addInterfaceRoute(family: dest.family, destination: dest.destination, interfaceName: meta.interfaceName) {
-                meta.routes.append(key)
-            }
-        }
-    } else {
-        let halfKeys = Set(halves.map { "\($0.family) \($0.destination)" })
-        for key in meta.routes where halfKeys.contains(key) {
-            deleteStoredRoute(key)
-        }
-
-        meta.routes.removeAll { halfKeys.contains($0) }
-        for server in meta.dnsServers {
-            let v6 = server.contains(":")
-            let family = v6 ? "inet6" : "inet"
-            let destination = v6 ? "\(server)/128" : "\(server)/32"
-            let key = "\(family) \(destination)"
-            if meta.routes.contains(key) { continue }
-            if addInterfaceRoute(family: family, destination: destination, interfaceName: meta.interfaceName) {
-                meta.routes.append(key)
-            }
+private func stopProcess() {
+    let pid = mihomoPID
+    if mihomoRunning() {
+        _ = mihomoAPI("PATCH", "/configs", secret: mihomoSecret, body: "{\"tun\":{\"enable\":false}}", timeout: 1)
+        let quiet = Date().addingTimeInterval(0.5)
+        while mihomoRunning(), Date() < quiet {
+            usleep(20_000)
         }
     }
 
-    saveTunnelMeta(slug: slug, meta)
-}
-
-/*
-===============
-isInternetHalf
-===============
-*/
-private func isInternetHalf(_ destination: String) -> Bool {
-    destination == "0.0.0.0/1" || destination == "128.0.0.0/1" || destination == "::/1" || destination == "8000::/1"
-}
-
-/*
-===============
-addInterfaceRoute
-===============
-*/
-private func addInterfaceRoute(family: String, destination: String, interfaceName: String) -> Bool {
-    let result = run(["/sbin/route", "-q", "-n", "add", "-\(family)", destination, "-interface", interfaceName])
-    return result.code == 0 || result.blob.localizedCaseInsensitiveContains("exists")
-}
-
-/*
-===============
-tunnelDestinations
-===============
-*/
-private func tunnelDestinations(_ document: WGDocument) -> [RouteDest] {
-    var seen = Set<String>()
-    var result: [RouteDest] = []
-
-/*
-===============
-add
-===============
-*/
-    func add(_ family: String, _ destination: String) {
-        let key = family + " " + destination
-        guard seen.insert(key).inserted else { return }
-        result.append(RouteDest(family: family, destination: destination))
-    }
-
-    for peer in document.peerIndexes {
-        for raw in document.peerAllowedIPs(peer).split(separator: ",") {
-            guard let cidr = CIDR.parse(String(raw)) else { continue }
-            if cidr.family == .v4 && cidr.prefix == 0 {
-                add("inet", "0.0.0.0/1")
-                add("inet", "128.0.0.0/1")
-            } else if cidr.family == .v6 && cidr.prefix == 0 {
-                add("inet6", "::/1")
-                add("inet6", "8000::/1")
-            } else {
-                add(cidr.family == .v4 ? "inet" : "inet6", cidr.string)
-            }
-        }
-    }
-
-    return result
-}
-
-/*
-===============
-splitDNS
-===============
-*/
-private func splitDNS(_ document: WGDocument) -> (servers: [String], search: [String]) {
-    var servers: [String] = []
-    var search: [String] = []
-    for token in document.interfaceDNS.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !token.isEmpty {
-        if IPAddress.parse(token) != nil {
-            servers.append(token)
+    if mihomoRunning() {
+        if let process = mihomoProcess {
+            process.terminate()
         } else {
-            search.append(token)
+            kill(pid, SIGTERM)
+        }
+
+        let deadline = Date().addingTimeInterval(4)
+        while mihomoRunning(), Date() < deadline {
+            usleep(20_000)
         }
     }
 
-    return (servers, search)
-}
-
-/*
-===============
-networkServices
-Prefer hardware-looking services. Skipping other VPN profiles keeps DNS apply
-off the disconnect hot path.
-===============
-*/
-private func networkServices() -> [String] {
-    let out = run(["/usr/sbin/networksetup", "-listallnetworkservices"]).out
-    let all = out.split(separator: "\n").dropFirst().map(String.init).filter { !$0.isEmpty && !$0.hasPrefix("*") }
-    let preferred = all.filter {
-        let lower = $0.lowercased()
-        return lower.contains("wi-fi")
-            || lower.contains("wifi")
-            || lower.contains("ethernet")
-            || lower.contains("usb")
-            || lower.contains("thunderbolt")
-            || lower.contains("lan")
-    }
-    return preferred.isEmpty ? all : preferred
-}
-
-/*
-===============
-dnsLines
-===============
-*/
-private func dnsLines(_ flag: String, _ service: String) -> [String] {
-    let out = run(["/usr/sbin/networksetup", flag, service]).out
-    let lines = out.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-    if lines.isEmpty || lines.contains(where: { $0.localizedCaseInsensitiveContains("aren't any") }) {
-        return ["Empty"]
+    if mihomoRunning() {
+        kill(pid, SIGKILL)
+        if let process = mihomoProcess {
+            process.waitUntilExit()
+        } else {
+            usleep(200_000)
+        }
     }
 
-    return lines
+    mihomoProcess = nil
+    mihomoPID = 0
+    lastProbeAt = nil
+    lastOkAt = nil
+    lastPingAt = nil
+    lastDelayMs = 0
+    lastPingMs = 0
+    mihomoEndpointIP = ""
+    unlink(FairleadPaths.mihomoPID)
+    waitControllerGone()
 }
 
 /*
 ===============
-applyDNS
+mihomoProtocolLabel
 ===============
 */
-private func applyDNS(servers: [String], search: [String]) -> [DNSBackup] {
-    guard !servers.isEmpty else { return [] }
-    var saved: [DNSBackup] = []
-    let domains = search.isEmpty ? ["Empty"] : search
-    for service in networkServices() {
-        saved.append(DNSBackup(service: service, servers: dnsLines("-getdnsservers", service), search: dnsLines("-getsearchdomains", service)))
-        _ = run(["/usr/sbin/networksetup", "-setdnsservers", service] + servers)
-        _ = run(["/usr/sbin/networksetup", "-setsearchdomains", service] + domains)
+func mihomoProtocolLabel(_ wg: String) -> String {
+    Amnezia.isAmnezia(WGDocument.parse(wg)) ? "AmneziaWG" : "WireGuard"
+}
+
+/*
+===============
+mihomoPeerHost
+Resolved endpoint IP when known, otherwise the host from Endpoint.
+===============
+*/
+func mihomoPeerHost() -> String? {
+    if !mihomoEndpointIP.isEmpty { return mihomoEndpointIP }
+    return endpointHost(mihomoEndpoint)
+}
+
+/*
+===============
+peerEndpoint
+The first peer's Endpoint, for the status line.
+===============
+*/
+private func peerEndpoint(_ wg: String) -> String {
+    let document = WGDocument.parse(wg)
+    guard let peer = document.peerIndexes.first else { return "" }
+    return document.peerEndpoint(peer)
+}
+
+/*
+===============
+mihomoUp
+Write config.yaml, start mihomo, and wait until the controller and TUN are up.
+===============
+*/
+func mihomoUp(wg: String, rules: MihomoRules) -> MihomoUp {
+    stopProcess()
+    guard let binary = ToolLocator.locate().mihomo else {
+        return MihomoUp(error: FairleadL10n.text("mihomo is not included in this copy of Fairlead."))
     }
 
-    return saved
-}
-
-/*
-===============
-restoreDNS
-===============
-*/
-private func restoreDNS(_ saved: [DNSBackup]) {
-    for item in saved {
-        let servers = item.servers.isEmpty ? ["Empty"] : item.servers
-        let search = item.search.isEmpty ? ["Empty"] : item.search
-        _ = run(["/usr/sbin/networksetup", "-setdnsservers", item.service] + servers)
-        _ = run(["/usr/sbin/networksetup", "-setsearchdomains", item.service] + search)
+    try? FileManager.default.createDirectory(atPath: FairleadPaths.mihomoDirectory, withIntermediateDirectories: true)
+    chmod(FairleadPaths.mihomoDirectory, 0o700)
+    let secret = makeSecret()
+    if let error = writeYAML(wg: wg, rules: rules, secret: secret) {
+        return MihomoUp(error: error)
     }
+
+    mihomoSecret = secret
+    mihomoEndpoint = peerEndpoint(wg)
+    mihomoEndpointIP = resolveEndpointIP(mihomoEndpoint)
+    if let error = spawn(binary: binary) {
+        return MihomoUp(error: error)
+    }
+
+    if let error = waitReady() {
+        stopProcess()
+        return MihomoUp(error: error)
+    }
+
+    recovered = false
+    probeFails = 0
+    fputs("fairlead-helper: mihomo \(mihomoPID) up\n", stderr)
+    return MihomoUp(pid: mihomoPID, secret: secret, endpoint: mihomoEndpoint, error: nil)
 }
 
 /*
 ===============
-deleteStoredRoute
+mihomoDown
+Stop mihomo. It drops the adapter and routes with it.
 ===============
 */
-private func deleteStoredRoute(_ stored: String) {
-    let parts = stored.split(separator: " ", maxSplits: 1).map(String.init)
-    guard parts.count == 2 else { return }
-    _ = run(["/sbin/route", "-q", "-n", "delete", "-\(parts[0])", parts[1]])
+func mihomoDown() {
+    stopProcess()
+    mihomoSecret = ""
+    mihomoEndpoint = ""
+    mihomoEndpointIP = ""
+    probeFails = 0
+    recovered = false
 }
 
 /*
 ===============
-metaURL
+reload
+Ask the running mihomo to read config.yaml again.
 ===============
 */
-private func metaURL(_ slug: String) -> URL {
-    URL(fileURLWithPath: FairleadPaths.directory).appendingPathComponent("\(slug).meta.json")
+private func reload() -> Bool {
+    guard let body = try? JSONSerialization.data(withJSONObject: ["path": configPath]),
+          let text = String(data: body, encoding: .utf8),
+          let reply = mihomoAPI("PUT", "/configs?force=true", secret: mihomoSecret, body: text, timeout: 5) else {
+        return false
+    }
+
+    return reply.status >= 200 && reply.status < 300
 }
 
 /*
 ===============
-loadTunnelMeta
+mihomoReload
+Rewrite config.yaml with the new rules and reload mihomo. If the reload is refused, restart it.
 ===============
 */
-private func loadTunnelMeta(slug: String) -> TunnelMeta? {
-    guard let data = try? Data(contentsOf: metaURL(slug)) else { return nil }
-    return try? JSONDecoder().decode(TunnelMeta.self, from: data)
+func mihomoReload(wg: String, rules: MihomoRules) -> String? {
+    guard mihomoPID > 0 else { return FairleadL10n.text("The tunnel is not running.") }
+    if let error = writeYAML(wg: wg, rules: rules, secret: mihomoSecret) { return error }
+    if mihomoRunning(), reload() { return nil }
+
+    fputs("fairlead-helper: mihomo reload failed, restarting\n", stderr)
+    stopProcess()
+    guard let binary = ToolLocator.locate().mihomo, spawn(binary: binary) == nil, waitReady() == nil else {
+        stopProcess()
+        return FairleadL10n.text("mihomo could not be restarted.")
+    }
+
+    return nil
 }
 
 /*
 ===============
-saveTunnelMeta
+total
+An unsigned number after a JSON key.
 ===============
 */
-private func saveTunnelMeta(slug: String, _ meta: TunnelMeta) {
-    guard let data = try? JSONEncoder().encode(meta) else { return }
-    try? data.write(to: metaURL(slug), options: .atomic)
-    chmod(metaURL(slug).path, 0o600)
+private func total(_ text: String, _ key: String) -> UInt64 {
+    guard let range = text.range(of: key) else { return 0 }
+    return UInt64(text[range.upperBound...].prefix { $0.isNumber }) ?? 0
 }
 
 /*
 ===============
-removeTunnelMeta
+probeDelay
+HTTP probe through the WireGuard outbound. 0 when the tunnel does not answer.
 ===============
 */
-private func removeTunnelMeta(slug: String) {
-    try? FileManager.default.removeItem(at: metaURL(slug))
+private func probeDelay() -> Int {
+    guard let reply = mihomoAPI("GET", probePath, secret: mihomoSecret, timeout: 4), reply.status == 200 else {
+        return 0
+    }
+
+    let text = String(decoding: reply.data, as: UTF8.self)
+    guard let range = text.range(of: "\"delay\":") else { return 0 }
+    let value = text[range.upperBound...].prefix { $0.isNumber }
+    return Int(value) ?? 0
 }
 
 /*
 ===============
-startMonitor
+endpointHost
+host from host:port or [v6]:port.
 ===============
 */
-private func startMonitor(_ meta: TunnelMeta) {
-    stopMonitor()
-    monitorState.lock.lock()
-    monitorState.stop = false
-    monitorState.iface = meta.interfaceName
-    monitorState.endpoints = meta.endpoints
-    monitorState.servers = meta.dnsServers
-    monitorState.search = meta.dnsSearch
-    monitorState.lock.unlock()
-    let thread = Thread {
-        while true {
-            for _ in 0..<16 {
-                monitorState.lock.lock()
-                let stop = monitorState.stop
-                monitorState.lock.unlock()
-                if stop { return }
-                Thread.sleep(forTimeInterval: 0.5)
+private func endpointHost(_ endpoint: String) -> String? {
+    if endpoint.hasPrefix("["), let end = endpoint.firstIndex(of: "]") {
+        let start = endpoint.index(after: endpoint.startIndex)
+        guard start < end else { return nil }
+        return String(endpoint[start..<end])
+    }
+
+    guard let colon = endpoint.lastIndex(of: ":"), colon > endpoint.startIndex else { return nil }
+    return String(endpoint[..<colon])
+}
+
+/*
+===============
+resolveEndpointIP
+DNS lookup before TUN is up. IPv4 only, for ICMP ping after connect.
+===============
+*/
+private func resolveEndpointIP(_ endpoint: String) -> String {
+    guard let host = endpointHost(endpoint), !host.isEmpty else { return "" }
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    var result: UnsafeMutablePointer<addrinfo>?
+    guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else { return "" }
+    defer { freeaddrinfo(first) }
+    var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+    guard getnameinfo(first.pointee.ai_addr, first.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 else {
+        return ""
+    }
+    return String(cString: buf)
+}
+
+/*
+===============
+pingEndpoint
+ICMP echo to the pre-resolved endpoint IP. No DNS after connect.
+===============
+*/
+private func pingEndpoint() -> Int {
+    guard !mihomoEndpointIP.isEmpty else { return 0 }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/sbin/ping")
+    process.arguments = ["-c", "1", "-W", "800", mihomoEndpointIP]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return 0
+    }
+
+    guard process.terminationStatus == 0 else { return 0 }
+    let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard let range = text.range(of: "time=") else { return 0 }
+    var num = ""
+    for ch in text[range.upperBound...] {
+        if ch.isNumber || ch == "." {
+            num.append(ch)
+        } else if !num.isEmpty {
+            break
+        }
+    }
+
+    guard let ms = Double(num) else { return 0 }
+    let rounded = Int(ms.rounded())
+    return rounded > 0 ? rounded : 1
+}
+
+/*
+===============
+mihomoStatus
+Counters, HTTP probe for tunnel liveness, ICMP ping for the UI (only after the tunnel is up).
+Pass probe: false right after up() so Connected still waits on later status ticks.
+===============
+*/
+func mihomoStatus(probe: Bool = true) -> WGDeviceStatus? {
+    guard mihomoPID > 0, mihomoRunning() else {
+        lastProbeAt = nil
+        lastOkAt = nil
+        lastDelayMs = 0
+        lastPingMs = 0
+        probeFails = 0
+        return nil
+    }
+
+    var rx: UInt64 = 0
+    var tx: UInt64 = 0
+    if let reply = mihomoAPI("GET", "/connections", secret: mihomoSecret), reply.status == 200 {
+        let head = String(decoding: reply.data.prefix(512), as: UTF8.self)
+        rx = total(head, "\"downloadTotal\":")
+        tx = total(head, "\"uploadTotal\":")
+    }
+
+    let now = Date()
+    var stage = ""
+    if probe {
+        let gap = lastOkAt == nil ? probeRetry : probeEvery
+        let needProbe = lastProbeAt == nil || now.timeIntervalSince(lastProbeAt!) >= gap
+        if lastOkAt == nil {
+            stage = FairleadL10n.text(lastProbeAt == nil ? "Opening the tunnel…" : "Checking the tunnel…")
+        }
+        if needProbe {
+            lastProbeAt = now
+            stage = FairleadL10n.text("Checking the tunnel…")
+            let delay = probeDelay()
+            if delay > 0 {
+                lastOkAt = now
+                lastDelayMs = delay
+                probeFails = 0
+            } else if lastOkAt == nil {
+                probeFails += 1
+                if probeFails >= probeFailRestart, !recovered {
+                    fputs("fairlead-helper: tunnel not reachable, restarting mihomo\n", stderr)
+                    recovered = true
+                    probeFails = 0
+                    lastProbeAt = nil
+                    let binary = ToolLocator.locate().mihomo
+                    stopProcess()
+                    if let binary, spawn(binary: binary) == nil {
+                        stage = FairleadL10n.text("Opening the tunnel…")
+                    }
+                }
             }
-
-            monitorState.lock.lock()
-            let stop = monitorState.stop
-            let iface = monitorState.iface
-            let endpoints = monitorState.endpoints
-            let servers = monitorState.servers
-            let search = monitorState.search
-            monitorState.lock.unlock()
-            if stop || iface.isEmpty { return }
-            refreshTunnel(iface: iface, endpoints: endpoints, servers: servers, search: search)
         }
+    } else if lastOkAt == nil {
+        stage = FairleadL10n.text("Opening the tunnel…")
     }
 
-    thread.stackSize = 512 * 1024
-    monitorThread = thread
-    thread.start()
+    var handshake = 0
+    var delay = 0
+    var ping = 0
+    if let ok = lastOkAt, now.timeIntervalSince(ok) <= probeStale {
+        handshake = Int(ok.timeIntervalSince1970)
+        delay = lastDelayMs
+        stage = ""
+        let needPing = lastPingAt == nil || now.timeIntervalSince(lastPingAt!) >= pingEvery
+        if needPing {
+            lastPingAt = now
+            let sample = pingEndpoint()
+            if sample > 0 {
+                lastPingMs = sample
+            }
+        }
+        ping = lastPingMs
+    } else {
+        lastOkAt = nil
+        lastDelayMs = 0
+    }
+
+    let peer = WGPeerStatus(
+        publicKey: "",
+        endpoint: mihomoEndpoint,
+        allowedIPs: "",
+        handshake: handshake,
+        rx: rx,
+        tx: tx,
+        keepalive: 0,
+        delay: delay,
+        ping: ping,
+        stage: stage
+    )
+    return WGDeviceStatus(interface: mihomoInterface, publicKey: "", listenPort: 0, peers: [peer])
 }
 
 /*
 ===============
-stopMonitor
+mihomoAdopt
+After a helper restart, take over the mihomo that is still running. False when it is gone or does not answer.
 ===============
 */
-private func stopMonitor() {
-    monitorState.lock.lock()
-    monitorState.stop = true
-    let thread = monitorThread
-    monitorState.lock.unlock()
-    // Don't block disconnect on a mid-flight networksetup; the thread exits on stop.
-    let deadline = Date().addingTimeInterval(0.35)
-    while let thread, thread.isExecuting, Date() < deadline {
-        Thread.sleep(forTimeInterval: 0.02)
-    }
-
-    monitorThread = nil
+func mihomoAdopt(pid: Int32, secret: String, endpoint: String) -> Bool {
+    guard pidIsMihomo(pid) else { return false }
+    guard let reply = mihomoAPI("GET", "/version", secret: secret, timeout: 1), reply.status == 200 else { return false }
+    mihomoProcess = nil
+    mihomoPID = pid
+    mihomoSecret = secret
+    mihomoEndpoint = endpoint
+    return true
 }
 
 /*
 ===============
-refreshTunnel
+mihomoReapOrphans
+End a mihomo a previous helper left behind. Only the recorded pid is touched.
 ===============
 */
-private func refreshTunnel(iface: String, endpoints: [EndpointHop], servers: [String], search: [String]) {
-    guard interfaceExists(iface) else { return }
-    for hop in endpoints {
-        let looked = RouteText.parseRouteGet(run(["/sbin/route", "-n", "get", "-\(hop.family)", hop.ip]).out)
-        if looked.interface == iface {
-            _ = run(["/sbin/route", "-q", "-n", "add", "-\(hop.family)", hop.ip, "-gateway", hop.gateway])
-        }
+func mihomoReapOrphans() {
+    defer { if mihomoPID == 0 { unlink(FairleadPaths.mihomoPID) } }
+    guard let text = try? String(contentsOfFile: FairleadPaths.mihomoPID, encoding: .utf8),
+          let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+          pid != mihomoPID, pidIsMihomo(pid) else { return }
+    fputs("fairlead-helper: ending an orphan mihomo \(pid)\n", stderr)
+    kill(pid, SIGTERM)
+    let deadline = Date().addingTimeInterval(3)
+    while pidAlive(pid), Date() < deadline {
+        usleep(20_000)
     }
 
-    guard !servers.isEmpty else { return }
-    let domains = search.isEmpty ? ["Empty"] : search
-    for service in networkServices() {
-        monitorState.lock.lock()
-        let stop = monitorState.stop
-        monitorState.lock.unlock()
-        if stop { return }
-        let current = dnsLines("-getdnsservers", service)
-        if Set(current) == Set(servers) { continue }
-        _ = run(["/usr/sbin/networksetup", "-setdnsservers", service] + servers)
-        _ = run(["/usr/sbin/networksetup", "-setsearchdomains", service] + domains)
-    }
+    if pidAlive(pid) { kill(pid, SIGKILL) }
 }

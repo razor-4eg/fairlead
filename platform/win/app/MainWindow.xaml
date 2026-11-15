@@ -285,7 +285,7 @@
                                     <ToggleButton x:Name="LanSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LanToggled"/>
                                 </Grid>
                             </Border>
-                            <TextBlock Text="A domain is resolved on the regular network. An app's addresses are learned as it connects." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                            <TextBlock Text="Domains and apps are matched by name and process while connected." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                             <TextBlock Text="Nothing here yet. Add an IP, a domain, or an app." FontSize="14" x:Name="RulesEmpty" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
                             <StackPanel x:Name="Rules"/>
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -359,7 +359,7 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <Ellipse x:Name="AwgDot" Width="6" Height="6" Fill="{StaticResource FaintBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
-                                    <TextBlock Grid.Column="1" Text="amneziawg-go" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Top"/>
+                                    <TextBlock Grid.Column="1" Text="mihomo" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Top"/>
                                     <TextBlock x:Name="AwgLine" Grid.Column="2" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Top"/>
                                     <Ellipse x:Name="HelperRowDot" Grid.Row="1" Width="6" Height="6" Fill="{StaticResource FaintBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="Helper" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource TextBrush}" VerticalAlignment="Top"/>
@@ -437,10 +437,6 @@
                         <TextBox x:Name="ListName" PlaceholderText="Name" Style="{StaticResource QuietBox}" TextChanged="ListChanged"/>
                         <TextBlock x:Name="ListHint" Text="One address or domain per line." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                         <TextBox x:Name="ListEntries" AcceptsReturn="True" Height="180" TextWrapping="Wrap" FontFamily="Consolas" Style="{StaticResource QuietBox}" TextChanged="ListChanged" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-                        <StackPanel x:Name="ListResolvedPane" Spacing="6" Visibility="Collapsed">
-                            <TextBlock Text="Resolved" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource FaintBrush}"/>
-                            <TextBox x:Name="ListResolved" IsReadOnly="True" AcceptsReturn="True" Height="120" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Style="{StaticResource QuietBox}" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-                        </StackPanel>
                         <TextBlock x:Name="ListError" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"/>
                         <Grid>
                             <TextBlock x:Name="ListProgress" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource MutedBrush}" Visibility="Collapsed"/>

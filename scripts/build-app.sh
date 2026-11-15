@@ -22,17 +22,17 @@ swift build -c release
 APP="dist/Fairlead.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-if [[ ! -x platform/mac/Support/amneziawg-go ]]; then
-  echo "platform/mac/Support/amneziawg-go is missing. Build it with scripts/build-amneziawg-go.sh." >&2
+if [[ ! -x platform/mac/Support/mihomo ]]; then
+  echo "platform/mac/Support/mihomo is missing. Build it with scripts/build-mihomo.sh." >&2
   exit 1
 fi
 cp .build/release/Fairlead "$APP/Contents/MacOS/Fairlead"
 cp .build/release/FairleadHelper "$APP/Contents/MacOS/FairleadHelper"
-cp platform/mac/Support/amneziawg-go "$APP/Contents/MacOS/amneziawg-go"
+cp platform/mac/Support/mihomo "$APP/Contents/MacOS/mihomo"
 cp platform/mac/Support/Info.plist "$APP/Contents/Info.plist"
 cp platform/mac/Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp platform/mac/Support/amneziawg-go.LICENSE "$APP/Contents/Resources/amneziawg-go.LICENSE"
+cp platform/mac/Support/mihomo.LICENSE "$APP/Contents/Resources/mihomo.LICENSE"
 cp -R platform/mac/Support/*.lproj "$APP/Contents/Resources/"
-chmod 755 "$APP/Contents/MacOS/Fairlead" "$APP/Contents/MacOS/FairleadHelper" "$APP/Contents/MacOS/amneziawg-go"
+chmod 755 "$APP/Contents/MacOS/Fairlead" "$APP/Contents/MacOS/FairleadHelper" "$APP/Contents/MacOS/mihomo"
 codesign --force --deep --sign - "$APP"
 echo "Built $(pwd)/$APP"

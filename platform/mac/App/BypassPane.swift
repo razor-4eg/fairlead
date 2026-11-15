@@ -107,7 +107,7 @@ struct BypassPane: View {
                 RouteListSheet(tunnelID: tunnel.id, listID: id)
                     .environmentObject(model)
             case .app(let id):
-                AppAddressesSheet(tunnelID: tunnel.id, ruleID: id)
+                AppPathSheet(tunnelID: tunnel.id, ruleID: id)
                     .environmentObject(model)
             }
         }
@@ -142,7 +142,7 @@ struct BypassPane: View {
 
     private var lanCaption: String {
         if live.lanCIDRs.isEmpty {
-            return FairleadL10n.text("The current Wi-Fi or Ethernet network. It appears after you connect.")
+            return FairleadL10n.text("Private LAN ranges stay off the tunnel when this is on.")
         }
 
         return live.lanCIDRs.joined(separator: ", ")
@@ -153,7 +153,7 @@ struct BypassPane: View {
     }
 
     private var listNote: some View {
-        Text("A domain is resolved on the regular network. An app's addresses are learned as it connects.")
+        Text("A domain is matched by name. An app is matched by its process path while connected.")
             .font(.system(size: 12))
             .foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -208,9 +208,11 @@ appRow
                     Text(rule.name)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
-                    Text(missing ? FairleadL10n.text("App not found") : FairleadL10n.addressCount(rule.learned.count))
+                    Text(missing ? FairleadL10n.text("App not found") : rule.path)
                         .font(.system(size: 12))
                         .foregroundStyle(missing ? Theme.danger : Theme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
@@ -443,24 +445,6 @@ struct RouteListSheet: View {
                 .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
                 .disabled(busy)
-            if !resolvedPreview.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Resolved")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                    ScrollView {
-                        Text(resolvedPreview)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Theme.muted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(height: 120)
-                    .padding(10)
-                    .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
-                }
-            }
-
             if !failures.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(failures, id: \.self) { failure in
@@ -497,24 +481,6 @@ struct RouteListSheet: View {
         !busy
             && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var resolvedPreview: String {
-        guard let list else { return "" }
-        var lines: [String] = []
-        for entry in list.entries where entry.kind == .domain {
-            lines.append(entry.value)
-            if entry.addresses.isEmpty {
-                lines.append("  " + (entry.refreshAt == nil
-                    ? FairleadL10n.text("Resolving…")
-                    : FairleadL10n.format("Could not resolve %@.", entry.value)))
-            } else {
-                for address in entry.addresses {
-                    lines.append("  " + address)
-                }
-            }
-        }
-        return lines.joined(separator: "\n")
     }
 
 /*
@@ -562,7 +528,7 @@ commit
     }
 }
 
-struct AppAddressesSheet: View {
+struct AppPathSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     var tunnelID: UUID
@@ -598,10 +564,6 @@ struct AppAddressesSheet: View {
     }
 
     private var bodyText: String {
-        guard let rule else { return "" }
-        if rule.learned.isEmpty {
-            return FairleadL10n.text("Nothing learned yet.")
-        }
-        return rule.learned.joined(separator: "\n")
+        rule?.path ?? ""
     }
 }

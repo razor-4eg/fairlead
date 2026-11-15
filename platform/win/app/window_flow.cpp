@@ -92,15 +92,11 @@ winrt::fire_and_forget MainWindow::TickAsync() {
 		}
 	}
 
-	int wait = session.helper_online ? 3000 : 200;
+	/* Connecting may run a probe (and occasionally a mihomo restart) inside status. */
+	int wait = session.helper_online ? (busy ? 12000 : 3000) : 200;
 	auto body = session.StatusBody();
 	co_await winrt::resume_background();
 	auto reply = session.Call(body, wait);
-	std::vector<ProcHit> hits;
-	if (session.ReplyOk(reply)) {
-		hits = session.SnapshotTcp();
-	}
-
 	co_await resume_ui{ queue };
 	if (session.ReplyOk(reply)) {
 		session.MarkHelper(true);
@@ -112,22 +108,7 @@ winrt::fire_and_forget MainWindow::TickAsync() {
 		session.ApplyStatus(reply);
 	}
 
-	bool learned = false;
-	Tunnel* live = nullptr;
-	if (session.helper_online) {
-		learned = session.ApplyLearn(hits);
-		for (auto const& tunnel : session.tunnels) {
-			if (tunnel->connected) {
-				live = tunnel.get();
-			}
-		}
-	}
-
 	Paint();
-	if (learned) {
-		PaintRules();
-		co_await PushBypassAsync(live);
-	}
 }
 
 winrt::fire_and_forget MainWindow::ToggleAsync(Tunnel* tunnel) {
@@ -167,44 +148,25 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::ConnectAsync(Tunnel* tunnel
 		co_await EnsureHelperAsync(true);
 	}
 
-	std::vector<RouteEntry*> pending;
-	for (auto const& list : tunnel->lists) {
-		if (!list->enabled) {
-			continue;
-		}
-
-		for (auto& entry : list->entries) {
-			if (entry.kind == "domain" && entry.addresses.empty() && entry.status.empty() && session.BeginResolve(entry.id)) {
-				pending.push_back(&entry);
-			}
-		}
-	}
-
-	bool changed = false;
-	for (auto* entry : pending) {
-		std::string host = entry->value;
-		co_await winrt::resume_background();
-		auto ips = lookup_host(host);
-		co_await resume_ui{ queue };
-		entry->addresses = std::move(ips);
-		entry->status = entry->addresses.empty() ? "Could not resolve" : "";
-		session.EndResolve(entry->id);
-		changed = true;
-	}
-
-	if (changed) {
-		session.SaveRules();
-	}
-
+	/* mihomo resolves domains itself. No pre-resolve here. */
 	auto body = session.Rpc("up", tunnel, true);
 	co_await winrt::resume_background();
 	auto reply = session.Call(body);
 	co_await resume_ui{ queue };
+	/* Cancelled while up() ran — DisconnectAsync already moved the phase. */
+	if (tunnel->phase != "Connecting") {
+		if (session.ReplyOk(reply)) {
+			auto down = session.Rpc("down", tunnel, false);
+			co_await winrt::resume_background();
+			session.Call(down);
+			co_await resume_ui{ queue };
+		}
+		Paint();
+		co_return;
+	}
+
 	session.FinishConnect(tunnel, reply);
 	Paint();
-	if (changed) {
-		PaintRules();
-	}
 }
 
 winrt::Windows::Foundation::IAsyncAction MainWindow::DisconnectAsync(Tunnel* tunnel) {
@@ -355,53 +317,8 @@ winrt::fire_and_forget MainWindow::HelperAsync(bool interactive) {
 	Paint();
 }
 
-winrt::fire_and_forget MainWindow::ResolveAsync(Tunnel* tunnel) {
-	auto life = get_strong();
-	auto queue = DispatcherQueue();
-	resolve_posted = true;
-	if (!tunnel) {
-		resolve_posted = false;
-		co_return;
-	}
-
-	std::vector<RouteEntry*> pending;
-	for (auto const& list : tunnel->lists) {
-		if (!list->enabled) {
-			continue;
-		}
-
-		for (auto& entry : list->entries) {
-			if (entry.kind == "domain" && entry.addresses.empty() && entry.status.empty() && session.BeginResolve(entry.id)) {
-				pending.push_back(&entry);
-			}
-		}
-	}
-
-	bool changed = false;
-	for (auto* entry : pending) {
-		std::string host = entry->value;
-		co_await winrt::resume_background();
-		auto ips = lookup_host(host);
-		co_await resume_ui{ queue };
-		entry->addresses = std::move(ips);
-		entry->status = entry->addresses.empty() ? "Could not resolve" : "";
-		session.EndResolve(entry->id);
-		changed = true;
-	}
-
-	resolve_posted = false;
-	if (!changed) {
-		co_return;
-	}
-
-	session.SaveRules();
-	PaintRules();
-	co_await PushBypassAsync(tunnel);
-}
-
 winrt::fire_and_forget MainWindow::SaveRoutesAsync() {
 	auto life = get_strong();
-	auto queue = DispatcherQueue();
 	if (route_cancel) {
 		co_return;
 	}
@@ -430,33 +347,6 @@ winrt::fire_and_forget MainWindow::SaveRoutesAsync() {
 	RouteProgress().Visibility(mux::Visibility::Visible);
 	auto built = session.BuildList(S(RouteName().Text()), S(RouteBox().Text()), nullptr);
 	if (built.list) {
-		auto pending = built.pending;
-		if (pending.empty()) {
-			RouteProgress().Text(L"Adding the list");
-		}
-
-		for (size_t i = 0; i < pending.size(); i++) {
-			if (cancel->load()) {
-				co_return;
-			}
-
-			RouteProgress().Text(H(pending[i]->value + "  " + std::to_string(i + 1) + "/" + std::to_string(pending.size())));
-			std::string host = pending[i]->value;
-			co_await winrt::resume_background();
-			auto ips = lookup_host(host);
-			co_await resume_ui{ queue };
-			if (cancel->load()) {
-				co_return;
-			}
-
-			pending[i]->addresses = std::move(ips);
-			pending[i]->status = pending[i]->addresses.empty() ? "Could not resolve" : "";
-		}
-
-		if (cancel->load()) {
-			co_return;
-		}
-
 		RouteProgress().Text(L"Adding the list");
 		session.CommitNew(std::move(built.list));
 		PaintRules();
@@ -479,7 +369,6 @@ winrt::fire_and_forget MainWindow::SaveRoutesAsync() {
 
 winrt::fire_and_forget MainWindow::SaveListAsync() {
 	auto life = get_strong();
-	auto queue = DispatcherQueue();
 	if (!editing_list || list_cancel) {
 		co_return;
 	}
@@ -509,33 +398,6 @@ winrt::fire_and_forget MainWindow::SaveListAsync() {
 	ListProgress().Visibility(mux::Visibility::Visible);
 	auto built = session.BuildList(S(ListName().Text()), S(ListEntries().Text()), list);
 	if (built.list) {
-		auto pending = built.pending;
-		if (pending.empty()) {
-			ListProgress().Text(L"Saving the list");
-		}
-
-		for (size_t i = 0; i < pending.size(); i++) {
-			if (cancel->load()) {
-				co_return;
-			}
-
-			ListProgress().Text(H(pending[i]->value + "  " + std::to_string(i + 1) + "/" + std::to_string(pending.size())));
-			std::string host = pending[i]->value;
-			co_await winrt::resume_background();
-			auto ips = lookup_host(host);
-			co_await resume_ui{ queue };
-			if (cancel->load()) {
-				co_return;
-			}
-
-			pending[i]->addresses = std::move(ips);
-			pending[i]->status = pending[i]->addresses.empty() ? "Could not resolve" : "";
-		}
-
-		if (cancel->load()) {
-			co_return;
-		}
-
 		ListProgress().Text(L"Saving the list");
 		auto name = built.list->name;
 		auto entries = std::move(built.list->entries);

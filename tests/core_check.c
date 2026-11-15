@@ -21,7 +21,6 @@
 static int s_failures = 0;
 
 static int list_has(char list[][64], int n, const char *item);
-static int contains_list(const bypass_t *plan, const char *item);
 static void put16p(unsigned char *p, int *n, unsigned int v);
 static void put32p(unsigned char *p, int *n, unsigned int v);
 size_t fairlead_qcompress(const unsigned char *src, size_t src_len, unsigned char *dst, size_t dst_cap);
@@ -98,11 +97,6 @@ int main(void) {
 	char				pub[128];
 	cidr_t			cidr;
 	ip_t				ip;
-	const char			*rules[] = {"0.0.0.0/0", "203.0.113.10", "198.51.100.0/24"};
-	const char			*learned[] = {"203.0.113.10", "192.0.2.5"};
-	const char			*lan[] = {"192.168.31.0/24"};
-	const char			*eps[] = {"203.0.113.10"};
-	bypass_t			*plan;
 	char				host[128];
 	int					nnets;
 	device_status_t	devices[2];
@@ -130,8 +124,6 @@ int main(void) {
 	WSADATA				wsa;
 	int					index;
 	char				again[128];
-	const char			*srules[] = {"0.0.0.0/0", "198.51.100.0/24", "203.0.113.10", "192.168.31.0/24"};
-	const char			*slearned[] = {"192.0.2.5"};
 	int					i;
 	int					found;
 	int					link;
@@ -267,30 +259,6 @@ int main(void) {
 	cidr_format(&cidr, value, (int)sizeof(value));
 	expect_str(value, "::1/128", "v6");
 	expect(!cidr_parse("nope", &cidr), "bad cidr");
-
-	plan = (bypass_t *)calloc(1, sizeof(*plan));
-	expect(plan != NULL, "plan alloc");
-	bypass_plan(0, rules, 3, learned, 2, lan, 1, 1, eps, 1, plan);
-	expect(!contains_list(plan, "0.0.0.0/0"), "no default");
-	expect(list_has(plan->routes, plan->route_count, "192.0.2.5/32"), "learned");
-	expect(list_has(plan->routes, plan->route_count, "198.51.100.0/24"), "rule");
-	expect(list_has(plan->routes, plan->route_count, "192.168.31.0/24"), "lan");
-	expect(!list_has(plan->routes, plan->route_count, "203.0.113.10/32"), "skip endpoint");
-	expect(plan->direct_count == 0, "exceptions have no separate direct list");
-	expect(plan->warning_count > 0, "warnings");
-
-	{
-		bypass_plan(1, srules, 4, slearned, 1, lan, 1, 1, eps, 1, plan);
-		expect(list_has(plan->routes, plan->route_count, "198.51.100.0/24"), "selected rule");
-		expect(list_has(plan->routes, plan->route_count, "192.0.2.5/32"), "selected learned");
-		expect(!list_has(plan->routes, plan->route_count, "203.0.113.10/32"), "selected skips endpoint");
-		expect(!list_has(plan->routes, plan->route_count, "0.0.0.0/0"), "selected no default");
-		expect(!list_has(plan->routes, plan->route_count, "192.168.31.0/24"), "selected lan stays off the tunnel");
-		expect(list_has(plan->direct, plan->direct_count, "192.168.31.0/24"), "selected lan direct");
-		expect(plan->warning_count > 0, "selected warnings");
-	}
-
-	free(plan);
 
 	expect(endpoint_host("vpn.example.com:51820", host, (int)sizeof(host)), "host ok");
 	expect_str(host, "vpn.example.com", "host");
@@ -610,16 +578,6 @@ static int list_has(char list[][64], int n, const char *item) {
 	}
 
 	return 0;
-}
-
-/*
-===============
-contains_list
-True when every needle is in the list.
-===============
-*/
-static int contains_list(const bypass_t *plan, const char *item) {
-	return list_has((char (*)[64])plan->routes, plan->route_count, item);
 }
 
 /*
