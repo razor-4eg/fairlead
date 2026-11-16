@@ -34,5 +34,7 @@ cp platform/mac/Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp platform/mac/Support/mihomo.LICENSE "$APP/Contents/Resources/mihomo.LICENSE"
 cp -R platform/mac/Support/*.lproj "$APP/Contents/Resources/"
 chmod 755 "$APP/Contents/MacOS/Fairlead" "$APP/Contents/MacOS/FairleadHelper" "$APP/Contents/MacOS/mihomo"
+# Drop any quarantine before packaging so a later helper install does not inherit it.
+xattr -cr "$APP" >/dev/null 2>&1 || true
 codesign --force --deep --sign - "$APP"
 echo "Built $(pwd)/$APP"

@@ -16,13 +16,39 @@ enum HelperInstaller {
 /*
 ===============
 needsUpdate
-The helper left running by launchd can be older than the app. Ad-hoc signing rewrites the signature, so the comparison ignores it and does not treat a re-sign as a new helper.
+True when this app’s helper is not what /usr/local/libexec last installed successfully.
+Install re-signs the binary for launchd; that changes the on-disk signature, so we trust
+the stamp written after a good install (content hash of the bundled helper), not a
+post-sign hash of the installed file. Otherwise a downloaded build keeps asking for the
+administrator password in a loop even though the helper is already up.
 ===============
 */
     static func needsUpdate() -> Bool {
         guard let expected = bundledFingerprint() else { return false }
+        guard FileManager.default.isExecutableFile(atPath: FairleadPaths.helperBinary) else {
+            return true
+        }
+
+        if let stamp = installedStamp(), !stamp.isEmpty {
+            return stamp != expected
+        }
+
+        // Legacy installs without a stamp: compare signature-stripped Mach-O bytes.
         guard let installed = installedFingerprint() else { return true }
         return installed != expected
+    }
+
+/*
+===============
+installedStamp
+===============
+*/
+    private static func installedStamp() -> String? {
+        guard let text = try? String(contentsOfFile: stampPath, encoding: .utf8) else {
+            return nil
+        }
+        let stamp = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return stamp.isEmpty ? nil : stamp
     }
 
 /*
@@ -180,7 +206,10 @@ so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
         killall fairlead-helper 2>/dev/null || true
         sleep 0.3
         killall -9 fairlead-helper harbor-helper 2>/dev/null || true
-        cp "$SRC" /usr/local/libexec/fairlead-helper
+        # -X: do not copy quarantine from a GitHub download into libexec (launchd then
+        # refuses the ad-hoc helper and Fairlead keeps asking for the password).
+        cp -X "$SRC" /usr/local/libexec/fairlead-helper
+        xattr -cr /usr/local/libexec/fairlead-helper >/dev/null 2>&1 || true
         chmod 755 /usr/local/libexec/fairlead-helper
         # codesign prints "replacing existing signature" on stderr. osascript treats
         # any stderr from a failing command as the error text, so keep it in the log.
@@ -193,14 +222,13 @@ so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
         rm -f /usr/local/libexec/fairlead-wireguard-go /usr/local/libexec/fairlead-amneziawg-go
         MIHOMO_SRC="$(dirname "$SRC")/mihomo"
         if [[ -x "$MIHOMO_SRC" ]]; then
-          cp "$MIHOMO_SRC" /usr/local/libexec/fairlead-mihomo
+          cp -X "$MIHOMO_SRC" /usr/local/libexec/fairlead-mihomo
+          xattr -cr /usr/local/libexec/fairlead-mihomo >/dev/null 2>&1 || true
           chmod 755 /usr/local/libexec/fairlead-mihomo
         else
           echo \(shellQuote(FairleadL10n.text("This copy of Fairlead is missing the tunnel engine."))) >&2
           exit 1
         fi
-        printf '%s\n' \(shellQuote(fingerprint)) > \(shellQuote(stampPath))
-        chmod 644 \(shellQuote(stampPath))
         RES="$(cd "$(dirname "$SRC")/../Resources" && pwd)"
         LOC=/usr/local/libexec/FairleadLocalizations.bundle
         rm -rf "$LOC"
@@ -262,10 +290,15 @@ so Fairlead must not ask again on ordinary connect, disconnect, or reboot.
         fi
         for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
           if [[ -S /var/run/fairlead/fairlead.sock ]]; then
+            # Stamp only after the helper is actually up — content hash of the bundled
+            # binary, so a later re-sign of the installed file does not look like an update.
+            printf '%s\n' \(shellQuote(fingerprint)) > \(shellQuote(stampPath))
+            chmod 644 \(shellQuote(stampPath))
             exit 0
           fi
           sleep 0.1
         done
+        rm -f \(shellQuote(stampPath))
         echo \(shellQuote(FairleadL10n.text("The helper did not open a socket. Last log lines:"))) >&2
         tail -n 40 "$LOG" >&2 || true
         exit 1
