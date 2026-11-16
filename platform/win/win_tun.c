@@ -794,6 +794,252 @@ static void close_connections(void) {
 	api("DELETE", "/connections", NULL, reply, (int)sizeof(reply), &status, 3000);
 }
 
+#define APP_EXE_MAX 64
+
+/*
+===============
+remember_exe
+Keep the file name. Process rules match chrome.exe, not the directory.
+===============
+*/
+static void remember_exe(wchar_t (*names)[MAX_PATH], int *count, int cap, const wchar_t *text) {
+	const wchar_t	*slash;
+	const wchar_t	*base;
+	int				i;
+
+	if (!names || !count || !text || !text[0] || *count >= cap) {
+		return;
+	}
+
+	slash = wcsrchr(text, L'\\');
+
+	if (!slash) {
+		slash = wcsrchr(text, L'/');
+	}
+
+	base = slash ? slash + 1 : text;
+
+	if (!base[0]) {
+		return;
+	}
+
+	for (i = 0; i < *count; i++) {
+		if (_wcsicmp(names[i], base) == 0) {
+			return;
+		}
+	}
+
+	wcsncpy(names[*count], base, MAX_PATH - 1);
+	names[*count][MAX_PATH - 1] = L'\0';
+	(*count)++;
+}
+
+/*
+===============
+remember_utf8
+===============
+*/
+static void remember_utf8(wchar_t (*names)[MAX_PATH], int *count, int cap, const char *text) {
+	wchar_t	wide[MAX_PATH];
+
+	if (!text || !text[0]) {
+		return;
+	}
+
+	if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, MAX_PATH) <= 0) {
+		return;
+	}
+
+	remember_exe(names, count, cap, wide);
+}
+
+/*
+===============
+exes_from_yaml
+Names already in config.yaml, so a removed app is reset too.
+===============
+*/
+static void exes_from_yaml(const char *path, wchar_t (*names)[MAX_PATH], int *count, int cap) {
+	FILE	*f;
+	char	*buf;
+	long	n;
+	char	*p;
+
+	if (!path || !path[0]) {
+		return;
+	}
+
+	f = fopen(path, "rb");
+
+	if (!f) {
+		return;
+	}
+
+	if (fseek(f, 0, SEEK_END) != 0) {
+		fclose(f);
+		return;
+	}
+
+	n = ftell(f);
+
+	if (n <= 0 || n > (1 << 20)) {
+		fclose(f);
+		return;
+	}
+
+	if (fseek(f, 0, SEEK_SET) != 0) {
+		fclose(f);
+		return;
+	}
+
+	buf = (char *)malloc((size_t)n + 1);
+
+	if (!buf || fread(buf, 1, (size_t)n, f) != (size_t)n) {
+		free(buf);
+		fclose(f);
+		return;
+	}
+
+	buf[n] = '\0';
+	fclose(f);
+	p = buf;
+
+	while ((p = strstr(p, "PROCESS-")) != NULL) {
+		char	raw[MAX_PATH * 2];
+		char	*comma;
+		char	*end;
+		int		k;
+		int		o;
+
+		if (strncmp(p, "PROCESS-NAME,", 13) != 0 && strncmp(p, "PROCESS-PATH,", 13) != 0) {
+			p += 8;
+			continue;
+		}
+
+		comma = strchr(p, ',');
+
+		if (!comma) {
+			break;
+		}
+
+		comma++;
+		end = strchr(comma, ',');
+
+		if (!end || (size_t)(end - comma) >= sizeof(raw)) {
+			p = comma;
+			continue;
+		}
+
+		o = 0;
+
+		for (k = 0; comma + k < end && o + 1 < (int)sizeof(raw); k++) {
+			if (comma[k] == '\\' && comma[k + 1] == '\\') {
+				raw[o++] = '\\';
+				k++;
+			} else {
+				raw[o++] = comma[k];
+			}
+		}
+
+		raw[o] = '\0';
+		remember_utf8(names, count, cap, raw);
+		p = end;
+	}
+
+	free(buf);
+}
+
+/*
+===============
+reset_app_tcp
+The system TUN stack keeps the app's own sockets. Mihomo only forgets them,
+so a new process rule waits until the app is restarted. RST those IPv4 flows.
+===============
+*/
+static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
+	MIB_TCPTABLE_OWNER_PID	*table;
+	DWORD					size;
+	DWORD					i;
+
+	if (!names || count <= 0) {
+		return;
+	}
+
+	size = 0;
+	table = NULL;
+
+	if (GetExtendedTcpTable(NULL, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != ERROR_INSUFFICIENT_BUFFER || !size) {
+		return;
+	}
+
+	table = (MIB_TCPTABLE_OWNER_PID *)malloc(size);
+
+	if (!table || GetExtendedTcpTable(table, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != NO_ERROR) {
+		free(table);
+		return;
+	}
+
+	for (i = 0; i < table->dwNumEntries; i++) {
+		MIB_TCPROW_OWNER_PID	*row;
+		HANDLE					proc;
+		wchar_t					image[MAX_PATH];
+		DWORD					nlen;
+		wchar_t					*base;
+		int						a;
+		int						hit;
+		MIB_TCPROW				kill;
+
+		row = &table->table[i];
+
+		if (row->dwState != MIB_TCP_STATE_ESTAB && row->dwState != MIB_TCP_STATE_CLOSE_WAIT) {
+			continue;
+		}
+
+		if (row->dwRemoteAddr == htonl(INADDR_LOOPBACK) || row->dwLocalAddr == htonl(INADDR_LOOPBACK)) {
+			continue;
+		}
+
+		proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, row->dwOwningPid);
+
+		if (!proc) {
+			continue;
+		}
+
+		nlen = MAX_PATH;
+
+		if (!QueryFullProcessImageNameW(proc, 0, image, &nlen)) {
+			CloseHandle(proc);
+			continue;
+		}
+
+		CloseHandle(proc);
+		base = wcsrchr(image, L'\\');
+		base = base ? base + 1 : image;
+		hit = 0;
+
+		for (a = 0; a < count; a++) {
+			if (_wcsicmp(base, names[a]) == 0) {
+				hit = 1;
+				break;
+			}
+		}
+
+		if (!hit) {
+			continue;
+		}
+
+		memset(&kill, 0, sizeof(kill));
+		kill.dwState = MIB_TCP_STATE_DELETE_TCB;
+		kill.dwLocalAddr = row->dwLocalAddr;
+		kill.dwLocalPort = row->dwLocalPort;
+		kill.dwRemoteAddr = row->dwRemoteAddr;
+		kill.dwRemotePort = row->dwRemotePort;
+		SetTcpEntry(&kill);
+	}
+
+	free(table);
+}
+
 /*
 ===============
 probe_delay
@@ -1483,32 +1729,50 @@ Rewrite config.yaml with the new rules and reload mihomo. If the reload is refus
 */
 int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int domain_count,
 	const char **apps, int app_count, int exclude_lan, int selected, win_tun_result_t *out) {
-	char	err[256];
+	char		err[256];
+	wchar_t		(*exes)[MAX_PATH];
+	int			exe_count;
+	int			i;
 
 	memset(out, 0, sizeof(*out));
+	exes = NULL;
+	exe_count = 0;
 
 	if (!s_session.active || !s_session.wg) {
 		snprintf(out->error, sizeof(out->error), "The tunnel is not running.");
 		return 0;
 	}
 
+	exes = (wchar_t (*)[MAX_PATH])calloc(APP_EXE_MAX, sizeof(*exes));
+
+	if (exes) {
+		exes_from_yaml(s_session.config_path, exes, &exe_count, APP_EXE_MAX);
+
+		for (i = 0; i < app_count; i++) {
+			remember_utf8(exes, &exe_count, APP_EXE_MAX, apps ? apps[i] : NULL);
+		}
+	}
+
 	if (!write_config(s_session.wg, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, selected,
 		out->error, (int)sizeof(out->error))) {
+		free(exes);
 		return 0;
 	}
 
 	if (!is_running()) {
 		snprintf(out->error, sizeof(out->error), "The tunnel is not running.");
+		free(exes);
 		return 0;
 	}
 
 	/*
-	 * Soft-reload rules, then drop live flows so Chrome/etc pick up the new policy.
-	 * A full process restart is the reliable fallback — soft reload alone can leave
-	 * TUN/DNS half-applied until the user bounces the tunnel by hand.
+	 * Soft-reload rules, then drop mihomo's flows and RST the listed apps' TCP
+	 * so an already running program reconnects under the new process rule.
+	 * A full process restart is the fallback when the reload itself is refused.
 	 */
 	if (reload(0)) {
 		close_connections();
+		reset_app_tcp(exes, exe_count);
 	} else {
 		log_line("fairlead: rule reload failed, restarting mihomo");
 		stop_proc();
@@ -1517,6 +1781,7 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 			snprintf(out->error, sizeof(out->error), "The tunnel could not be restarted.");
 			stop_proc();
 			session_clear();
+			free(exes);
 			return 0;
 		}
 
@@ -1541,5 +1806,6 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 		snprintf(out->stage, sizeof(out->stage), "Checking the tunnel…");
 	}
 
+	free(exes);
 	return 1;
 }
