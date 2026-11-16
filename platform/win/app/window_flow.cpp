@@ -65,6 +65,7 @@ bool problem_kept(std::vector<RouteProblem> const& problems) {
 
 winrt::fire_and_forget MainWindow::BootAsync() {
 	auto life = get_strong();
+	auto queue = DispatcherQueue();
 	co_await EnsureHelperAsync(false);
 	auto* tunnel = session.ResolveDefault();
 	if (!tunnel) {
@@ -76,8 +77,11 @@ winrt::fire_and_forget MainWindow::BootAsync() {
 		}
 		if (session.helper_online) {
 			auto body = session.DownBody();
+			rpc_busy = true;
+			flag_off clear_rpc{ rpc_busy };
 			co_await winrt::resume_background();
 			session.Call(body, 8000);
+			co_await resume_ui{ queue };
 		}
 		Paint();
 		co_return;

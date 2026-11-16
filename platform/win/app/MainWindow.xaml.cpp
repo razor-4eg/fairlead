@@ -575,7 +575,35 @@ void MainWindow::PaintChrome() {
 		return hstring(text);
 	};
 	auto label = [&](auto const& control, std::string_view key) { control.Text(words(key)); };
-	auto caption = [&](auto const& control, std::string_view key) { control.Content(box_value(words(key))); };
+	/* Boxed string Content skips ContentPresenter TextBlock styles — build an explicit label. */
+	auto caption = [&](auto const& control, std::string_view key) {
+		controls::TextBlock text;
+		text.Text(words(key));
+		text.TextLineBounds(mux::TextLineBounds::Tight);
+		text.VerticalAlignment(mux::VerticalAlignment::Center);
+		text.HorizontalAlignment(mux::HorizontalAlignment::Center);
+		control.Content(text);
+	};
+	auto caption_icon = [&](auto const& control, std::string_view key, wchar_t const* glyph) {
+		controls::StackPanel row;
+		row.Orientation(controls::Orientation::Horizontal);
+		row.Spacing(6);
+		row.VerticalAlignment(mux::VerticalAlignment::Center);
+		controls::FontIcon icon;
+		icon.Glyph(glyph);
+		icon.FontSize(11);
+		icon.FontFamily(media::FontFamily(L"Segoe Fluent Icons, Segoe MDL2 Assets"));
+		icon.VerticalAlignment(mux::VerticalAlignment::Center);
+		controls::TextBlock text;
+		text.Text(words(key));
+		text.FontSize(13);
+		text.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
+		text.TextLineBounds(mux::TextLineBounds::Tight);
+		text.VerticalAlignment(mux::VerticalAlignment::Center);
+		row.Children().Append(icon);
+		row.Children().Append(text);
+		control.Content(row);
+	};
 	mux::Controls::ToolTipService::SetToolTip(SettingsButton(), box_value(words("Settings")));
 	Search().PlaceholderText(words("Search"));
 	AppSearch().PlaceholderText(words("Search"));
@@ -607,8 +635,8 @@ void MainWindow::PaintChrome() {
 	label(QuicBody(), "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes.");
 	label(RulesNote(), "IPs, domains, and apps for the Direct / Through mode.");
 	label(RulesEmpty(), "Nothing here yet. Add an IP, a domain, or an app.");
-	caption(AddRouteButton(), "Add route");
-	caption(AddAppButton(), "Add app");
+	caption_icon(AddRouteButton(), "Add route", L"\uE710");
+	caption_icon(AddAppButton(), "Add app", L"\uE710");
 	label(SettingsTitle(), "Settings");
 	label(LoginTitle(), "Open at login");
 	label(LoginBody(), "Fairlead starts when you sign in. A default tunnel connects on its own.");
@@ -787,12 +815,15 @@ void MainWindow::RebuildList() {
 		lines.Spacing(2);
 		controls::TextBlock name;
 		name.Text(H(tunnel->name));
-		name.FontSize(14);
+		name.FontSize(13);
+		name.FontWeight(tunnel == session.selected
+			? winrt::Microsoft::UI::Text::FontWeights::SemiBold()
+			: winrt::Microsoft::UI::Text::FontWeights::Normal());
 		name.Foreground(brush(L"TextBrush"));
 		name.TextTrimming(mux::TextTrimming::CharacterEllipsis);
 		controls::TextBlock endpoint;
 		endpoint.Text(H(tunnel->endpoint));
-		endpoint.FontSize(12);
+		endpoint.FontSize(11);
 		endpoint.Foreground(brush(L"MutedBrush"));
 		endpoint.TextTrimming(mux::TextTrimming::CharacterEllipsis);
 		lines.Children().Append(name);
@@ -989,7 +1020,7 @@ void MainWindow::PaintRules() {
 		controls::TextBlock title_block;
 		title_block.Text(H(title));
 		title_block.FontSize(14);
-		title_block.FontWeight(winrt::Microsoft::UI::Text::FontWeights::Medium());
+		title_block.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
 		title_block.Foreground(brush(on ? L"TextBrush" : L"FaintBrush"));
 		title_block.TextWrapping(mux::TextWrapping::Wrap);
 		text.Children().Append(title_block);
@@ -1411,7 +1442,7 @@ void MainWindow::AddField(std::wstring const& key, std::wstring const& label, st
 	controls::TextBlock caption;
 	caption.Text(label);
 	caption.FontSize(11);
-	caption.FontWeight(winrt::Microsoft::UI::Text::FontWeights::Medium());
+	caption.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
 	caption.Foreground(brush(L"MutedBrush"));
 	row.Children().Append(caption);
 	controls::TextBox box;

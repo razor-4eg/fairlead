@@ -131,14 +131,14 @@
             <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="8">
                 <Button Style="{StaticResource PillButton}" Click="NewTunnel">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE710;" FontSize="12" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="NewLabel" Text="New" FontSize="14" FontWeight="Medium" VerticalAlignment="Center"/>
+                        <FontIcon Glyph="&#xE710;" FontSize="11" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="NewLabel" Text="New" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextLineBounds="Tight"/>
                     </StackPanel>
                 </Button>
                 <Button Style="{StaticResource PillButton}" Click="ImportTunnel">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE8B5;" FontSize="12" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="ImportLabel" Text="Import" FontSize="14" FontWeight="Medium" VerticalAlignment="Center"/>
+                        <FontIcon Glyph="&#xE8B5;" FontSize="11" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="ImportLabel" Text="Import" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextLineBounds="Tight"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -148,7 +148,7 @@
         <Grid Grid.Column="1">
             <StackPanel x:Name="Empty" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16" MaxWidth="460">
                 <Ellipse Width="42" Height="42" Stroke="{StaticResource AccentBrush}" StrokeThickness="2" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="EmptyTitle" Text="No tunnels" FontSize="22" FontWeight="Medium" Foreground="{StaticResource TextBrush}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="EmptyTitle" Text="No tunnels" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" HorizontalAlignment="Center"/>
                 <TextBlock x:Name="EmptyBody" Text="Import a WireGuard or AmneziaWG config, or create a new one. You can drop a .conf file or an Amnezia share on the window." FontSize="13" Foreground="{StaticResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap"/>
                 <Button x:Name="EmptyCreate" Content="Create" Style="{StaticResource ProminentButton}" HorizontalAlignment="Center" Click="NewTunnel" Margin="0,6,0,0"/>
             </StackPanel>
@@ -175,16 +175,16 @@
                             <StackPanel.RenderTransform>
                                 <TranslateTransform x:Name="HeaderMetaY"/>
                             </StackPanel.RenderTransform>
-                            <TextBlock x:Name="TitleText" FontSize="29" FontWeight="Medium" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="EndpointText" FontSize="14" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="AddressText" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="TitleText" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="EndpointText" FontSize="13" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="AddressText" FontSize="12" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border x:Name="AwgBadge" Height="22" Padding="10,0" VerticalAlignment="Center" Visibility="Collapsed" Background="#1F7CDBB6" CornerRadius="11" BorderBrush="#477CDBB6" BorderThickness="1">
                                 <Border.RenderTransform>
                                     <TranslateTransform x:Name="AwgBadgeX"/>
                                 </Border.RenderTransform>
-                                <TextBlock Text="AmneziaWG" FontSize="11" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" TextLineBounds="Tight" Margin="0,-1,0,0"/>
+                                <TextBlock Text="AmneziaWG" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" TextLineBounds="Tight" Margin="0,-1,0,0"/>
                             </Border>
                             <Button x:Name="EditButton" Content="Edit" Style="{StaticResource PillButton}" Click="OpenEditor" VerticalAlignment="Center"/>
                             <Button x:Name="MoreButton" Style="{StaticResource IconButton}" Background="#0DFFFFFF" VerticalAlignment="Center">
@@ -214,9 +214,9 @@
                             </Grid>
                         </Button>
                         <StackPanel VerticalAlignment="Center" Spacing="6">
-                            <TextBlock x:Name="PhaseText" FontSize="23" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
-                            <TextBlock x:Name="DetailText" FontSize="14" Foreground="{StaticResource MutedBrush}"/>
-                            <TextBlock x:Name="IfaceText" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}"/>
+                            <TextBlock x:Name="PhaseText" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBlock x:Name="DetailText" FontSize="13" Foreground="{StaticResource MutedBrush}"/>
+                            <TextBlock x:Name="IfaceText" FontSize="12" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}"/>
                         </StackPanel>
                     </StackPanel>
                     <!-- Stat text sits beside the rounded plate so the corner radius does not clip it. -->
@@ -245,12 +245,12 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="4">
-                                    <TextBlock x:Name="PolicyTitleText" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="PolicyTitleText" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock x:Name="PolicyBodyText" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <!-- Grid host (no rounded clip) + background Border behind the thumb -->
                                 <Grid x:Name="PolicySegment" Grid.Column="1" VerticalAlignment="Top" Width="178" Height="34" Loaded="PolicySegmentLoaded">
-                                    <Border Background="#0AFFFFFF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="17"/>
+                                    <Border Background="#0AFFFFFF" BorderBrush="{StaticResource GlassLineBrush}" BorderThickness="1" CornerRadius="17"/>
                                     <Grid Margin="4,0">
                                         <Border x:Name="PolicyThumb" Width="85" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" HorizontalAlignment="Left" VerticalAlignment="Center">
                                             <Border.RenderTransform>
@@ -275,7 +275,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="3" VerticalAlignment="Center">
-                                        <TextBlock x:Name="LanTitle" Text="Local network directly" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="LanTitle" Text="Local network directly" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                         <TextBlock x:Name="LanBody" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="LanSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LanToggled"/>
@@ -288,7 +288,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="3" VerticalAlignment="Center">
-                                        <TextBlock x:Name="QuicTitle" Text="Block browser QUIC" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="QuicTitle" Text="Block browser QUIC" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                         <TextBlock x:Name="QuicBody" Text="Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="QuicSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="QuicToggled"/>
@@ -325,7 +325,7 @@
                                     </Ellipse.RenderTransform>
                                 </Ellipse>
                             </Grid>
-                            <TextBlock x:Name="SettingsTitle" Text="Settings" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="SettingsTitle" Text="Settings" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Border Background="{StaticResource ElevBrush}" CornerRadius="14" Padding="16" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
                             <StackPanel Spacing="16">
@@ -335,7 +335,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock x:Name="LoginTitle" Text="Open at login" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="LoginTitle" Text="Open at login" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                         <TextBlock x:Name="LoginBody" Text="Fairlead starts when you sign in. A default tunnel connects on its own." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="LoginSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LoginToggled"/>
@@ -346,19 +346,19 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock x:Name="HiddenTitle" Text="Start hidden" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="HiddenTitle" Text="Start hidden" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                         <TextBlock x:Name="HiddenBody" Text="Open in the tray only. Click the Fairlead icon to show the window." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="HiddenSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="HiddenToggled"/>
                                 </Grid>
                                 <StackPanel Spacing="8">
-                                    <TextBlock x:Name="LanguageTitle" Text="Language" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock x:Name="LanguageTitle" Text="Language" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                     <TextBlock x:Name="LanguageBody" Text="Language of the Fairlead interface. Auto follows the system language." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     <ComboBox x:Name="LanguageCombo" HorizontalAlignment="Stretch" SelectionChanged="LanguageChanged"/>
                                 </StackPanel>
                                 <Border Height="1" Background="{StaticResource LineBrush}"/>
                                 <StackPanel Spacing="8">
-                                    <TextBlock x:Name="DefaultTitle" Text="Default tunnel" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock x:Name="DefaultTitle" Text="Default tunnel" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                     <TextBlock x:Name="DefaultBody" Text="None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     <ComboBox x:Name="DefaultCombo" HorizontalAlignment="Stretch" SelectionChanged="DefaultChanged"/>
                                 </StackPanel>
@@ -382,9 +382,9 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid Margin="0,0,0,16">
-                            <TextBlock x:Name="EditorTitle" Text="Config" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                            <TextBlock x:Name="EditorTitle" Text="Config" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                             <Grid x:Name="EditorSegment" HorizontalAlignment="Right" VerticalAlignment="Center" Width="148" Height="34" Loaded="EditorSegmentLoaded">
-                                <Border Background="#0AFFFFFF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="17"/>
+                                <Border Background="#0AFFFFFF" BorderBrush="{StaticResource GlassLineBrush}" BorderThickness="1" CornerRadius="17"/>
                                 <Grid Margin="4,0">
                                     <Border x:Name="EditorThumb" Width="70" Height="26" CornerRadius="13" Background="{StaticResource AccentBrush}" HorizontalAlignment="Left" VerticalAlignment="Center">
                                         <Border.RenderTransform>
@@ -414,7 +414,7 @@
                         </StackPanel>
                     </Grid>
                     <StackPanel x:Name="RoutePane" Visibility="Collapsed" Width="440" Spacing="16">
-                        <TextBlock x:Name="RouteTitle" Text="Add route" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                        <TextBlock x:Name="RouteTitle" Text="Add route" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                         <TextBlock x:Name="RouteNote" Text="One address or domain per line." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                         <TextBox x:Name="RouteName" PlaceholderText="Name" Style="{StaticResource QuietBox}" TextChanged="RouteChanged"/>
                         <Grid>
@@ -431,7 +431,7 @@
                         </Grid>
                     </StackPanel>
                     <StackPanel x:Name="ListPane" Visibility="Collapsed" Width="480" Spacing="12">
-                        <TextBlock x:Name="ListTitle" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="ListTitle" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
                         <TextBox x:Name="ListName" PlaceholderText="Name" Style="{StaticResource QuietBox}" TextChanged="ListChanged"/>
                         <TextBlock x:Name="ListHint" Text="One address or domain per line." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                         <TextBox x:Name="ListEntries" AcceptsReturn="True" Height="180" TextWrapping="Wrap" FontFamily="Consolas" Style="{StaticResource QuietBox}" TextChanged="ListChanged" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
@@ -459,7 +459,7 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <TextBlock x:Name="AppTitle" Text="Add app" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                        <TextBlock x:Name="AppTitle" Text="Add app" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                         <TextBox x:Name="AppSearch" Grid.Row="1" Margin="0,12,0,10" PlaceholderText="Search" Style="{StaticResource QuietBox}" TextChanged="AppSearchChanged"/>
                         <ListView x:Name="AppList" Grid.Row="2" SelectionMode="Single" Background="Transparent" BorderThickness="0">
                             <ListView.ItemContainerStyle>
