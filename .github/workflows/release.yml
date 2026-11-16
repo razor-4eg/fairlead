@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and upload (e.g. v1.1.1)"
+        description: "Release tag to build and upload (e.g. v1.1.2)"
         required: true
-        default: "v1.1.1"
+        default: "v1.1.2"
       ref:
         description: "Git ref to build from (commit/branch/tag). Empty = the release tag."
         required: false
@@ -62,6 +62,12 @@ jobs:
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Stamp macOS version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" platform/mac/Support/Info.plist
 
       - name: Build mihomo
         run: ./scripts/build-mihomo.sh
@@ -162,7 +168,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Upload release assets
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.version.outputs.tag }}
@@ -173,10 +179,18 @@ jobs:
           WIN="artifacts/windows-x64/Fairlead-${VERSION}-windows-x64.zip"
           ls -lh "$MAC" "$WIN"
 
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          NOTES=".github/release-notes/${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "Missing release notes: $NOTES" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Fairlead ${VERSION}" --notes-file "$NOTES"
+          else
             gh release create "$TAG" \
               --title "Fairlead ${VERSION}" \
-              --generate-notes \
+              --notes-file "$NOTES" \
               --verify-tag
           fi
 
