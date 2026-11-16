@@ -27,10 +27,14 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="11" VerticalAlignment="Center">
-                    <!-- App mark: ring + offset dot (same geometry as macOS Mark). -->
+                    <!-- Ring and dot measured from the app icon: dot sits upper-right, inside the ring. -->
                     <Grid Width="18" Height="18" VerticalAlignment="Center">
-                        <Ellipse Stroke="{StaticResource AccentBrush}" StrokeThickness="1.4"/>
-                        <Ellipse Width="4" Height="4" Fill="{StaticResource AccentBrush}" Margin="4,0,0,1" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        <Ellipse Width="15.63" Height="15.63" Stroke="{StaticResource AccentBrush}" StrokeThickness="2.37" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Ellipse Width="2.87" Height="2.87" Fill="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Ellipse.RenderTransform>
+                                <TranslateTransform X="3.15" Y="-1.14"/>
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
                     </Grid>
                     <TextBlock Text="FAIRLEAD" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" CharacterSpacing="90" Foreground="{StaticResource TextBrush}" Margin="0,-1,0,0"/>
                 </StackPanel>
@@ -215,20 +219,18 @@
                             <TextBlock x:Name="IfaceText" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource FaintBrush}"/>
                         </StackPanel>
                     </StackPanel>
+                    <!-- Stat text sits beside the rounded plate so the corner radius does not clip it. -->
                     <Grid x:Name="StatsRow" ColumnSpacing="11">
-                        <Grid.RenderTransform>
-                            <TranslateTransform/>
-                        </Grid.RenderTransform>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Style="{StaticResource CardStyle}" Grid.Column="0"><StackPanel><TextBlock x:Name="DownCaption" Text="DOWN" Style="{StaticResource StatLabel}"/><TextBlock x:Name="DownText" Style="{StaticResource StatValue}"/></StackPanel></Border>
-                        <Border Style="{StaticResource CardStyle}" Grid.Column="1"><StackPanel><TextBlock x:Name="UpCaption" Text="UP" Style="{StaticResource StatLabel}"/><TextBlock x:Name="UpText" Style="{StaticResource StatValue}"/></StackPanel></Border>
-                        <Border Style="{StaticResource CardStyle}" Grid.Column="2"><StackPanel><TextBlock x:Name="RxCaption" Text="RECEIVED" Style="{StaticResource StatLabel}"/><TextBlock x:Name="RxText" Style="{StaticResource StatValue}"/></StackPanel></Border>
-                        <Border Style="{StaticResource CardStyle}" Grid.Column="3"><StackPanel><TextBlock x:Name="TxCaption" Text="SENT" Style="{StaticResource StatLabel}"/><TextBlock x:Name="TxText" Style="{StaticResource StatValue}"/></StackPanel></Border>
+                        <Grid Grid.Column="0"><Border Background="{StaticResource ElevBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="13"/><StackPanel Margin="13,12"><TextBlock x:Name="DownCaption" Text="DOWN" Style="{StaticResource StatLabel}"/><TextBlock x:Name="DownText" Style="{StaticResource StatValue}" TextWrapping="Wrap"/></StackPanel></Grid>
+                        <Grid Grid.Column="1"><Border Background="{StaticResource ElevBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="13"/><StackPanel Margin="13,12"><TextBlock x:Name="UpCaption" Text="UP" Style="{StaticResource StatLabel}"/><TextBlock x:Name="UpText" Style="{StaticResource StatValue}" TextWrapping="Wrap"/></StackPanel></Grid>
+                        <Grid Grid.Column="2"><Border Background="{StaticResource ElevBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="13"/><StackPanel Margin="13,12"><TextBlock x:Name="RxCaption" Text="RECEIVED" Style="{StaticResource StatLabel}"/><TextBlock x:Name="RxText" Style="{StaticResource StatValue}" TextWrapping="Wrap"/></StackPanel></Grid>
+                        <Grid Grid.Column="3"><Border Background="{StaticResource ElevBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="13"/><StackPanel Margin="13,12"><TextBlock x:Name="TxCaption" Text="SENT" Style="{StaticResource StatLabel}"/><TextBlock x:Name="TxText" Style="{StaticResource StatValue}" TextWrapping="Wrap"/></StackPanel></Grid>
                     </Grid>
                 </StackPanel>
                 <ScrollViewer x:Name="DetailScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" BringIntoViewOnFocusChange="False">
@@ -303,8 +305,12 @@
                     <StackPanel Spacing="22" Margin="0,0,16,0">
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <Grid Width="18" Height="18" VerticalAlignment="Center">
-                                <Ellipse Stroke="{StaticResource AccentBrush}" StrokeThickness="1.4"/>
-                                <Ellipse Width="4" Height="4" Fill="{StaticResource AccentBrush}" Margin="4,0,0,1" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                <Ellipse Width="15.63" Height="15.63" Stroke="{StaticResource AccentBrush}" StrokeThickness="2.37" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Ellipse Width="2.87" Height="2.87" Fill="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                                    <Ellipse.RenderTransform>
+                                        <TranslateTransform X="3.15" Y="-1.14"/>
+                                    </Ellipse.RenderTransform>
+                                </Ellipse>
                             </Grid>
                             <TextBlock x:Name="SettingsTitle" Text="Settings" FontSize="19" FontWeight="Medium" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
                         </StackPanel>
@@ -461,13 +467,6 @@
             </Border>
         </Grid>
         <!-- Drag only over the detail column so the sidebar brand/settings stay clickable. -->
-        <Grid x:Name="DragRegion" Grid.Column="1" Height="32" VerticalAlignment="Top" Background="Transparent">
-            <Border x:Name="TitlePhase" Visibility="Collapsed" Height="20" Padding="8,0" CornerRadius="10" Background="#1A7CDBB6" BorderBrush="#337CDBB6" BorderThickness="1" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="18,0,0,0">
-                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Ellipse x:Name="TitlePhaseDot" Width="3.5" Height="3.5" Fill="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="TitlePhaseText" FontSize="11" FontWeight="Medium" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" TextLineBounds="Tight" Margin="0,-1,0,0"/>
-                </StackPanel>
-            </Border>
-        </Grid>
+        <Grid x:Name="DragRegion" Grid.Column="1" Height="32" VerticalAlignment="Top" Background="Transparent"/>
     </Grid>
 </Window>

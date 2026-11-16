@@ -195,8 +195,15 @@ static char *handle_request(const char *body) {
 	int					cap;
 	int					i;
 	int					ok;
+	int					nwritten;
 	const char			*error;
-	char				num[64];
+	/*
+	 * The whole counter fragment has to fit. 64 bytes ends inside "tx"
+	 * once rx grows a digit (~100 KB, the 92–97 KB stall), snprintf cuts
+	 * the object, json_parse rejects the reply, and the UI keeps the last
+	 * totals. Connect and the pipe are not involved.
+	 */
+	char				num[256];
 	char				path[MAX_PATH + 16];
 
 	cidr_count = 0;
@@ -357,12 +364,14 @@ static char *handle_request(const char *body) {
 		append_escaped(&buf, &len, &cap, tun.public_key);
 		append(&buf, &len, &cap, ",\"peers\":[{\"endpoint\":");
 		append_escaped(&buf, &len, &cap, tun.live_endpoint);
-		snprintf(num, sizeof(num),
+		nwritten = snprintf(num, sizeof(num),
 			",\"handshake\":%d,\"delay\":%d,\"ping\":%d,\"rx\":%llu,\"tx\":%llu,\"downRate\":%llu,\"upRate\":%llu",
 			tun.handshake, tun.delay_ms, tun.ping_ms,
 			(unsigned long long)tun.rx, (unsigned long long)tun.tx,
 			(unsigned long long)tun.down_bps, (unsigned long long)tun.up_bps);
-		append(&buf, &len, &cap, num);
+		if (nwritten > 0 && nwritten < (int)sizeof(num)) {
+			append(&buf, &len, &cap, num);
+		}
 
 		if (tun.stage[0]) {
 			append(&buf, &len, &cap, ",\"stage\":");

@@ -83,7 +83,7 @@ winrt::fire_and_forget MainWindow::TickAsync() {
 
 	auto life = get_strong();
 	ticking = true;
-	flag_off clear{ ticking };
+	flag_off clear_tick{ ticking };
 	auto queue = DispatcherQueue();
 	session.RefreshTools();
 	bool busy = false;
@@ -93,23 +93,29 @@ winrt::fire_and_forget MainWindow::TickAsync() {
 		}
 	}
 
-	/* Connecting may run a probe (and occasionally a tunnel restart) inside status. */
-	int wait = session.helper_online ? (busy ? 20000 : 10000) : 200;
+	/*
+	 * Keep status short when Connected so the 1s metrics ticker is not wedged behind a
+	 * 10–20s pipe read. Connect/disconnect still use their own long Call waits.
+	 */
+	int wait = session.helper_online ? (busy ? 8000 : 3500) : 200;
 	auto body = session.StatusBody();
 	co_await winrt::resume_background();
 	auto reply = session.Call(body, wait);
-	co_await resume_ui{ queue };
-	if (session.ReplyOk(reply)) {
-		session.MarkHelper(true);
-	} else if (!busy) {
-		session.MarkHelper(false);
-	}
 
-	if (!reply.empty()) {
-		session.ApplyStatus(reply);
-	}
+	/* Do not co_await the UI queue — if enqueue drops, clear_tick still releases ticking. */
+	queue.TryEnqueue([life, this, reply = std::move(reply), busy]() mutable {
+		if (session.ReplyOk(reply)) {
+			session.MarkHelper(true);
+		} else if (!busy && !reply.empty()) {
+			session.MarkHelper(false);
+		}
 
-	Paint();
+		if (!reply.empty()) {
+			session.ApplyStatus(reply);
+		}
+
+		Paint();
+	});
 }
 
 winrt::fire_and_forget MainWindow::ToggleAsync(Tunnel* tunnel) {

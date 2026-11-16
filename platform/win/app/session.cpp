@@ -179,32 +179,55 @@ std::string appdata_dir() {
 	return narrow(path);
 }
 
-bool read_full(HANDLE pipe, void* buf, int n) {
+bool pipe_xfer(HANDLE pipe, void* buf, int n, bool reading, DWORD timeout_ms) {
 	int got = 0;
 	while (got < n) {
-		DWORD chunk = 0;
-		if (!ReadFile(pipe, (char*)buf + got, (DWORD)(n - got), &chunk, nullptr) || chunk == 0) {
+		OVERLAPPED ov{};
+		ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		if (!ov.hEvent) {
 			return false;
 		}
 
+		DWORD chunk = 0;
+		BOOL ok = reading
+			? ReadFile(pipe, (char*)buf + got, (DWORD)(n - got), &chunk, &ov)
+			: WriteFile(pipe, (char*)buf + got, (DWORD)(n - got), &chunk, &ov);
+		if (!ok) {
+			if (GetLastError() != ERROR_IO_PENDING) {
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+
+			DWORD wait = WaitForSingleObject(ov.hEvent, timeout_ms);
+			if (wait != WAIT_OBJECT_0) {
+				CancelIoEx(pipe, &ov);
+				WaitForSingleObject(ov.hEvent, 1000);
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+
+			if (!GetOverlappedResult(pipe, &ov, &chunk, FALSE) || chunk == 0) {
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+		} else if (chunk == 0) {
+			CloseHandle(ov.hEvent);
+			return false;
+		}
+
+		CloseHandle(ov.hEvent);
 		got += (int)chunk;
 	}
 
 	return true;
 }
 
-bool write_full(HANDLE pipe, void const* buf, int n) {
-	int sent = 0;
-	while (sent < n) {
-		DWORD chunk = 0;
-		if (!WriteFile(pipe, (char const*)buf + sent, (DWORD)(n - sent), &chunk, nullptr) || chunk == 0) {
-			return false;
-		}
+bool read_full(HANDLE pipe, void* buf, int n, DWORD timeout_ms) {
+	return pipe_xfer(pipe, buf, n, true, timeout_ms);
+}
 
-		sent += (int)chunk;
-	}
-
-	return true;
+bool write_full(HANDLE pipe, void* buf, int n, DWORD timeout_ms) {
+	return pipe_xfer(pipe, buf, n, false, timeout_ms);
 }
 
 void read_lists(json_t* item, Tunnel* tunnel) {
@@ -404,8 +427,10 @@ std::string Session::Call(std::string const& body, int connect_ms) {
 		return {};
 	}
 
-	WaitNamedPipeW(L"\\\\.\\pipe\\fairlead", (DWORD)std::max(50, connect_ms));
-	HANDLE pipe_handle = CreateFileW(L"\\\\.\\pipe\\fairlead", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+	DWORD timeout = (DWORD)std::max(50, connect_ms);
+	WaitNamedPipeW(L"\\\\.\\pipe\\fairlead", timeout);
+	/* OVERLAPPED so status ticks can time out — sync ReadFile wedged metrics forever. */
+	HANDLE pipe_handle = CreateFileW(L"\\\\.\\pipe\\fairlead", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
 	if (pipe_handle == INVALID_HANDLE_VALUE) {
 		return {};
 	}
@@ -413,11 +438,13 @@ std::string Session::Call(std::string const& body, int connect_ms) {
 	std::string reply;
 	uint32_t n = (uint32_t)body.size();
 	unsigned char header[4] = { (unsigned char)(n >> 24), (unsigned char)(n >> 16), (unsigned char)(n >> 8), (unsigned char)n };
-	if (write_full(pipe_handle, header, 4) && write_full(pipe_handle, body.data(), (int)body.size()) && read_full(pipe_handle, header, 4)) {
+	if (write_full(pipe_handle, header, 4, timeout) &&
+		(n == 0 || write_full(pipe_handle, const_cast<char*>(body.data()), (int)body.size(), timeout)) &&
+		read_full(pipe_handle, header, 4, timeout)) {
 		int size = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
 		if (size >= 0 && size <= 2000000) {
 			reply.resize(size);
-			if (size == 0 || !read_full(pipe_handle, reply.data(), size)) {
+			if (size > 0 && !read_full(pipe_handle, reply.data(), size, timeout)) {
 				reply.clear();
 			}
 		}
@@ -543,6 +570,8 @@ void Session::ApplyStatus(std::string const& reply) {
 			json_t* peer = peers->child;
 			uint64_t rx = json_u64(peer, "rx");
 			uint64_t tx = json_u64(peer, "tx");
+			json_t* down_node = json_get(peer, "downRate");
+			json_t* up_node = json_get(peer, "upRate");
 			int64_t now = (int64_t)GetTickCount64();
 			live->handshake = json_int(peer, "handshake");
 			live->delay_ms = json_int(peer, "delay");
@@ -552,35 +581,35 @@ void Session::ApplyStatus(std::string const& reply) {
 				live->endpoint = endpoint;
 			}
 
-			/* Connected when the HTTP probe through the tunnel succeeded. Ping is display only. */
-			if (live->handshake > 0) {
-				uint64_t down_rate = json_u64(peer, "downRate");
-				uint64_t up_rate = json_u64(peer, "upRate");
-				bool have_rate = json_get(peer, "downRate") || json_get(peer, "upRate");
-				/* Helper rates when present and non-zero; otherwise derive from totals. */
-				if (have_rate && (down_rate > 0 || up_rate > 0)) {
-					live->down = rate_of((double)down_rate);
-					live->up = rate_of((double)up_rate);
-				} else if (live->sample_tick != 0 && now > live->sample_tick &&
-					rx >= live->sample_rx && tx >= live->sample_tx) {
-					double dt = (now - live->sample_tick) / 1000.0;
-					if (dt >= 0.2) {
-						double down = (double)(rx - live->sample_rx) / dt;
-						double up = (double)(tx - live->sample_tx) / dt;
-						double cap = 10.0 * 1024.0 * 1024.0 * 1024.0;
-						live->down = rate_of(down > cap ? 0 : down);
-						live->up = rate_of(up > cap ? 0 : up);
-					}
-				} else if (have_rate) {
-					live->down = rate_of(0);
-					live->up = rate_of(0);
+			/*
+			 * Same as Mac absorb(): prefer helper rates when present; else rx/tx deltas.
+			 * Never wipe totals/rates on a handshake blip — that made the UI look frozen at 0.
+			 */
+			if (down_node && up_node) {
+				live->down = rate_of((double)json_u64(peer, "downRate"));
+				live->up = rate_of((double)json_u64(peer, "upRate"));
+			} else if (live->sample_tick != 0 && now > live->sample_tick &&
+				rx >= live->sample_rx && tx >= live->sample_tx) {
+				double dt = (now - live->sample_tick) / 1000.0;
+				if (dt >= 0.2) {
+					double down = (double)(rx - live->sample_rx) / dt;
+					double up = (double)(tx - live->sample_tx) / dt;
+					double cap = 10.0 * 1024.0 * 1024.0 * 1024.0;
+					live->down = rate_of(down > cap ? 0 : down);
+					live->up = rate_of(up > cap ? 0 : up);
 				}
+			} else if (rx < live->sample_rx || tx < live->sample_tx) {
+				live->down = rate_of(0);
+				live->up = rate_of(0);
+			}
 
-				live->sample_rx = rx;
-				live->sample_tx = tx;
-				live->sample_tick = now;
-				live->rx = bytes_of((double)rx);
-				live->tx = bytes_of((double)tx);
+			live->sample_rx = rx;
+			live->sample_tx = tx;
+			live->sample_tick = now;
+			live->rx = bytes_of((double)rx);
+			live->tx = bytes_of((double)tx);
+
+			if (live->handshake > 0) {
 				live->connected = true;
 				live->phase = "Connected";
 				live->detail = live->ping_ms > 0
@@ -592,13 +621,6 @@ void Session::ApplyStatus(std::string const& reply) {
 				std::string stage = json_str(peer, "stage");
 				live->detail = stage.empty() ? l10n::text("Checking the tunnel…") : l10n::display(stage);
 				live->delay_ms = 0;
-				live->down = rate_of(0);
-				live->up = rate_of(0);
-				live->rx = bytes_of(0);
-				live->tx = bytes_of(0);
-				live->sample_rx = 0;
-				live->sample_tx = 0;
-				live->sample_tick = 0;
 			}
 		}
 	}

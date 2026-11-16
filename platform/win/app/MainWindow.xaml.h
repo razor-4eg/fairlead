@@ -99,8 +99,9 @@ private:
 	std::vector<std::pair<std::wstring, Microsoft::UI::Xaml::Media::ImageSource>> icons;
 	std::vector<Microsoft::UI::Xaml::Media::Animation::Storyboard> boards;
 	Microsoft::UI::Xaml::Media::Animation::Storyboard sheet_board{ nullptr };
-	Microsoft::UI::Xaml::Media::Animation::Storyboard spin_board{ nullptr };
-	Microsoft::UI::Dispatching::DispatcherQueueTimer timer{ nullptr };
+	bool spinning = false;
+	/* XAML timer, not DispatcherQueueTimer — that one runs below idle and stalls while a dependent animation is on the UI thread. */
+	Microsoft::UI::Xaml::DispatcherTimer timer{ nullptr };
 	NOTIFYICONDATAW tray{};
 	bool tray_added = false;
 	int normal_w = 1479;
@@ -139,7 +140,6 @@ private:
 	void PaintPower();
 	void PaintHelper();
 	void PaintAwg(bool animate);
-	void PaintTitlebar();
 	void PaintEditorSegment();
 	void NoteSelection();
 	void RebuildList();

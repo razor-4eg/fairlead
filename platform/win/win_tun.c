@@ -222,7 +222,6 @@ static int api(const char *method, const char *path, const char *body, char *rep
 		WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size, WINHTTP_NO_HEADER_INDEX);
 		ok = 1;
 
-		/* Large bodies such as /connections are cut at reply_cap on purpose. */
 		while (reply && len < reply_cap - 1) {
 			got = 0;
 
@@ -232,11 +231,6 @@ static int api(const char *method, const char *path, const char *body, char *rep
 
 			len += (int)got;
 			reply[len] = '\0';
-
-			/* Totals sit at the front of /connections — stop before the huge array. */
-			if (strstr(reply, "\"downloadTotal\":") && strstr(reply, "\"uploadTotal\":")) {
-				break;
-			}
 		}
 
 		if (reply) {
@@ -694,43 +688,95 @@ static int write_config(const char *wg_text, const char **cidrs, int cidr_count,
 
 /*
 ===============
-total_of
-Read an unsigned number after a JSON key.
+nic_score
+Mihomo's adapter. Friendly name is Meta; the description mentions Wintun.
 ===============
 */
-static unsigned long long total_of(const char *text, const char *key) {
-	const char	*p;
+static int nic_score(MIB_IFROW *row) {
+	wchar_t	name[MAX_INTERFACE_NAME_LEN + 1];
+	char	descr[MAXLEN_IFDESCR + 1];
+	DWORD	n;
 
-	p = strstr(text, key);
-
-	if (!p) {
+	if (row->dwOperStatus != MIB_IF_OPER_STATUS_OPERATIONAL && row->dwOperStatus != MIB_IF_OPER_STATUS_CONNECTED) {
 		return 0;
 	}
 
-	return strtoull(p + strlen(key), NULL, 10);
-}
+	wcsncpy(name, row->wszName, MAX_INTERFACE_NAME_LEN);
+	name[MAX_INTERFACE_NAME_LEN] = 0;
+	n = row->dwDescrLen;
 
-/*
-===============
-read_totals
-Cumulative counters from /connections. Only the JSON header is kept — the array is ignored.
-===============
-*/
-static int read_totals(unsigned long long *rx, unsigned long long *tx) {
-	char	reply[2048];
-	int		status;
+	if (n > MAXLEN_IFDESCR) {
+		n = MAXLEN_IFDESCR;
+	}
 
-	*rx = 0;
-	*tx = 0;
-	status = 0;
+	memcpy(descr, row->bDescr, n);
+	descr[n] = '\0';
 
-	if (api("GET", "/connections", NULL, reply, (int)sizeof(reply), &status, 1500) && status == 200) {
-		*rx = total_of(reply, "\"downloadTotal\":");
-		*tx = total_of(reply, "\"uploadTotal\":");
+	if (_wcsicmp(name, L"Meta") == 0 || _wcsicmp(name, L"Mihomo") == 0) {
+		return 2;
+	}
+
+	if (wcsstr(name, L"Meta") || wcsstr(name, L"Mihomo") || wcsstr(name, L"Wintun")) {
+		return 2;
+	}
+
+	if (strstr(descr, "Wintun") || strstr(descr, "Meta") || strstr(descr, "Mihomo")) {
 		return 1;
 	}
 
 	return 0;
+}
+
+/*
+===============
+nic_totals
+Byte counters from the TUN adapter. Local MIB read — no controller request.
+===============
+*/
+static int nic_totals(unsigned long long *rx, unsigned long long *tx) {
+	MIB_IFTABLE	*table;
+	DWORD		size;
+	DWORD		i;
+	int			best;
+	int			rank;
+
+	*rx = 0;
+	*tx = 0;
+	size = 0;
+	table = NULL;
+	best = -1;
+	rank = 0;
+
+	if (GetIfTable(NULL, &size, FALSE) != ERROR_INSUFFICIENT_BUFFER || size == 0) {
+		return 0;
+	}
+
+	table = (MIB_IFTABLE *)malloc(size);
+
+	if (!table || GetIfTable(table, &size, FALSE) != NO_ERROR) {
+		free(table);
+		return 0;
+	}
+
+	for (i = 0; i < table->dwNumEntries; i++) {
+		int	score;
+
+		score = nic_score(&table->table[i]);
+
+		if (score > rank) {
+			rank = score;
+			best = (int)i;
+		}
+	}
+
+	if (best >= 0) {
+		/* In = host download, Out = host upload, from the stack's side of the NIC. */
+		*rx = table->table[best].dwInOctets;
+		*tx = table->table[best].dwOutOctets;
+	}
+
+	free(table);
+	return best >= 0;
 }
 
 /*
@@ -957,7 +1003,7 @@ static void fill_identity(win_tun_result_t *out) {
 /*
 ===============
 refresh_traffic
-Rates from successive /connections totals. Fast header-only read — no streaming API.
+Rates from the adapter counters. Local MIB read only — never an HTTP call.
 ===============
 */
 static void refresh_traffic(win_tun_result_t *out) {
@@ -967,15 +1013,16 @@ static void refresh_traffic(win_tun_result_t *out) {
 
 	now = GetTickCount64();
 
-	if (!read_totals(&rx, &tx)) {
+	if (!nic_totals(&rx, &tx)) {
 		out->rx = s_session.traffic_rx;
 		out->tx = s_session.traffic_tx;
-		/* Don't freeze a stale rate when the controller is busy. */
+
 		if (s_session.traffic_tick == 0 || now < s_session.traffic_tick ||
 			(now - s_session.traffic_tick) > 2000) {
 			s_session.down_bps = 0;
 			s_session.up_bps = 0;
 		}
+
 		out->down_bps = s_session.down_bps;
 		out->up_bps = s_session.up_bps;
 		return;

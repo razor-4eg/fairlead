@@ -332,10 +332,10 @@ MainWindow::MainWindow() {
 	TunnelList().RightTapped([this](auto&& sender, auto&& args) {
 		OnTunnelMenu(sender, args);
 	});
-	timer = DispatcherQueue().CreateTimer();
+	timer = mux::DispatcherTimer();
 	timer.Interval(std::chrono::seconds(1));
 	timer.Tick([this](auto&&, auto&&) {
-		if (!ticking) {
+		if (!ticking && !rpc_busy) {
 			TickAsync();
 		}
 	});
@@ -609,10 +609,18 @@ void MainWindow::Paint() {
 	PhaseText().Text(H(tunnel ? l10n::text(tunnel->phase) : ""));
 	DetailText().Text(H(tunnel ? tunnel->detail : ""));
 	IfaceText().Text(H(tunnel ? tunnel->iface : ""));
-	DownText().Text(H(tunnel ? tunnel->down : "0 " + l10n::text("B") + l10n::text("/s")));
-	UpText().Text(H(tunnel ? tunnel->up : "0 " + l10n::text("B") + l10n::text("/s")));
-	RxText().Text(H(tunnel ? tunnel->rx : "0 " + l10n::text("B")));
-	TxText().Text(H(tunnel ? tunnel->tx : "0 " + l10n::text("B")));
+	auto set_stat = [](controls::TextBlock const& block, winrt::hstring const& value) {
+		if (block.Text() == value) {
+			return;
+		}
+
+		block.Text(value);
+		block.InvalidateMeasure();
+	};
+	set_stat(DownText(), H(tunnel ? tunnel->down : "0 " + l10n::text("B") + l10n::text("/s")));
+	set_stat(UpText(), H(tunnel ? tunnel->up : "0 " + l10n::text("B") + l10n::text("/s")));
+	set_stat(RxText(), H(tunnel ? tunnel->rx : "0 " + l10n::text("B")));
+	set_stat(TxText(), H(tunnel ? tunnel->tx : "0 " + l10n::text("B")));
 	PolicyTitleText().Text(H(session.PolicyTitle()));
 	PolicyBodyText().Text(H(session.PolicyBody()));
 	LanBody().Text(H(tunnel ? tunnel->lan : l10n::text("Private LAN ranges stay off the tunnel when this is on.")));
@@ -638,7 +646,6 @@ void MainWindow::NoteSelection() {
 	quiet = false;
 	if (!session.selected) {
 		PaintAwg(false);
-		PaintTitlebar();
 		PaintRules();
 		return;
 	}
@@ -646,7 +653,6 @@ void MainWindow::NoteSelection() {
 	motion::snap(HeaderMeta());
 	Hold(motion::swap_in(HeaderMeta()));
 	PaintAwg(true);
-	PaintTitlebar();
 	PaintRules();
 }
 
@@ -698,7 +704,10 @@ void MainWindow::RebuildList() {
 			}
 		}
 
-		TunnelList().SelectedItem(chosen);
+		if (TunnelList().SelectedItem() != chosen) {
+			TunnelList().SelectedItem(chosen);
+		}
+
 		quiet = was;
 		return;
 	}
@@ -764,12 +773,17 @@ void MainWindow::PaintPolicy() {
 	DirectButton().Foreground(direct ? ink : muted);
 	ThroughButton().Foreground(direct ? muted : ink);
 	double cell = PolicySegment().ActualWidth() > 0 ? (PolicySegment().ActualWidth() - 8) / 2.0 : 85;
-	if (std::abs(PolicyThumb().Width() - cell) > 0.5) {
+	bool width_changed = std::abs(PolicyThumb().Width() - cell) > 0.5;
+	if (width_changed) {
 		PolicyThumb().Width(cell);
 	}
 
-	Hold(motion::slide_x(PolicyThumbX(), direct ? 0 : cell, 280, !quiet));
-	direct_drawn = direct;
+	/* Every status tick used to start a new dependent storyboard. Those run on the UI thread and were starving the counters. */
+	bool moved = direct != direct_drawn;
+	if (moved || width_changed) {
+		Hold(motion::slide_x(PolicyThumbX(), direct ? 0 : cell, 280, !quiet && moved));
+		direct_drawn = direct;
+	}
 }
 
 void MainWindow::PaintEditorSegment() {
@@ -795,39 +809,24 @@ void MainWindow::PaintPower() {
 	Power().Background(media::SolidColorBrush(on ? rgba(32, 124, 219, 182) : rgba(12, 255, 255, 255)));
 	PowerRing().Stroke(brush(on ? L"AccentBrush" : L"LineBrush"));
 	PowerIcon().Foreground(brush(on ? L"AccentBrush" : L"MutedBrush"));
+	/* Disconnect keeps the accent ring, so the dash has to be the light text color or it disappears into the stroke. */
+	PowerSpin().Stroke(brush(on ? L"TextBrush" : L"AccentBrush"));
 	if (busy) {
 		PowerSpin().Visibility(mux::Visibility::Visible);
-		if (!spin_board) {
-			spin_board = motion::spin(PowerSpinRotate());
-			spin_board.Begin();
+		if (!spinning) {
+			motion::spin_on(PowerSpin());
+			spinning = true;
 		}
 	} else {
-		PowerSpin().Visibility(mux::Visibility::Collapsed);
-		if (spin_board) {
-			spin_board.Stop();
-			spin_board = nullptr;
+		if (spinning) {
+			motion::spin_off(PowerSpin());
+			spinning = false;
 			PowerSpinRotate().Angle(0);
 		}
+
+		PowerSpin().Visibility(mux::Visibility::Collapsed);
 	}
 
-	PaintTitlebar();
-}
-
-void MainWindow::PaintTitlebar() {
-	auto* tunnel = session.selected;
-	std::string phase = tunnel ? tunnel->phase : "";
-	bool live = tunnel && !phase.empty() && phase != "Off";
-	TitlePhase().Visibility(shown(live));
-	TitlePhaseDot().Fill(brush(L"AccentBrush"));
-	bool busy = phase == "Connecting" || phase == "Disconnecting";
-	TitlePhaseDot().Opacity(live ? (busy ? 0.7 : 1) : 0.55);
-	if (!live) {
-		return;
-	}
-
-	std::string shown_phase = l10n::text(phase);
-	TitlePhaseText().Text(H(busy ? shown_phase + "…" : shown_phase));
-	TitlePhaseText().Foreground(brush(L"AccentBrush"));
 }
 
 void MainWindow::PaintHelper() {

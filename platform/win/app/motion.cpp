@@ -158,18 +158,31 @@ anim::Storyboard knob(mux::Shapes::Ellipse const& knob_el, double to, bool anima
 	return board;
 }
 
-anim::Storyboard spin(media::RotateTransform const& rotate) {
-	anim::DoubleAnimation value;
-	value.From(winrt::box_value(0.0).as<winrt::Windows::Foundation::IReference<double>>());
-	value.To(360);
-	value.Duration(duration_of(900));
-	value.RepeatBehavior(anim::RepeatBehaviorHelper::Forever());
-	value.EnableDependentAnimation(true);
-	anim::Storyboard::SetTarget(value, rotate);
-	anim::Storyboard::SetTargetProperty(value, L"Angle");
-	anim::Storyboard board;
-	board.Children().Append(value);
-	return board;
+void spin_on(mux::UIElement const& el) {
+	/* Compositor thread. A forever dependent storyboard runs on the UI thread and starves the stats timer. */
+	try {
+		auto visual = mux::Hosting::ElementCompositionPreview::GetElementVisual(el);
+		float w = el.ActualSize().x > 1.f ? el.ActualSize().x : 96.f;
+		float h = el.ActualSize().y > 1.f ? el.ActualSize().y : 96.f;
+		visual.CenterPoint({ w / 2.f, h / 2.f, 0.f });
+		visual.RotationAxis({ 0.f, 0.f, 1.f });
+		auto anim = visual.Compositor().CreateScalarKeyFrameAnimation();
+		anim.InsertKeyFrame(0.f, 0.f);
+		anim.InsertKeyFrame(1.f, 360.f);
+		anim.Duration(std::chrono::milliseconds(900));
+		anim.IterationBehavior(winrt::Microsoft::UI::Composition::AnimationIterationBehavior::Forever);
+		visual.StartAnimation(L"RotationAngleInDegrees", anim);
+	} catch (...) {
+	}
+}
+
+void spin_off(mux::UIElement const& el) {
+	try {
+		auto visual = mux::Hosting::ElementCompositionPreview::GetElementVisual(el);
+		visual.StopAnimation(L"RotationAngleInDegrees");
+		visual.RotationAngleInDegrees(0);
+	} catch (...) {
+	}
 }
 
 anim::Storyboard sheet(mux::UIElement const& overlay, media::ScaleTransform const& scale, double from_opacity, double from_scale, double opacity, double to_scale, int ms) {
