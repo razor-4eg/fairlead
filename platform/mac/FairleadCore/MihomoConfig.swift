@@ -37,6 +37,7 @@ The shared C builder does the work. Returns the YAML, or nil with a message.
         wg: String,
         selected: Bool,
         excludeLAN: Bool,
+        blockQUIC: Bool = true,
         cidrs: [String],
         domains: [String],
         apps: [String],
@@ -49,7 +50,7 @@ The shared C builder does the work. Returns the YAML, or nil with a message.
                 CBridge.withCStrings(domains) { d, dn in
                     CBridge.withCStrings(apps) { a, an in
                         var rules = mihomo_rules_t(cidrs: c, cidr_count: cn, domains: d, domain_count: dn, apps: a, app_count: an)
-                        return CBridge.take(mihomo_config(wg, selected ? 1 : 0, excludeLAN ? 1 : 0, &rules, controller, secret, &err, 256))
+                        return CBridge.take(mihomo_config(wg, selected ? 1 : 0, excludeLAN ? 1 : 0, blockQUIC ? 1 : 0, &rules, controller, secret, &err, 256))
                     }
                 }
             }

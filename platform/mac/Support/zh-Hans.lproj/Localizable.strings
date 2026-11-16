@@ -189,7 +189,7 @@
 "%d domains.many" = "%d 个域名";
 "%d domains.other" = "%d 个域名";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "域名匹配该名称及其子域名。应用在连接期间按其进程路径匹配。";
+"IPs, domains, and apps for the Direct / Through mode." = "用于「直连 / 隧道」模式的 IP、域名和应用。";
 "The tunnel exited. %@" = "隧道已退出。%@";
 "The tunnel did not answer on %@." = "隧道未在 %@ 上响应。";
 "The tunnel could not start the network adapter. %@" = "隧道无法启动网络适配器。%@";
@@ -222,3 +222,13 @@
 "The tunnel did not start." = "隧道未能启动。";
 "The tunnel started without a network adapter." = "隧道已启动但没有网络适配器。";
 "The tunnel could not be reached." = "无法连通隧道。";
+"None" = "无";
+"Could not sign the helper." = "无法为服务签名。";
+"The controller address is missing." = "缺少控制器地址。";
+"The config has no peer." = "配置中没有对端。";
+"Interface Address is required." = "需要接口地址（Address）。";
+"Out of memory." = "内存不足。";
+"PrivateKey and PublicKey are required." = "需要 PrivateKey 和 PublicKey。";
+"Block browser QUIC" = "阻止浏览器 QUIC";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "对隧道流量关闭 HTTP/3，避免浏览器在规则切换后卡住。";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "「无」不自动连接。选择「上次活动」或指定隧道时，打开 Fairlead 会选中并连接它。";

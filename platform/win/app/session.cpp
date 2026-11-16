@@ -311,6 +311,7 @@ std::unique_ptr<Tunnel> new_tunnel(std::string const& name, std::string const& c
 	tunnel->slug = "fld" + hex_id(4);
 	tunnel->config = config;
 	tunnel->exclude_lan = true;
+	tunnel->block_quic = true;
 	return tunnel;
 }
 
@@ -413,7 +414,15 @@ void Session::RefreshTools() {
 	awg_ok = std::filesystem::exists(awg);
 	awg_text = awg_ok ? narrow(awg.wstring()) : "engine  " + l10n::text("not found");
 	if (!helper_online) {
-		notice = l10n::text("The system helper is not running. A tunnel cannot start without it.");
+		auto elapsed = std::chrono::steady_clock::now() - started_at;
+		if (!helper_notice_ready && elapsed >= std::chrono::milliseconds(helper_grace_ms)) {
+			helper_notice_ready = true;
+		}
+		if (helper_notice_ready) {
+			notice = l10n::text("The system helper is not running. A tunnel cannot start without it.");
+		} else {
+			notice.clear();
+		}
 	} else if (selected && !awg_ok) {
 		notice = l10n::text("This copy of Fairlead is missing the tunnel engine.");
 	} else {
@@ -464,6 +473,7 @@ std::string Session::Rpc(char const* op, Tunnel* tunnel, bool with_config) {
 	if (strcmp(op, "up") == 0 || strcmp(op, "bypass") == 0) {
 		body += tunnel->selected_policy ? ",\"policy\":\"selected\"" : ",\"policy\":\"exceptions\"";
 		body += tunnel->exclude_lan ? ",\"excludeLAN\":true" : ",\"excludeLAN\":false";
+		body += tunnel->block_quic ? ",\"blockQUIC\":true" : ",\"blockQUIC\":false";
 		/* mihomo resolves domains and matches processes itself. Only literal addresses go as cidrs. */
 		auto emit = [&](char const* key, auto&& fill) {
 			bool first = true;
@@ -521,6 +531,10 @@ std::string Session::Rpc(char const* op, Tunnel* tunnel, bool with_config) {
 
 std::string Session::StatusBody() const {
 	return "{\"token\":" + json_quote(token) + ",\"op\":\"status\"}";
+}
+
+std::string Session::DownBody() const {
+	return "{\"token\":" + json_quote(token) + ",\"op\":\"down\"}";
 }
 
 std::string Session::QuitBody() const {
@@ -805,6 +819,15 @@ void Session::SetLan(bool on) {
 	}
 
 	selected->exclude_lan = on;
+	Save();
+}
+
+void Session::SetBlockQuic(bool on) {
+	if (!selected) {
+		return;
+	}
+
+	selected->block_quic = on;
 	Save();
 }
 
@@ -1098,6 +1121,11 @@ bool Session::LaunchHelper(void* hwnd, std::string& error) {
 }
 
 void Session::MarkHelper(bool online) {
+	if (online) {
+		helper_notice_ready = false;
+	} else if (helper_online) {
+		helper_notice_ready = true;
+	}
 	helper_online = online;
 	RefreshTools();
 }
@@ -1161,6 +1189,7 @@ void Session::Load() {
 			tunnel->slug = json_str(item, "slug");
 			tunnel->config = json_str(item, "configText");
 			tunnel->exclude_lan = json_bool(item, "excludeLAN", true);
+			tunnel->block_quic = json_bool(item, "blockQUIC", true);
 			tunnel->selected_policy = json_str(item, "routePolicy") == "selected";
 			if (tunnel->id.empty()) {
 				tunnel->id = hex_id(8);
@@ -1210,6 +1239,7 @@ void Session::Save() {
 		out += ",\"slug\":" + json_quote(tunnel->slug);
 		out += ",\"configText\":" + json_quote(tunnel->config);
 		out += tunnel->exclude_lan ? ",\"excludeLAN\":true" : ",\"excludeLAN\":false";
+		out += tunnel->block_quic ? ",\"blockQUIC\":true" : ",\"blockQUIC\":false";
 		out += tunnel->selected_policy ? ",\"routePolicy\":\"selected\"" : ",\"routePolicy\":\"exceptions\"";
 		out += ",\"routeLists\":[";
 		for (size_t k = 0; k < tunnel->lists.size(); k++) {

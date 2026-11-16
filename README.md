@@ -4,99 +4,159 @@
 
 <h1 align="center">Fairlead</h1>
 
-Fairlead is a WireGuard and AmneziaWG client for macOS and Windows. You import a config, connect, and choose which traffic uses the tunnel.
+<p align="center">
+  <strong>WireGuard and AmneziaWG for macOS and Windows</strong><br>
+  Import a config, connect, and choose what goes through the tunnel.
+</p>
 
-The data plane is [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta): TUN, DNS, process rules, WireGuard, and AmneziaWG. Fairlead is the UI, the config editor, and a small privileged helper that starts and stops mihomo.
+<p align="center">
+  <a href="https://github.com/razor-4eg/fairlead/releases"><img src="https://img.shields.io/github/v/release/razor-4eg/fairlead?label=release&color=7CDBB6" alt="Release"></a>
+  <a href="https://github.com/razor-4eg/fairlead/releases"><img src="https://img.shields.io/github/downloads/razor-4eg/fairlead/total?color=7CDBB6" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-black" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Windows-10%2F11-black" alt="Windows 10/11">
+</p>
+
+Fairlead is a desktop client for [WireGuard](https://www.wireguard.com/) and AmneziaWG. You keep your configs on this computer, connect when you need to, and decide which addresses, domains, and apps use the tunnel — or stay on the regular network.
 
 WireGuard is a trademark of Jason A. Donenfeld. Fairlead is an independent client.
 
+![Tunnel overview](docs/screenshots/overview.png)
+
+---
+
+## Features
+
+- **WireGuard and AmneziaWG** in one app — Amnezia configs show an AmneziaWG badge
+- **Import** `.conf` files, JSON shares, or Amnezia `vpn://` links; drag and drop onto the window
+- **Direct / Through** routing — either exclude a list from the tunnel, or send only that list through it
+- **Live filter updates** — Direct / Through rules apply while connected; no reconnect needed
+- **Routes by IP, domain, or app** — match running programs by path, not by addresses learned earlier
+- **Local network** can stay off the tunnel
+- **Optional QUIC block** for tunnel traffic, so browsers recover cleanly when rules change
+- **Live metrics** — rates, totals, and reachability while connected
+- **Menu bar (macOS) / tray (Windows)** — close the window without disconnecting
+- **Open at login**, start hidden, and a **default tunnel** that can connect on launch
+- **Languages:** Auto (system), English, Russian, German, Spanish, French, Portuguese, Simplified Chinese
+
+---
+
 ## Install
 
-Download the archive for your system from the [releases](https://github.com/razor-4eg/fairlead/releases) page and unzip it.
+Download the build for your system from [Releases](https://github.com/razor-4eg/fairlead/releases) and unzip it.
 
-On a Mac, move `Fairlead.app` to `/Applications` and open it from there.
+### macOS
 
-On Windows, run `Fairlead.exe`. Keep the unzipped folder as it is. Fairlead does not have its own installer, and the files next to `Fairlead.exe` have to stay there.
+1. Move `Fairlead.app` to `/Applications`.
+2. Open it from Applications (not from the archive).
+3. The first time you connect, macOS asks for an administrator password to install the helper. Later connections do not ask again. The helper also returns after a reboot.
 
-The first time you connect, the system asks for an administrator password. Fairlead uses it to install a helper. Later connections do not ask. The helper also comes back after you restart the computer.
+Configs live in `~/Library/Application Support/Fairlead` and are readable only by your account. Settings has a button that opens this folder.
 
-Configs stay on this computer, readable only by your account. On a Mac they are in `~/Library/Application Support/Fairlead`. On Windows they are in `%AppData%\Fairlead`. Settings has a button that opens this folder.
+### Windows
 
-## If macOS blocks the app
+1. Unzip the archive and keep the folder as it is — files next to `Fairlead.exe` must stay together. Fairlead has no separate installer.
+2. Run `Fairlead.exe`.
+3. The first connection asks for administrator rights to install the helper. After that, connect and disconnect without elevating again. The helper comes back after a reboot.
 
-A Fairlead you downloaded is not notarized, so macOS stops the first launch. A copy built on the same Mac opens without this prompt.
+Configs live in `%AppData%\Fairlead`. Settings can open that folder for you.
 
-1. Double-click Fairlead. If macOS says it cannot check the app for malicious software, click Done. Move to Trash deletes the app.
-2. Open System Settings → Privacy & Security and scroll to the bottom. Fairlead is listed there as blocked.
-3. Click Open Anyway, then confirm.
+---
 
-The approval is for that copy. A new copy can ask again.
+## First launch warnings
 
-You can also remove the block in Terminal before the first launch:
+Builds from GitHub are not notarized (macOS) and are not signed with an EV certificate (Windows). The system may warn once. That is expected for a download you trust.
+
+### macOS Gatekeeper
+
+1. Open Fairlead. If macOS says it cannot check the app for malicious software, click **Done** (do not move it to Trash).
+2. Open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
+3. Confirm when asked.
+
+A new copy of the app can ask again. You can also clear quarantine before the first open (only for a build you trust):
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Fairlead.app
 ```
 
-Do this only for an app you trust. The password you see while connecting is the helper installer. It is a separate prompt.
+The administrator password when connecting is for the helper, not for Gatekeeper.
 
-## Opening and quitting
+### Windows SmartScreen
 
-Closing the window does not disconnect. Fairlead keeps running: in the menu bar on a Mac, and in the tray on Windows. On a Mac the Dock icon goes away while the window is closed. Open the window again from that icon.
+1. If SmartScreen says Windows protected your PC, click **More info**.
+2. Click **Run anyway**.
 
-Quit from the same menu when you want to disconnect. Fairlead stops mihomo and restores normal routing and DNS.
+Keep the unzipped folder intact so `Fairlead.exe`, the helper, and the bundled engine stay side by side.
 
-One tunnel runs at a time. Connecting another stops the current one.
+---
 
-## Tunnels
+## Using Fairlead
 
-Import a `.conf`, a JSON share, or a text file that contains an Amnezia `vpn://` key. You can drop the file on the window, or create a tunnel and edit it in the form or as text.
+Closing the window does not disconnect. Fairlead stays in the menu bar on macOS and in the tray on Windows. Quit from that menu when you want the tunnel down and normal routing restored.
 
-An AmneziaWG config is marked in the header. A plain WireGuard config connects as WireGuard.
+Only one tunnel runs at a time. Connecting another stops the current one.
 
-The window shows the endpoint, address, handshake, and live down and up rates. The menu bar on a Mac, and the tray menu on Windows, have the same controls.
+### Tunnels
 
-![Tunnel list and the main tunnel view](docs/screenshots/overview.png)
-
-## Routes
-
-AllowedIPs in the config decide what the WireGuard peer can carry. The switch above the list decides how Fairlead’s filter list is applied. Both modes use the same addresses, domains, and apps. Fairlead writes the list into the mihomo config as rules, and mihomo does the routing.
-
-**Direct.** Traffic goes through the tunnel, except the list, which stays on your normal network.
-
-**Through.** Only the list goes through the tunnel. Everything else stays on your normal network.
-
-**Add route** opens a window. Give the list a name and put one address or domain on each line. **Add app** picks an application. A rule can be switched off without deleting it.
-
-- An IP address or a network. Mihomo matches it as a CIDR.
-- A domain, such as `example.com`. Mihomo matches the name itself, so Fairlead does not look up addresses ahead of time. `*.example.com` is not accepted.
-- The current Wi-Fi or Ethernet network. It stays on your normal connection.
-- An app. Mihomo matches the process path of the running program, not addresses it connected to before. On a Mac, a `.app` bundle includes helper processes inside the bundle.
-
-![Addresses, domains, and apps on one list](docs/screenshots/routes.png)
-
-## Configs
-
-The editor has the interface and each peer: keys, address, DNS, MTU, listen port, endpoint, allowed IPs, and keepalive. AmneziaWG parameters from the config are edited in the same form. The private key stays hidden until you show it. The same config can be edited as text, copied, or exported as a `.conf`. The Text tab also accepts an Amnezia `vpn://` key.
-
-PreUp, PostUp, PreDown, PostDown, and SaveConfig are not run.
+Import a config, or create one and edit it as fields or as text. The detail view shows the endpoint, address, handshake, and live traffic.
 
 ![Config editor](docs/screenshots/config.png)
 
-## Settings
+### Routes
 
-Open Settings from the gear. On a Mac you can also use the menu bar or Command-Comma.
+Allowed IPs in the WireGuard config still define what the peer can carry. The **Direct / Through** control decides how Fairlead’s filter list is applied:
 
-**Open at login.** Fairlead starts when you sign in. On a Mac, if the system still needs approval, the switch stays on and Settings points to System Settings → General → Login Items.
+| Mode | Behavior |
+|------|----------|
+| **Direct** | Traffic uses the tunnel, except the list, which stays on your normal network |
+| **Through** | Only the list uses the tunnel; everything else stays on your normal network |
 
-**Default tunnel.** Fairlead selects this tunnel when it opens and connects it. Together with Open at login, the tunnel comes up after you sign in. None opens Fairlead without connecting.
+Add IPs or domains with **Add route**, or pick programs with **Add app**. Each rule can be turned off without deleting it. Domains are matched by name; apps are matched by the running process.
 
-**Start helper.** Installs the helper, or replaces the one already installed, after the administrator password. Config folder opens the directory with your configs.
+![Routes](docs/screenshots/routes.png)
+
+### Settings
+
+- **Open at login** — start Fairlead when you sign in  
+- **Start hidden** — menu bar / tray only until you open the window  
+- **Language** — Auto follows the system; or pick a fixed language  
+- **Default tunnel** — None leaves tunnels off; Last active or a named tunnel is selected and connected when Fairlead opens  
+- **Start helper** — install or replace the system helper  
+- **Config folder** — open your local configs  
 
 ![Settings](docs/screenshots/settings.png)
 
-## Language
+---
 
-Fairlead uses the system language by default. English, Russian, German, Spanish, French, Portuguese, and Simplified Chinese are included. The same languages and the same Localizable.strings catalogs are used on macOS and Windows.
+## Build from source
 
-To pick one yourself, open Settings and choose it under Language. Auto follows the system language again. The choice is saved with your other settings and applies right away, with no restart.
+### macOS
+
+Requires macOS 15+, Swift 6 tooling, and a mihomo binary in `platform/mac/Support/mihomo` (see `scripts/build-mihomo.sh`).
+
+```bash
+./scripts/build-app.sh
+```
+
+The app is written to `dist/Fairlead.app`.
+
+### Windows
+
+Requires a MinGW `gcc` on `PATH` (for example MSYS2), Visual Studio with C++ workload / MSBuild, and bundled `mihomo.exe` / `wintun.dll` under `dist\win\bin` (or as described in the build scripts).
+
+```bat
+scripts\build-win.bat
+```
+
+Output lands in `dist\win`.
+
+---
+
+## Privacy
+
+Configs and keys stay on this computer. Fairlead does not upload them. The helper runs with elevated rights only to manage the tunnel; your settings and tunnel list remain in your user profile.
+
+---
+
+## License and trademarks
+
+See the repository for license terms. WireGuard is a trademark of Jason A. Donenfeld. AmneziaWG is part of the Amnezia project. Fairlead is not affiliated with either.

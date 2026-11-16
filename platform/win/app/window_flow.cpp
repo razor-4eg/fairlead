@@ -67,12 +67,28 @@ winrt::fire_and_forget MainWindow::BootAsync() {
 	auto life = get_strong();
 	co_await EnsureHelperAsync(false);
 	auto* tunnel = session.ResolveDefault();
-	if (!tunnel || tunnel->connected || tunnel->phase == "Connecting") {
+	if (!tunnel) {
+		/* None: tear down any leftover helper session so reopen does not look like auto-connect. */
+		for (auto const& one : session.tunnels) {
+			if (one->connected || one->phase == "Connecting") {
+				co_await DisconnectAsync(one.get());
+			}
+		}
+		if (session.helper_online) {
+			auto body = session.DownBody();
+			co_await winrt::resume_background();
+			session.Call(body, 8000);
+		}
+		Paint();
 		co_return;
 	}
 
 	session.selected = tunnel;
 	Paint();
+	if (tunnel->connected || tunnel->phase == "Connecting") {
+		co_return;
+	}
+
 	co_await ConnectAsync(tunnel);
 }
 
@@ -240,6 +256,7 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::EnsureHelperAsync(bool inte
 	flag_off clear{ helper_starting };
 	std::wstring exe = widen(session.exe_dir) + L"\\fairlead-helper.exe";
 	if (!std::filesystem::exists(std::filesystem::path(exe))) {
+		session.helper_notice_ready = true;
 		session.banner = l10n::format("fairlead-helper.exe is missing from %@", session.exe_dir);
 		Paint();
 		co_return;
@@ -277,6 +294,7 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::EnsureHelperAsync(bool inte
 
 	std::string error;
 	if (!session.LaunchHelper(hwnd, error)) {
+		session.helper_notice_ready = true;
 		session.banner = error;
 		Paint();
 		co_return;
@@ -315,6 +333,7 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::EnsureHelperAsync(bool inte
 		}
 	}
 
+	session.helper_notice_ready = true;
 	session.banner = l10n::text("The helper did not start.");
 	Paint();
 }

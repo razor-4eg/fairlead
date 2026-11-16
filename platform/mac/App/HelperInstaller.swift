@@ -299,6 +299,29 @@ Older installs lack KeepAlive, so a crash left the helper dead until a password 
 
 /*
 ===============
+nudge
+Ask launchd to (re)start an already-installed helper without a password prompt.
+Also drop a stale socket so a dead process does not leave a dead path.
+===============
+*/
+    static func nudge() {
+        try? FileManager.default.removeItem(atPath: FairleadPaths.socket)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        // -k: kill and restart if launchd still thinks the job is up.
+        process.arguments = ["kickstart", "-k", "system/com.fairlead.helper"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
+        }
+    }
+
+/*
+===============
 runShell
 ===============
 */

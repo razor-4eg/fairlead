@@ -281,7 +281,20 @@
                                     <ToggleButton x:Name="LanSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LanToggled"/>
                                 </Grid>
                             </Border>
-                            <TextBlock x:Name="RulesNote" Text="Domains and apps are matched by name and process while connected." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                            <Border Background="#08FFFFFF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="13">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock x:Name="QuicTitle" Text="Block browser QUIC" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="QuicBody" Text="Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="QuicSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="QuicToggled"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="RulesNote" Text="IPs, domains, and apps for the Direct / Through mode." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                             <TextBlock Text="Nothing here yet. Add an IP, a domain, or an app." FontSize="14" x:Name="RulesEmpty" Visibility="Collapsed" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
                             <StackPanel x:Name="Rules"/>
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -346,7 +359,7 @@
                                 <Border Height="1" Background="{StaticResource LineBrush}"/>
                                 <StackPanel Spacing="8">
                                     <TextBlock x:Name="DefaultTitle" Text="Default tunnel" FontSize="14" FontWeight="Medium" Foreground="{StaticResource TextBrush}"/>
-                                    <TextBlock x:Name="DefaultBody" Text="Fairlead selects this tunnel when it opens and connects it." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="DefaultBody" Text="None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     <ComboBox x:Name="DefaultCombo" HorizontalAlignment="Stretch" SelectionChanged="DefaultChanged"/>
                                 </StackPanel>
                             </StackPanel>

@@ -7,6 +7,7 @@
 //================================================================
 
 import AppKit
+import FairleadCore
 import SwiftUI
 
 @MainActor
@@ -133,7 +134,7 @@ struct FairleadApp: App {
         .restorationBehavior(.disabled)
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
+                Button(FairleadL10n.text("Settings…")) {
                     delegate.model.requestOpenMainWindow()
                     delegate.model.showSettings = true
                 }
@@ -141,18 +142,18 @@ struct FairleadApp: App {
             }
 
             CommandGroup(replacing: .newItem) {
-                Button("New tunnel") { delegate.model.createTunnel() }
+                Button(FairleadL10n.text("New tunnel")) { delegate.model.createTunnel() }
                     .keyboardShortcut("n", modifiers: .command)
-                Button("Import config…") { delegate.model.importPanel() }
+                Button(FairleadL10n.text("Import config…")) { delegate.model.importPanel() }
                     .keyboardShortcut("i", modifiers: .command)
             }
 
-            CommandMenu("Tunnel") {
-                Button("Connect or disconnect") {
+            CommandMenu(FairleadL10n.text("Tunnel")) {
+                Button(FairleadL10n.text("Connect or disconnect")) {
                     if let id = delegate.model.selection { delegate.model.toggle(id) }
                 }
                 .keyboardShortcut("k", modifiers: .command)
-                Button("Edit") {
+                Button(FairleadL10n.text("Edit")) {
                     delegate.model.editing = delegate.model.selectedTunnel
                 }
                 .keyboardShortcut("e", modifiers: .command)
@@ -199,22 +200,22 @@ struct MenuBarContent: View {
 
     var body: some View {
         if model.tunnels.isEmpty {
-            Button("Open Fairlead") { model.requestOpenMainWindow() }
+            Button(FairleadL10n.text("Open Fairlead")) { model.requestOpenMainWindow() }
         } else {
             ForEach(model.tunnels) { tunnel in
                 Button(model.menuTitle(tunnel)) { model.toggle(tunnel.id) }
             }
 
             Divider()
-            Button("Open Fairlead") { model.requestOpenMainWindow() }
+            Button(FairleadL10n.text("Open Fairlead")) { model.requestOpenMainWindow() }
         }
 
         Divider()
-        Button("Settings…") {
+        Button(FairleadL10n.text("Settings…")) {
             model.requestOpenMainWindow()
             model.showSettings = true
         }
 
-        Button("Quit Fairlead") { NSApp.terminate(nil) }
+        Button(FairleadL10n.text("Quit Fairlead")) { NSApp.terminate(nil) }
     }
 }

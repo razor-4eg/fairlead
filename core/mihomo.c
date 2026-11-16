@@ -382,10 +382,77 @@ policy_selected: Through → list uses PROXY, else list uses DIRECT.
 match_proxy: MATCH goes to PROXY when 1.
 ===============
 */
-static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_selected, int exclude_lan, int match_proxy) {
+/*
+===============
+emit_quic_reject
+Chrome/YouTube HTTP/3 (QUIC, UDP/443) keeps a session across path changes. When a
+process flips between PROXY and DIRECT the QUIC flow is poisoned and the tab shows
+"no internet" until Chrome restarts. Force TCP HTTPS for remaining traffic.
+DIRECT process rules are emitted before this so excluded apps can still use QUIC.
+Only UDP/443 is blocked — game/voice UDP on other ports is untouched.
+===============
+*/
+static void emit_quic_reject(ybuf_t *b) {
+	y_add(b, "  - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT\n");
+}
+
+/*
+===============
+emit_app_rules
+===============
+*/
+static void emit_app_rules(ybuf_t *b, const mihomo_rules_t *rules, const char *target) {
+	int	i;
+
+	if (!rules) {
+		return;
+	}
+
+	for (i = 0; i < rules->app_count; i++) {
+		if (!rules->apps[i] || !rules->apps[i][0]) {
+			continue;
+		}
+
+		y_process(b, rules->apps[i], target);
+	}
+}
+
+/*
+===============
+emit_host_rules
+Domains and CIDRs for the list hit.
+===============
+*/
+static void emit_host_rules(ybuf_t *b, const mihomo_rules_t *rules, const char *hit) {
+	int	i;
+
+	if (!rules) {
+		return;
+	}
+
+	for (i = 0; i < rules->domain_count; i++) {
+		if (!rules->domains[i] || !rules->domains[i][0]) {
+			continue;
+		}
+
+		y_rule(b, "DOMAIN-SUFFIX", rules->domains[i], hit);
+	}
+
+	for (i = 0; i < rules->cidr_count; i++) {
+		if (!rules->cidrs[i] || !rules->cidrs[i][0]) {
+			continue;
+		}
+
+		y_add(b, "  - IP-CIDR,");
+		y_add(b, rules->cidrs[i]);
+		y_fmt(b, ",%s,no-resolve\n", hit);
+	}
+}
+
+static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_selected, int exclude_lan,
+	int match_proxy, int block_quic) {
 	const char	*hit;
 	const char	*miss;
-	int			i;
 
 	hit = policy_selected ? "PROXY" : "DIRECT";
 	miss = match_proxy ? "PROXY" : "DIRECT";
@@ -396,34 +463,23 @@ static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_s
 		y_add(b, "  - GEOIP,LAN,DIRECT\n");
 	}
 
-	if (rules) {
-		for (i = 0; i < rules->app_count; i++) {
-			if (!rules->apps[i] || !rules->apps[i][0]) {
-				continue;
-			}
-
-			y_process(b, rules->apps[i], hit);
-		}
-
-		for (i = 0; i < rules->domain_count; i++) {
-			if (!rules->domains[i] || !rules->domains[i][0]) {
-				continue;
-			}
-
-			y_rule(b, "DOMAIN-SUFFIX", rules->domains[i], hit);
-		}
-
-		for (i = 0; i < rules->cidr_count; i++) {
-			if (!rules->cidrs[i] || !rules->cidrs[i][0]) {
-				continue;
-			}
-
-			y_add(b, "  - IP-CIDR,");
-			y_add(b, rules->cidrs[i]);
-			y_fmt(b, ",%s,no-resolve\n", hit);
-		}
+	/*
+	 * Exceptions mode: listed apps go DIRECT before the QUIC reject so Chrome
+	 * outside the tunnel can keep HTTP/3. Through mode lists apps after reject.
+	 */
+	if (!policy_selected) {
+		emit_app_rules(b, rules, hit);
 	}
 
+	if (block_quic) {
+		emit_quic_reject(b);
+	}
+
+	if (policy_selected) {
+		emit_app_rules(b, rules, hit);
+	}
+
+	emit_host_rules(b, rules, hit);
 	y_fmt(b, "  - MATCH,%s\n", miss);
 }
 
@@ -432,7 +488,7 @@ static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_s
 mihomo_config
 ===============
 */
-char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan,
+char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, int block_quic,
 	const mihomo_rules_t *rules, const char *controller, const char *secret,
 	char *err, int err_cap) {
 	doc_t		doc;
@@ -742,9 +798,9 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan,
 	 * in Through) use PROXY; MATCH stays DIRECT.
 	 */
 	if (policy_selected) {
-		emit_rule_lines(&b, rules, 1, exclude_lan, 0);
+		emit_rule_lines(&b, rules, 1, exclude_lan, 0, block_quic);
 	} else if (full) {
-		emit_rule_lines(&b, rules, 0, exclude_lan, 1);
+		emit_rule_lines(&b, rules, 0, exclude_lan, 1, block_quic);
 	} else {
 		char	allowed[1024];
 		char	nets[16][256];
@@ -758,33 +814,13 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan,
 			y_add(&b, "  - GEOIP,LAN,DIRECT\n");
 		}
 
-		if (rules) {
-			for (i = 0; i < rules->app_count; i++) {
-				if (!rules->apps[i] || !rules->apps[i][0]) {
-					continue;
-				}
+		emit_app_rules(&b, rules, "DIRECT");
 
-				y_process(&b, rules->apps[i], "DIRECT");
-			}
-
-			for (i = 0; i < rules->domain_count; i++) {
-				if (!rules->domains[i] || !rules->domains[i][0]) {
-					continue;
-				}
-
-				y_rule(&b, "DOMAIN-SUFFIX", rules->domains[i], "DIRECT");
-			}
-
-			for (i = 0; i < rules->cidr_count; i++) {
-				if (!rules->cidrs[i] || !rules->cidrs[i][0]) {
-					continue;
-				}
-
-				y_add(&b, "  - IP-CIDR,");
-				y_add(&b, rules->cidrs[i]);
-				y_add(&b, ",DIRECT,no-resolve\n");
-			}
+		if (block_quic) {
+			emit_quic_reject(&b);
 		}
+
+		emit_host_rules(&b, rules, "DIRECT");
 
 		for (i = 0; i < n; i++) {
 			y_add(&b, "  - IP-CIDR,");

@@ -90,7 +90,7 @@ struct SettingsSheet: View {
                     Text(FairleadL10n.text("Default tunnel"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.text)
-                    Text(FairleadL10n.text("Fairlead selects this tunnel when it opens and connects it."))
+                    Text(FairleadL10n.text("None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens."))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)

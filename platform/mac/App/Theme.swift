@@ -25,6 +25,29 @@ enum Theme {
     static let nsBackground = NSColor(srgbRed: 0.043, green: 0.059, blue: 0.055, alpha: 1)
 }
 
+/// Shared springs — rubber for thumbs, tighter for press feedback.
+enum Motion {
+    /// Sliding pill / switch knob: overshoot like a soft rubber band.
+    static let rubber = Animation.spring(response: 0.42, dampingFraction: 0.68, blendDuration: 0)
+    /// Short settle for color and opacity that ride along the rubber move.
+    static let soft = Animation.spring(response: 0.36, dampingFraction: 0.78, blendDuration: 0)
+    /// Press-in / release on rows and buttons (Windows uses ~0.94 scale + spring).
+    static let press = Animation.spring(response: 0.28, dampingFraction: 0.55, blendDuration: 0)
+    /// Amnezia badge and other one-shot slide-ins.
+    static let slideIn = Animation.spring(response: 0.48, dampingFraction: 0.78, blendDuration: 0)
+}
+
+/// Scale press like the Windows Composition spring on power / list rows.
+struct FairleadPressStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.96
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? pressedScale : 1)
+            .animation(Motion.press, value: configuration.isPressed)
+    }
+}
+
 struct WindowTuner: NSViewRepresentable {
 /*
 ===============
@@ -233,63 +256,88 @@ quietField
 
 struct FairleadChoice<Value: Hashable>: View {
     var selection: Value
-    var options: [(value: Value, title: LocalizedStringKey)]
+    /// English catalog keys; resolved through FairleadL10n so the in-app language applies.
+    var options: [(value: Value, title: String)]
     var select: (Value) -> Void
+    @Namespace private var thumb
 
     var body: some View {
         HStack(spacing: 3) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 let on = option.value == selection
                 Button {
-                    select(option.value)
+                    withAnimation(Motion.rubber) {
+                        select(option.value)
+                    }
                 } label: {
-                    Text(option.title)
+                    Text(FairleadL10n.text(option.title))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
-                        .background(on ? Theme.accent : Color.clear, in: Capsule())
+                        .background {
+                            if on {
+                                Capsule()
+                                    .fill(Theme.accent)
+                                    .matchedGeometryEffect(id: "thumb", in: thumb)
+                            }
+                        }
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .focusEffectDisabled()
             }
         }
         .padding(3)
         .background(Color.white.opacity(0.04), in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.line))
-        .animation(.easeOut(duration: 0.15), value: selection)
+        .animation(Motion.soft, value: selection)
     }
 }
 
 struct FairleadSwitch: View {
     @Binding var isOn: Bool
-    var label: LocalizedStringKey? = nil
+    var label: String? = nil
+    /// Local knob position so the slide survives parent view rebuilds.
+    @State private var knob = false
 
     var body: some View {
         Button {
-            isOn.toggle()
+            let next = !isOn
+            withAnimation(Motion.rubber) {
+                knob = next
+            }
+            isOn = next
         } label: {
             HStack(spacing: 8) {
                 if let label {
-                    Text(label)
+                    Text(FairleadL10n.text(label))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.muted)
                 }
 
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(isOn ? Theme.accent : Color.white.opacity(0.08))
-                        .overlay(Capsule().strokeBorder(isOn ? Color.clear : Theme.line))
+                        .fill(knob ? Theme.accent : Color.white.opacity(0.08))
+                        .overlay(Capsule().strokeBorder(knob ? Color.clear : Theme.line))
                     Circle()
-                        .fill(isOn ? Theme.ink : Theme.muted)
+                        .fill(knob ? Theme.ink : Theme.muted)
                         .frame(width: 14, height: 14)
-                        .offset(x: isOn ? 18 : 4)
+                        .shadow(color: .black.opacity(knob ? 0.18 : 0), radius: 1.5, y: 1)
+                        .offset(x: knob ? 18 : 4)
                 }
                 .frame(width: 36, height: 20)
             }
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
-        .animation(.easeOut(duration: 0.15), value: isOn)
+        .onAppear { knob = isOn }
+        .onChange(of: isOn) { _, value in
+            guard knob != value else { return }
+            withAnimation(Motion.rubber) {
+                knob = value
+            }
+        }
     }
 }
 
@@ -384,7 +432,8 @@ private struct FairleadSelectRow: View {
 }
 
 struct FairleadButton: View {
-    var title: LocalizedStringKey
+    /// English catalog key; resolved through FairleadL10n so the in-app language applies.
+    var title: String
     var systemImage: String?
     var prominent = false
     var action: () -> Void
@@ -397,7 +446,7 @@ struct FairleadButton: View {
                         .font(.system(size: 11, weight: .semibold))
                 }
 
-                Text(title)
+                Text(FairleadL10n.text(title))
                     .font(.system(size: 13, weight: .medium))
             }
             .foregroundStyle(prominent ? Theme.ink : Theme.text)
@@ -406,7 +455,8 @@ struct FairleadButton: View {
             .background(prominent ? Theme.accent : Color.white.opacity(0.06), in: Capsule())
             .overlay(Capsule().strokeBorder(prominent ? Color.clear : Theme.line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FairleadPressStyle(pressedScale: 0.95))
+        .focusEffectDisabled()
     }
 }
 

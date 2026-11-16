@@ -40,6 +40,7 @@ struct MainWindow : MainWindowT<MainWindow> {
 	void SetThrough(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void PolicySegmentLoaded(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void LanToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+	void QuicToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void OpenEditor(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void ExportSelected(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void AskDelete(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -110,6 +111,8 @@ private:
 	int normal_y = 0;
 	bool have_pos = false;
 	bool helper_starting = false;
+	bool notice_shown = false;
+	bool banner_shown = false;
 	Tunnel* pending_delete = nullptr;
 	Microsoft::UI::Xaml::Controls::MenuFlyout row_menu{ nullptr };
 
@@ -140,6 +143,7 @@ private:
 	void PaintPower();
 	void PaintHelper();
 	void PaintAwg(bool animate);
+	void PaintNotice(winrt::Microsoft::UI::Xaml::Controls::Border const& card, winrt::Microsoft::UI::Xaml::Controls::TextBlock const& text, std::string const& content, bool& shown);
 	void PaintEditorSegment();
 	void NoteSelection();
 	void RebuildList();

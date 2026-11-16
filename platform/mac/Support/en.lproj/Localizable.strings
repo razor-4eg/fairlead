@@ -189,7 +189,7 @@
 "%d domains.many" = "%d domains";
 "%d domains.other" = "%d domains";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "A domain matches that name and its subdomains. An app is matched by its process path while connected.";
+"IPs, domains, and apps for the Direct / Through mode." = "IPs, domains, and apps for the Direct / Through mode.";
 "The tunnel exited. %@" = "The tunnel exited. %@";
 "The tunnel did not answer on %@." = "The tunnel did not answer on %@.";
 "The tunnel could not start the network adapter. %@" = "The tunnel could not start the network adapter. %@";
@@ -222,3 +222,14 @@
 "The tunnel did not start." = "The tunnel did not start.";
 "The tunnel started without a network adapter." = "The tunnel started without a network adapter.";
 "The tunnel could not be reached." = "The tunnel could not be reached.";
+"None" = "None";
+"Could not sign the helper." = "Could not sign the helper.";
+"The controller address is missing." = "The controller address is missing.";
+"The config has no peer." = "The config has no peer.";
+"Interface Address is required." = "Interface Address is required.";
+"Out of memory." = "Out of memory.";
+"PrivateKey and PublicKey are required." = "PrivateKey and PublicKey are required.";
+"Block browser QUIC" = "Block browser QUIC";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes.";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens.";
+

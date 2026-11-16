@@ -188,6 +188,7 @@ static char *handle_request(const char *body) {
 	int					domain_count;
 	int					app_count;
 	int					exclude;
+	int					block_quic;
 	int					selected;
 	win_tun_result_t	tun;
 	char				*buf;
@@ -213,6 +214,7 @@ static char *handle_request(const char *body) {
 	domain_list = NULL;
 	app_list = NULL;
 	exclude = 0;
+	block_quic = 1;
 	selected = 0;
 	buf = NULL;
 	len = 0;
@@ -243,6 +245,10 @@ static char *handle_request(const char *body) {
 
 	if (json_get(root, "excludeLAN") && json_get(root, "excludeLAN")->type == JSON_BOOL) {
 		exclude = json_get(root, "excludeLAN")->boolean;
+	}
+
+	if (json_get(root, "blockQUIC") && json_get(root, "blockQUIC")->type == JSON_BOOL) {
+		block_quic = json_get(root, "blockQUIC")->boolean;
 	}
 
 	selected = policy && strcmp(policy, "selected") == 0;
@@ -277,7 +283,7 @@ static char *handle_request(const char *body) {
 		if (!name || !config) {
 			error = "The config is empty.";
 		} else if (win_tun_up(name, config, cidr_list, cidr_count, domain_list, domain_count, app_list, app_count,
-			exclude, selected, s_exe_dir, &tun)) {
+			exclude, block_quic, selected, s_exe_dir, &tun)) {
 			snprintf(s_slug, sizeof(s_slug), "%s", name);
 			ok = 1;
 		} else {
@@ -295,7 +301,7 @@ static char *handle_request(const char *body) {
 		s_quit = 1;
 		memset(&tun, 0, sizeof(tun));
 	} else if (strcmp(op, "bypass") == 0) {
-		if (!win_tun_bypass(cidr_list, cidr_count, domain_list, domain_count, app_list, app_count, exclude, selected, &tun)) {
+		if (!win_tun_bypass(cidr_list, cidr_count, domain_list, domain_count, app_list, app_count, exclude, block_quic, selected, &tun)) {
 			error = tun.error[0] ? tun.error : "The tunnel is not running.";
 		} else {
 			ok = 1;

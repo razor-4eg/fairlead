@@ -27,6 +27,8 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var settings = AppSettings.empty
     @Published var loginItemMessage: String?
+    /// False until helper is up, boot grace elapses, or start fails — avoids a flashy offline banner.
+    @Published var helperNoticeReady = false
 
     private let store = TunnelStore()
     private let settingsStore = SettingsStore()
@@ -34,6 +36,8 @@ final class AppModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var helperStartTask: Task<Void, Never>?
+    /// Next time an offline poll may nudge launchd again.
+    private var helperRetryAt = Date.distantPast
     /// While bypass RPC runs, status polls only fill the socket backlog.
     private var routesBusy = 0
     /// While up/down RPC runs — not while we wait for a handshake after up returns.
@@ -43,6 +47,8 @@ final class AppModel: ObservableObject {
     /// User (or Finder reopen after launch) asked for the main window.
     private var mainWindowRequested = false
     @Published var helperStale = false
+    /// Seconds to wait for launchd before showing the helper-offline notice.
+    private let helperGraceSeconds: TimeInterval = 8
 
     var selectedTunnel: Tunnel? {
         tunnels.first { $0.id == selection }
@@ -82,6 +88,13 @@ init
         }
 
         Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(self?.helperGraceSeconds ?? 8) * 1_000_000_000)
+            await MainActor.run {
+                self?.armHelperNoticeIfNeeded()
+            }
+        }
+
+        Task { [weak self] in
             guard let self else { return }
             // First install / helper update may need the password once. After that,
             // launchd KeepAlive keeps the helper up without prompting again.
@@ -91,6 +104,20 @@ init
             await self.ensureHelper(interactive: needsInstall)
             await self.connectDefaultIfNeeded()
         }
+    }
+
+/*
+===============
+armHelperNoticeIfNeeded
+Show the offline notice only after grace (or a hard start failure).
+===============
+*/
+    private func armHelperNoticeIfNeeded() {
+        guard !helperOnline else {
+            helperNoticeReady = false
+            return
+        }
+        helperNoticeReady = true
     }
 
 /*
@@ -205,12 +232,6 @@ setLanguage
         guard settings.language != next else { return }
         settings.language = next
         FairleadL10n.applyPreference(next)
-        if next == "auto" {
-            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-        } else {
-            let tag = next == "zh-Hans" ? "zh-Hans" : next
-            UserDefaults.standard.set([tag], forKey: "AppleLanguages")
-        }
         settingsStore.save(settings)
         objectWillChange.send()
     }
@@ -342,10 +363,29 @@ connectDefaultIfNeeded
         guard !didAutoConnect else { return }
         didAutoConnect = true
         guard let id = resolvedDefaultTunnelID(),
-              let tunnel = tunnels.first(where: { $0.id == id }) else { return }
+              let tunnel = tunnels.first(where: { $0.id == id }) else {
+            // None: tear down any helper-adopted leftover so reopen does not look like auto-connect.
+            await dropLeftoverTunnels()
+            return
+        }
         selection = id
         guard live(id).phase == .idle || live(id).phase == .disconnecting else { return }
         await connect(tunnel)
+    }
+
+/*
+===============
+dropLeftoverTunnels
+When default is None, end tunnels the helper still has from a previous session.
+===============
+*/
+    private func dropLeftoverTunnels() async {
+        let response = await rpc(RPCRequest(op: "status"), timeout: 2)
+        guard let response, response.ok else { return }
+        for managed in response.managed ?? [] {
+            _ = await rpc(RPCRequest(op: "down", name: managed.name), timeout: 60)
+        }
+        await refresh()
     }
 
 /*
@@ -407,14 +447,18 @@ startHelper
             return
         }
 
-        // Installed and current: launchd KeepAlive / RunAtLoad brings it back without a password.
-        if await waitHelper(tries: 40) {
+        // Installed and current: nudge launchd (no password), then wait. Login /
+        // KeepAlive races often need a kickstart plus more than a couple of seconds.
+        HelperInstaller.nudge()
+        if await waitHelper(tries: 80) {
             helperStale = false
             banner = nil
             return
         }
         if interactive {
-            banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
+            // Settings "Start helper": re-bootstrap with the password if launchd is stuck.
+            await replaceHelper()
+            return
         }
     }
 
@@ -428,6 +472,7 @@ Full privileged install. Password once per helper version.
         if let error = await HelperInstaller.install() {
             banner = error
             helperOnline = false
+            helperNoticeReady = true
             helperStale = HelperInstaller.needsUpdate() || !HelperInstaller.plistHasKeepAlive()
             return
         }
@@ -437,6 +482,7 @@ Full privileged install. Password once per helper version.
             return
         }
         helperOnline = false
+        helperNoticeReady = true
         helperStale = HelperInstaller.needsUpdate() || !HelperInstaller.plistHasKeepAlive()
         banner = FairleadL10n.text("The helper is installed, but the socket is not responding yet.")
     }
@@ -474,6 +520,7 @@ markHelperOnline
 */
     private func markHelperOnline() {
         helperOnline = true
+        helperNoticeReady = false
         if tools.mihomo == nil {
             tools = ToolLocator.locate()
         }
@@ -653,6 +700,9 @@ connect
         await ensureHelper(interactive: true)
         if !helperOnline || HelperInstaller.needsUpdate() {
             mutate(tunnel.id) { $0.phase = .idle }
+            if !helperOnline {
+                helperNoticeReady = true
+            }
             if banner == nil {
                 banner = HelperInstaller.needsUpdate()
                     ? FairleadL10n.text("The running helper is an older copy. Fairlead will replace it.")
@@ -678,6 +728,7 @@ connect
                 domains: tunnel.directDomains(),
                 apps: tunnel.directApps(),
                 excludeLAN: tunnel.excludeLAN,
+                blockQUIC: tunnel.blockQUIC,
                 policy: tunnel.routePolicy.rawValue
             ),
             timeout: 90
@@ -1014,6 +1065,17 @@ setExcludeLAN
 
 /*
 ===============
+setBlockQUIC
+===============
+*/
+    func setBlockQUIC(_ id: UUID, _ enabled: Bool) {
+        guard var tunnel = tunnels.first(where: { $0.id == id }) else { return }
+        tunnel.blockQUIC = enabled
+        replace(tunnel)
+    }
+
+/*
+===============
 setRoutePolicy
 ===============
 */
@@ -1101,6 +1163,7 @@ pushRoutes
                 domains: tunnel.directDomains(),
                 apps: tunnel.directApps(),
                 excludeLAN: tunnel.excludeLAN,
+                blockQUIC: tunnel.blockQUIC,
                 policy: tunnel.routePolicy.rawValue
             ),
             timeout: 120
@@ -1136,11 +1199,18 @@ refresh
         // When the helper is down, fail fast so start and quit are not blocked.
         let response = await rpc(RPCRequest(op: "status"), timeout: helperOnline ? 10 : 0.2)
         guard let response, response.ok else {
+            if helperOnline {
+                helperNoticeReady = true
+            }
             helperOnline = false
             if tools.mihomo == nil {
                 tools = ToolLocator.locate()
             }
-
+            // Keep trying in the background — launchd / login races often clear after a nudge.
+            if Date() >= helperRetryAt, helperStartTask == nil {
+                helperRetryAt = Date().addingTimeInterval(4)
+                Task { await self.ensureHelper(interactive: false) }
+            }
             return
         }
 

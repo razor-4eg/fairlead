@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -37,6 +38,7 @@ struct Tunnel {
 	std::string config;
 	std::string name;
 	bool exclude_lan = true;
+	bool block_quic = true;
 	bool selected_policy = false;
 	std::vector<std::unique_ptr<RouteList>> lists;
 	std::vector<std::unique_ptr<AppRule>> apps;
@@ -73,6 +75,10 @@ struct Session {
 	std::string notice;
 	std::string banner;
 	bool helper_online = false;
+	/// False until helper is up, boot grace elapses, or start fails — avoids a flashy offline banner.
+	bool helper_notice_ready = false;
+	std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
+	static constexpr int helper_grace_ms = 8000;
 	std::string awg_text = "engine  not found";
 	bool awg_ok = false;
 	bool launch_at_login = false;
@@ -100,6 +106,7 @@ struct Session {
 	std::string Call(std::string const& body, int connect_ms = 5000);
 	std::string Rpc(char const* op, Tunnel* tunnel, bool with_config);
 	std::string StatusBody() const;
+	std::string DownBody() const;
 	std::string QuitBody() const;
 	bool ReplyOk(std::string const& reply) const;
 	std::string ErrorOf(std::string const& reply) const;
@@ -116,6 +123,7 @@ struct Session {
 	void RememberLast(std::string const& id);
 	void SetPolicy(bool through);
 	void SetLan(bool on);
+	void SetBlockQuic(bool on);
 	void SaveRules();
 	BuiltList BuildList(std::string const& name, std::string const& text, RouteList* replacing);
 	void CommitNew(std::unique_ptr<RouteList> list);

@@ -32,6 +32,10 @@ public enum FairleadL10n {
         } else {
             languageOverride = canonical(raw)
         }
+        // UI goes through FairleadL10n only. Clear any leftover AppleLanguages so
+        // Bundle.preferredLocalizations cannot drag Auto onto a previous pick (or a
+        // secondary system language / region quirk).
+        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
         catalogCache = nil
     }
 
@@ -172,19 +176,34 @@ public enum FairleadL10n {
     }
 
     private static func resolvedLanguage() -> String {
-        let raw = languageOverride
-            ?? bundle.preferredLocalizations.first
-            ?? Bundle.main.preferredLocalizations.first
-            ?? Locale.preferredLanguages.first
-            ?? "en"
-        return canonical(raw)
+        if let languageOverride {
+            return canonical(languageOverride)
+        }
+        // Auto: first system UI language Fairlead ships. Do not use
+        // Bundle.preferredLocalizations — app-domain AppleLanguages leftovers and
+        // region tags (e.g. en_US@rg=ru…) have made that pick the wrong catalog.
+        return systemLanguage()
+    }
+
+    /// First preferred system language that Fairlead has a catalog for.
+    public static func systemLanguage() -> String {
+        for raw in Locale.preferredLanguages {
+            if let code = matchedCode(raw) {
+                return code
+            }
+        }
+        return "en"
     }
 
     private static func canonical(_ raw: String) -> String {
+        matchedCode(raw) ?? "en"
+    }
+
+    private static func matchedCode(_ raw: String) -> String? {
         let lower = raw.replacingOccurrences(of: "_", with: "-").lowercased()
         if lower.hasPrefix("zh") { return "zh-Hans" }
         let code = lower.split(separator: "-").first.map(String.init) ?? lower
-        return languageCodes.contains(code) ? code : "en"
+        return languageCodes.contains(code) ? code : nil
     }
 
     private static func localizedBundle() -> Bundle {

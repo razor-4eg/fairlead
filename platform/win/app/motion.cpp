@@ -115,6 +115,20 @@ anim::Storyboard slide_in_x(mux::UIElement const& el, double from_x, int ms) {
 	return board;
 }
 
+anim::Storyboard slide_in_y(mux::UIElement const& el, double from_y, int ms) {
+	auto shift = translate_of(el);
+	shift.Y(from_y);
+	el.Opacity(0);
+	return fade_shift(el, 0, 1, from_y, 0, ms);
+}
+
+anim::Storyboard slide_out_y(mux::UIElement const& el, double to_y, int ms) {
+	auto shift = translate_of(el);
+	double from_y = shift.Y();
+	double from_opacity = el.Opacity();
+	return fade_shift(el, from_opacity, 0, from_y, to_y, ms);
+}
+
 void press(mux::UIElement const& el, bool down) {
 	if (el.ActualSize().x <= 0 || el.ActualSize().y <= 0) {
 		return;

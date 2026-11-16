@@ -36,13 +36,13 @@ int		win_tun_up(const char *slug, const char *config,
 			const char **cidrs, int cidr_count,
 			const char **domains, int domain_count,
 			const char **apps, int app_count,
-			int exclude_lan, int selected, const char *exe_dir, win_tun_result_t *out);
+			int exclude_lan, int block_quic, int selected, const char *exe_dir, win_tun_result_t *out);
 int		win_tun_down(win_tun_result_t *out);
 int		win_tun_bypass(
 			const char **cidrs, int cidr_count,
 			const char **domains, int domain_count,
 			const char **apps, int app_count,
-			int exclude_lan, int selected, win_tun_result_t *out);
+			int exclude_lan, int block_quic, int selected, win_tun_result_t *out);
 int		win_tun_active(void);
 void	win_tun_status(win_tun_result_t *out);
 void	win_tun_reconcile(void);

@@ -113,6 +113,8 @@ struct Tunnel: Codable, Identifiable, Equatable {
     var routeLists: [RouteList]
     var appRules: [AppRule]
     var excludeLAN: Bool
+    /// When on, UDP/443 (HTTP/3 QUIC) is rejected for tunnel traffic so browsers recover after rule flips.
+    var blockQUIC: Bool
     var routePolicy: RoutePolicy
 
 /*
@@ -128,6 +130,7 @@ init
         routeLists: [RouteList] = [],
         appRules: [AppRule] = [],
         excludeLAN: Bool = true,
+        blockQUIC: Bool = true,
         routePolicy: RoutePolicy = .exceptions
     ) {
         self.id = id
@@ -137,11 +140,12 @@ init
         self.routeLists = routeLists
         self.appRules = appRules
         self.excludeLAN = excludeLAN
+        self.blockQUIC = blockQUIC
         self.routePolicy = routePolicy
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, configText, ipRules, appRules, domainRules, routeLists, excludeLAN, routePolicy
+        case id, name, slug, configText, ipRules, appRules, domainRules, routeLists, excludeLAN, blockQUIC, routePolicy
     }
 
 /*
@@ -157,6 +161,7 @@ init
         configText = try container.decode(String.self, forKey: .configText)
         appRules = try container.decodeIfPresent([AppRule].self, forKey: .appRules) ?? []
         excludeLAN = try container.decodeIfPresent(Bool.self, forKey: .excludeLAN) ?? true
+        blockQUIC = try container.decodeIfPresent(Bool.self, forKey: .blockQUIC) ?? true
         routePolicy = try container.decodeIfPresent(RoutePolicy.self, forKey: .routePolicy) ?? .exceptions
         if container.contains(.routeLists) {
             routeLists = try container.decodeIfPresent([RouteList].self, forKey: .routeLists) ?? []
@@ -181,6 +186,7 @@ encode
         try container.encode(routeLists, forKey: .routeLists)
         try container.encode(appRules, forKey: .appRules)
         try container.encode(excludeLAN, forKey: .excludeLAN)
+        try container.encode(blockQUIC, forKey: .blockQUIC)
         try container.encode(routePolicy, forKey: .routePolicy)
     }
 

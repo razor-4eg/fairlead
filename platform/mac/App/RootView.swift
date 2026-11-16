@@ -57,12 +57,12 @@ struct RootView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(FairleadL10n.text("Delete"), role: .destructive) {
                 if let pendingDelete { model.delete(pendingDelete) }
                 pendingDelete = nil
             }
 
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
+            Button(FairleadL10n.text("Cancel"), role: .cancel) { pendingDelete = nil }
         }
     }
 
@@ -100,7 +100,14 @@ struct SidebarView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .tracking(2.2)
                     .foregroundStyle(Theme.text)
-                Spacer()
+                Spacer(minLength: 8)
+                Circle()
+                    .fill(model.helperOnline && model.tools.ready && !model.helperStale ? Theme.accent : Theme.faint)
+                    .frame(width: 7, height: 7)
+                    .animation(Motion.soft, value: model.helperOnline)
+                    .animation(Motion.soft, value: model.helperStale)
+                    .help(FairleadL10n.text(helperStatus))
+                    .accessibilityLabel(FairleadL10n.text(helperStatus))
                 Button {
                     model.showSettings = true
                 } label: {
@@ -110,9 +117,9 @@ struct SidebarView: View {
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(FairleadPressStyle(pressedScale: 0.9))
                 .focusEffectDisabled()
-                .help("Settings")
+                .help(FairleadL10n.text("Settings"))
             }
             .padding(.top, 18)
             .padding(.horizontal, 18)
@@ -122,7 +129,7 @@ struct SidebarView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.faint)
-                TextField("Search", text: $model.query)
+                TextField(FairleadL10n.text("Search"), text: $model.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.text)
@@ -151,23 +158,9 @@ struct SidebarView: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(model.helperOnline && model.tools.ready && !model.helperStale ? Theme.accent : Theme.faint)
-                        .frame(width: 6, height: 6)
-                    Text(FairleadL10n.text(helperStatus))
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.muted)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { model.showSettings = true }
-
-                HStack(spacing: 8) {
-                    FairleadButton(title: "New", systemImage: "plus") { model.createTunnel() }
-                    FairleadButton(title: "Import", systemImage: "square.and.arrow.down") { model.importPanel() }
-                }
+            HStack(spacing: 8) {
+                FairleadButton(title: "New", systemImage: "plus") { model.createTunnel() }
+                FairleadButton(title: "Import", systemImage: "square.and.arrow.down") { model.importPanel() }
             }
             .padding(14)
         }
@@ -197,6 +190,7 @@ struct SidebarRow: View {
                 Circle()
                     .fill(connected ? Theme.accent : Theme.faint)
                     .frame(width: 7, height: 7)
+                    .animation(Motion.soft, value: connected)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tunnel.name)
                         .font(.system(size: 13, weight: selected ? .semibold : .regular))
@@ -215,16 +209,18 @@ struct SidebarRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(selected ? Color.white.opacity(0.07) : (hovered ? Color.white.opacity(0.035) : Color.clear))
+                    .animation(Motion.soft, value: selected)
+                    .animation(.easeOut(duration: 0.12), value: hovered)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FairleadPressStyle(pressedScale: 0.97))
         .onHover { hovered = $0 }
         .contextMenu {
             Button(FairleadL10n.text(connected ? "Disconnect" : "Connect")) { model.toggle(tunnel.id) }
-            Button("Edit") { model.editing = tunnel }
-            Button("Export…") { model.export(tunnel) }
+            Button(FairleadL10n.text("Edit")) { model.editing = tunnel }
+            Button(FairleadL10n.text("Export…")) { model.export(tunnel) }
             Divider()
-            Button("Delete", role: .destructive) { pendingDelete = tunnel }
+            Button(FairleadL10n.text("Delete"), role: .destructive) { pendingDelete = tunnel }
         }
     }
 }

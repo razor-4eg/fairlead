@@ -38,10 +38,10 @@ struct BypassPane: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(tunnel.routePolicy == .selected ? "Through the tunnel" : "Direct"))
+                    Text(FairleadL10n.text(tunnel.routePolicy == .selected ? "Through the tunnel" : "Direct"))
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(Theme.text)
-                    Text(LocalizedStringKey(tunnel.routePolicy == .selected
+                    Text(FairleadL10n.text(tunnel.routePolicy == .selected
                          ? "Only these addresses use the tunnel. Everything else stays on the regular network."
                          : "These addresses stay out of the tunnel and use the regular network."))
                         .font(.system(size: 12))
@@ -61,10 +61,11 @@ struct BypassPane: View {
             }
 
             lanRow
+            quicRow
             listNote
 
             if listIsEmpty {
-                Text("Nothing here yet. Add an IP, a domain, or an app.")
+                Text(FairleadL10n.text("Nothing here yet. Add an IP, a domain, or an app."))
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
                     .padding(.vertical, 8)
@@ -122,7 +123,7 @@ struct BypassPane: View {
     private var lanRow: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Local network directly")
+                Text(FairleadL10n.text("Local network directly"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.text)
                 Text(lanCaption)
@@ -134,6 +135,28 @@ struct BypassPane: View {
             FairleadSwitch(isOn: Binding(
                 get: { tunnel.excludeLAN },
                 set: { model.setExcludeLAN(tunnel.id, $0) }
+            ))
+        }
+        .padding(11)
+        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var quicRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(FairleadL10n.text("Block browser QUIC"))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.text)
+                Text(FairleadL10n.text("Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+            FairleadSwitch(isOn: Binding(
+                get: { tunnel.blockQUIC },
+                set: { model.setBlockQUIC(tunnel.id, $0) }
             ))
         }
         .padding(11)
@@ -153,7 +176,7 @@ struct BypassPane: View {
     }
 
     private var listNote: some View {
-        Text("A domain matches that name and its subdomains. An app is matched by its process path while connected.")
+        Text(FairleadL10n.text("IPs, domains, and apps for the Direct / Through mode."))
             .font(.system(size: 12))
             .foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
@@ -165,8 +188,8 @@ listRow
 ===============
 */
     private func listRow(_ list: RouteList) -> some View {
-        HStack(spacing: 8) {
-            kindMark("List")
+        HStack(spacing: 10) {
+            ruleGlyph("list.bullet")
             VStack(alignment: .leading, spacing: 2) {
                 Text(list.name)
                     .font(.system(size: 14, weight: .medium))
@@ -197,23 +220,20 @@ appRow
 */
     private func appRow(_ rule: AppRule) -> some View {
         let missing = !FileManager.default.fileExists(atPath: rule.path)
-        return HStack(spacing: 8) {
-            kindMark("App")
-            HStack(spacing: 10) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: rule.path))
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                    .opacity(missing ? 0.4 : 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(rule.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
-                    Text(missing ? FairleadL10n.text("App not found") : rule.path)
-                        .font(.system(size: 12))
-                        .foregroundStyle(missing ? Theme.danger : Theme.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+        return HStack(spacing: 10) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: rule.path))
+                .resizable()
+                .frame(width: 28, height: 28)
+                .opacity(missing ? 0.4 : 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rule.name)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(rule.enabled ? Theme.text : Theme.faint)
+                Text(missing ? FairleadL10n.text("App not found") : rule.path)
+                    .font(.system(size: 12))
+                    .foregroundStyle(missing ? Theme.danger : Theme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             Spacer(minLength: 8)
@@ -273,14 +293,15 @@ listCaption
 
 /*
 ===============
-kindMark
+ruleGlyph
+Fixed 28×28 slot so list and app rows share the same leading column.
 ===============
 */
-    private func kindMark(_ title: LocalizedStringKey) -> some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold))
+    private func ruleGlyph(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Theme.muted)
-            .frame(width: 28, alignment: .leading)
+            .frame(width: 28, height: 28)
     }
 }
 
@@ -298,14 +319,14 @@ struct AddRouteSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add route")
+            Text(FairleadL10n.text("Add route"))
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Theme.text)
-            Text("One address or domain per line.")
+            Text(FairleadL10n.text("One address or domain per line."))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Name", text: $name)
+            TextField(FairleadL10n.text("Name"), text: $name)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.text)
@@ -322,7 +343,7 @@ struct AddRouteSheet: View {
                     .padding(10)
                     .disabled(busy)
                 if text.isEmpty {
-                    Text("example.com\n203.0.113.10\n10.1.0.0/16")
+                    Text(FairleadL10n.text("example.com\n203.0.113.10\n10.1.0.0/16"))
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(Theme.faint)
                         .padding(.horizontal, 15)
@@ -423,13 +444,13 @@ struct RouteListSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit list")
+            Text(FairleadL10n.text("Edit list"))
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Theme.text)
-            Text("One address or domain per line.")
+            Text(FairleadL10n.text("One address or domain per line."))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
-            TextField("Name", text: $name)
+            TextField(FairleadL10n.text("Name"), text: $name)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.text)

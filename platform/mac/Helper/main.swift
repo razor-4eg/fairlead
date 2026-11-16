@@ -64,17 +64,32 @@ private func refreshHelperLanguage() {
         FairleadL10n.bundle = bundle
     }
 
-    guard let account = getpwnam(user) else { return }
-    let home = String(cString: account.pointee.pw_dir)
-    let url = URL(fileURLWithPath: home).appendingPathComponent("Library/Preferences/.GlobalPreferences.plist")
-    guard let data = try? Data(contentsOf: url),
-          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-          let languages = plist["AppleLanguages"] as? [String],
-          let first = languages.first else {
+    // Prefer the user's saved Fairlead language; fall back to system preferred languages.
+    if let code = helperLanguagePreference() {
+        FairleadL10n.applyPreference(code)
         return
     }
+    FairleadL10n.applyPreference("auto")
+}
 
-    FairleadL10n.languageOverride = first
+/*
+===============
+helperLanguagePreference
+Read ~/Library/Application Support/Fairlead/settings.json language when present.
+===============
+*/
+private func helperLanguagePreference() -> String? {
+    guard let account = getpwnam(user) else { return nil }
+    let home = String(cString: account.pointee.pw_dir)
+    let url = URL(fileURLWithPath: home)
+        .appendingPathComponent("Library/Application Support/Fairlead/settings.json")
+    guard let data = try? Data(contentsOf: url),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let language = json["language"] as? String else {
+        return nil
+    }
+    let trimmed = language.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
 }
 
 /*
@@ -328,6 +343,7 @@ private func rules(_ request: RPCRequest) -> MihomoRules {
         domains: Array(domains.prefix(4096)),
         apps: Array(apps.prefix(64)),
         excludeLAN: request.excludeLAN ?? false,
+        blockQUIC: request.blockQUIC ?? true,
         selected: (RoutePolicy(rawValue: request.policy ?? "") ?? .exceptions) == .selected
     )
 }

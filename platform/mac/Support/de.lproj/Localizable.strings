@@ -40,7 +40,7 @@
 "App not found" = "App nicht gefunden";
 "Config" = "Konfiguration";
 "Fields" = "Felder";
-"Text" = "Text";
+"Text" = "Rohtext";
 "Name" = "Name";
 "Home" = "Zuhause";
 "Add peer" = "Peer hinzufügen";
@@ -173,7 +173,7 @@
 "Address %@ covers the whole internet. Use the other filter for that." = "Adresse %@ umfasst das ganze Internet. Dafür den anderen Filter verwenden.";
 "Through" = "Tunnel";
 "IP" = "IP";
-"Domain" = "Domain";
+"Domain" = "Domäne";
 "App" = "App";
 "Nothing here yet. Add an IP, a domain, or an app." = "Noch nichts hier. Füge eine IP, eine Domain oder eine App hinzu.";
 "Enter an IP, a network, or a domain." = "Gib eine IP, ein Netz oder eine Domain ein.";
@@ -189,7 +189,7 @@
 "%d domains.many" = "%d Domains";
 "%d domains.other" = "%d Domains";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Eine Domain gilt für diesen Namen und seine Subdomains. Eine App wird nach ihrem Prozesspfad zugeordnet, solange die Verbindung steht.";
+"IPs, domains, and apps for the Direct / Through mode." = "IPs, Domains und Apps für den Modus Direkt / Tunnel.";
 "The tunnel exited. %@" = "Der Tunnel wurde beendet. %@";
 "The tunnel did not answer on %@." = "Der Tunnel hat nicht auf %@ geantwortet.";
 "The tunnel could not start the network adapter. %@" = "Der Tunnel konnte den Netzwerkadapter nicht starten. %@";
@@ -222,3 +222,13 @@
 "The tunnel did not start." = "Der Tunnel wurde nicht gestartet.";
 "The tunnel started without a network adapter." = "Der Tunnel wurde ohne Netzwerkadapter gestartet.";
 "The tunnel could not be reached." = "Der Tunnel antwortet nicht.";
+"None" = "Keine";
+"Could not sign the helper." = "Der Helfer konnte nicht signiert werden.";
+"The controller address is missing." = "Die Controller-Adresse fehlt.";
+"The config has no peer." = "In der Konfiguration fehlt ein Peer.";
+"Interface Address is required." = "Eine Interface-Adresse ist erforderlich.";
+"Out of memory." = "Nicht genug Speicher.";
+"PrivateKey and PublicKey are required." = "PrivateKey und PublicKey sind erforderlich.";
+"Block browser QUIC" = "Browser-QUIC blockieren";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Hält HTTP/3 für Tunnelverkehr aus, damit Browser nach Regelwechseln wieder stabil laufen.";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "„Keine“ lässt Tunnel aus. „Zuletzt aktiv“ oder ein benannter Tunnel wird beim Start ausgewählt und verbunden.";

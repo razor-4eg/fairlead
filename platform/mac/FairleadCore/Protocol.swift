@@ -1,5 +1,13 @@
 import Foundation
 
+/// Which way the address list steers traffic.
+public enum RoutePolicy: String, Codable, Equatable, Sendable {
+    /// The tunnel keeps its routes. Listed addresses go out through the regular network.
+    case exceptions
+    /// Listed addresses go through the tunnel. Everything else stays on the regular network.
+    case selected
+}
+
 public struct ToolReport: Codable, Equatable, Sendable {
     public var mihomo: String?
 
@@ -39,6 +47,7 @@ public struct RPCRequest: Codable, Sendable {
     public var domains: [String]?
     public var apps: [String]?
     public var excludeLAN: Bool?
+    public var blockQUIC: Bool?
     public var policy: String?
 
     public init(
@@ -50,6 +59,7 @@ public struct RPCRequest: Codable, Sendable {
         domains: [String]? = nil,
         apps: [String]? = nil,
         excludeLAN: Bool? = nil,
+        blockQUIC: Bool? = nil,
         policy: String? = nil
     ) {
         self.id = id
@@ -60,6 +70,7 @@ public struct RPCRequest: Codable, Sendable {
         self.domains = domains
         self.apps = apps
         self.excludeLAN = excludeLAN
+        self.blockQUIC = blockQUIC
         self.policy = policy
     }
 }

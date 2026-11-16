@@ -391,6 +391,8 @@ static void wait_controller_gone(int max_ms) {
 	}
 }
 
+static void close_connections(void);
+
 /*
 ===============
 stop_proc
@@ -407,6 +409,8 @@ static void stop_proc(void) {
 	}
 
 	if (is_running()) {
+		/* Drop live flows before tearing the TUN down so Chrome can reopen on the real path. */
+		close_connections();
 		api("PATCH", "/configs", "{\"tun\":{\"enable\":false}}", reply, (int)sizeof(reply), &status, 1000);
 		WaitForSingleObject(s_session.proc.hProcess, 500);
 	}
@@ -616,7 +620,7 @@ Build config.yaml from the WireGuard text and the rules. Fills err on failure.
 ===============
 */
 static int write_config(const char *wg_text, const char **cidrs, int cidr_count, const char **domains, int domain_count,
-	const char **apps, int app_count, int exclude_lan, int selected, char *err, int err_cap) {
+	const char **apps, int app_count, int exclude_lan, int block_quic, int selected, char *err, int err_cap) {
 	mihomo_rules_t	rules;
 	char			(*norm)[64];
 	const char		**ptrs;
@@ -653,7 +657,7 @@ static int write_config(const char *wg_text, const char **cidrs, int cidr_count,
 	rules.domain_count = domain_count;
 	rules.apps = apps;
 	rules.app_count = app_count;
-	yaml = mihomo_config(wg_text, selected, exclude_lan, &rules, CONTROLLER_ADDR, s_session.secret, err, err_cap);
+	yaml = mihomo_config(wg_text, selected, exclude_lan, block_quic, &rules, CONTROLLER_ADDR, s_session.secret, err, err_cap);
 	free(norm);
 	free(ptrs);
 
@@ -951,19 +955,30 @@ static void exes_from_yaml(const char *path, wchar_t (*names)[MAX_PATH], int *co
 
 /*
 ===============
-reset_app_tcp
-The system TUN stack keeps the app's own sockets. Mihomo only forgets them,
-so a new process rule waits until the app is restarted. RST those IPv4 flows.
+exe_listed
 ===============
 */
-static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
+static int exe_listed(wchar_t (*names)[MAX_PATH], int count, const wchar_t *base) {
+	int	a;
+
+	for (a = 0; a < count; a++) {
+		if (_wcsicmp(base, names[a]) == 0) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+/*
+===============
+reset_app_tcp4
+===============
+*/
+static void reset_app_tcp4(wchar_t (*names)[MAX_PATH], int count) {
 	MIB_TCPTABLE_OWNER_PID	*table;
 	DWORD					size;
 	DWORD					i;
-
-	if (!names || count <= 0) {
-		return;
-	}
 
 	size = 0;
 	table = NULL;
@@ -985,8 +1000,6 @@ static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
 		wchar_t					image[MAX_PATH];
 		DWORD					nlen;
 		wchar_t					*base;
-		int						a;
-		int						hit;
 		MIB_TCPROW				kill;
 
 		row = &table->table[i];
@@ -1015,16 +1028,8 @@ static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
 		CloseHandle(proc);
 		base = wcsrchr(image, L'\\');
 		base = base ? base + 1 : image;
-		hit = 0;
 
-		for (a = 0; a < count; a++) {
-			if (_wcsicmp(base, names[a]) == 0) {
-				hit = 1;
-				break;
-			}
-		}
-
-		if (!hit) {
+		if (!exe_listed(names, count, base)) {
 			continue;
 		}
 
@@ -1038,6 +1043,22 @@ static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
 	}
 
 	free(table);
+}
+
+/*
+===============
+reset_app_tcp
+The system TUN stack keeps the app's own sockets. Mihomo only forgets them,
+so a new process rule waits until the app is restarted. RST those IPv4 flows.
+(SetTcpEntry is IPv4-only; UDP/443 QUIC is rejected in config so Chrome uses TCP.)
+===============
+*/
+static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
+	if (!names || count <= 0) {
+		return;
+	}
+
+	reset_app_tcp4(names, count);
 }
 
 /*
@@ -1677,7 +1698,7 @@ Write config.yaml, start mihomo, and wait until the controller and TUN are up.
 */
 int win_tun_up(const char *slug, const char *config, const char **cidrs, int cidr_count,
 	const char **domains, int domain_count, const char **apps, int app_count,
-	int exclude_lan, int selected, const char *exe_dir, win_tun_result_t *out) {
+	int exclude_lan, int block_quic, int selected, const char *exe_dir, win_tun_result_t *out) {
 	memset(out, 0, sizeof(*out));
 
 	if (s_session.active || s_session.proc_open) {
@@ -1691,7 +1712,7 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 
 	make_secret(s_session.secret, (int)sizeof(s_session.secret));
 
-	if (!write_config(config, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, selected,
+	if (!write_config(config, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, block_quic, selected,
 		out->error, (int)sizeof(out->error))) {
 		return 0;
 	}
@@ -1728,7 +1749,7 @@ Rewrite config.yaml with the new rules and reload mihomo. If the reload is refus
 ===============
 */
 int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int domain_count,
-	const char **apps, int app_count, int exclude_lan, int selected, win_tun_result_t *out) {
+	const char **apps, int app_count, int exclude_lan, int block_quic, int selected, win_tun_result_t *out) {
 	char		err[256];
 	wchar_t		(*exes)[MAX_PATH];
 	int			exe_count;
@@ -1753,7 +1774,7 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 		}
 	}
 
-	if (!write_config(s_session.wg, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, selected,
+	if (!write_config(s_session.wg, cidrs, cidr_count, domains, domain_count, apps, app_count, exclude_lan, block_quic, selected,
 		out->error, (int)sizeof(out->error))) {
 		free(exes);
 		return 0;

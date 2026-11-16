@@ -37,7 +37,7 @@ init
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Config")
+                Text(FairleadL10n.text("Config"))
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(Theme.text)
                 Spacer()
@@ -63,13 +63,13 @@ init
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        field("Name", text: $name, placeholder: "Home")
+                        field(FairleadL10n.text("Name"), text: $name, placeholder: FairleadL10n.text("Home"))
                         interfaceFields
                         ForEach(document.peerIndexes, id: \.self) { index in
                             peerFields(index)
                         }
 
-                        Button("Add peer") { _ = document.addPeer() }
+                        Button(FairleadL10n.text("Add peer")) { _ = document.addPeer() }
                             .buttonStyle(.plain)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.accent)
@@ -78,7 +78,7 @@ init
             }
 
             if configHasHooks {
-                Text("PreUp, PostUp, PreDown, and PostDown commands in the config are not run.")
+                Text(FairleadL10n.text("PreUp, PostUp, PreDown, and PostDown commands in the config are not run."))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
                     .padding(.top, 12)
@@ -96,7 +96,7 @@ init
             }
 
             HStack {
-                Button("Copy") { copyConfig() }
+                Button(FairleadL10n.text("Copy")) { copyConfig() }
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
@@ -146,14 +146,14 @@ init
             field("Address", text: interfaceBinding("Address"), placeholder: "10.8.0.2/32")
             field("DNS", text: interfaceBinding("DNS"), placeholder: "1.1.1.1")
             HStack(spacing: 10) {
-                field("MTU", text: interfaceBinding("MTU"), placeholder: "auto")
-                field("ListenPort", text: interfaceBinding("ListenPort"), placeholder: "auto")
+                field("MTU", text: interfaceBinding("MTU"), placeholder: FairleadL10n.text("auto"))
+                field("ListenPort", text: interfaceBinding("ListenPort"), placeholder: FairleadL10n.text("auto"))
             }
 
             if !Amnezia.presentKeys(in: document).isEmpty {
                 sectionTitle("AmneziaWG")
                 ForEach(Amnezia.presentKeys(in: document), id: \.self) { key in
-                    field(LocalizedStringKey(key), text: interfaceBinding(key), placeholder: "")
+                    field(key, text: interfaceBinding(key), placeholder: "")
                 }
             }
         }
@@ -167,9 +167,9 @@ init
             HStack(spacing: 8) {
                 Group {
                     if revealKey {
-                        TextField("key", text: interfaceBinding("PrivateKey"))
+                        TextField(FairleadL10n.text("key"), text: interfaceBinding("PrivateKey"))
                     } else {
-                        SecureField("key", text: interfaceBinding("PrivateKey"))
+                        SecureField(FairleadL10n.text("key"), text: interfaceBinding("PrivateKey"))
                     }
                 }
                 .quietField()
@@ -177,7 +177,7 @@ init
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
-                Button("New key") { regenerate() }
+                Button(FairleadL10n.text("New key")) { regenerate() }
                     .buttonStyle(.plain)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.accent)
@@ -196,15 +196,15 @@ peerFields
                 sectionTitle(FairleadL10n.format("Peer %d", document.peerIndexes.firstIndex(of: index).map { $0 + 1 } ?? 1))
                 Spacer()
                 if document.peerIndexes.count > 1 {
-                    Button("Remove peer") { document.removeSection(at: index) }
+                    Button(FairleadL10n.text("Remove peer")) { document.removeSection(at: index) }
                         .buttonStyle(.plain)
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.danger)
                 }
             }
 
-            field("PublicKey", text: peerBinding(index, "PublicKey"), placeholder: "server public key")
-            field("PresharedKey", text: peerBinding(index, "PresharedKey"), placeholder: "optional")
+            field("PublicKey", text: peerBinding(index, "PublicKey"), placeholder: FairleadL10n.text("server public key"))
+            field("PresharedKey", text: peerBinding(index, "PresharedKey"), placeholder: FairleadL10n.text("optional"))
             field("Endpoint", text: peerBinding(index, "Endpoint"), placeholder: "vpn.example.com:51820")
             field("AllowedIPs", text: peerBinding(index, "AllowedIPs"), placeholder: "0.0.0.0/0, ::/0")
             field("PersistentKeepalive", text: peerBinding(index, "PersistentKeepalive"), placeholder: "25")
@@ -228,7 +228,7 @@ sectionTitle
 field
 ===============
 */
-    private func field(_ title: LocalizedStringKey, text: Binding<String>, placeholder: LocalizedStringKey) -> some View {
+    private func field(_ title: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .medium))

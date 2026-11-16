@@ -320,10 +320,12 @@ MainWindow::MainWindow() {
 		DispatcherQueue().TryEnqueue([this] { AppWindow().Hide(); });
 	});
 	HookSwitch(LanSwitch());
+	HookSwitch(QuicSwitch());
 	HookSwitch(LoginSwitch());
 	HookSwitch(HiddenSwitch());
 	quiet = true;
 	LanSwitch().IsChecked(session.selected ? session.selected->exclude_lan : true);
+	QuicSwitch().IsChecked(session.selected ? session.selected->block_quic : true);
 	LoginSwitch().IsChecked(session.launch_at_login);
 	HiddenSwitch().IsChecked(session.start_hidden);
 	quiet = false;
@@ -480,6 +482,53 @@ void MainWindow::Hold(anim::Storyboard const& board) {
 	board.Begin();
 }
 
+void MainWindow::PaintNotice(controls::Border const& card, controls::TextBlock const& text, std::string const& content, bool& shown) {
+	bool want = !content.empty();
+	if (want) {
+		text.Text(H(content));
+	}
+
+	if (want == shown) {
+		return;
+	}
+
+	shown = want;
+	if (want) {
+		card.Visibility(mux::Visibility::Visible);
+		if (!quiet) {
+			Hold(motion::slide_in_y(card, -14, 280));
+		} else {
+			motion::snap(card);
+		}
+		return;
+	}
+
+	if (quiet) {
+		card.Visibility(mux::Visibility::Collapsed);
+		motion::snap(card);
+		return;
+	}
+
+	auto board = motion::slide_out_y(card, -14, 220);
+	if (!board) {
+		card.Visibility(mux::Visibility::Collapsed);
+		motion::snap(card);
+		return;
+	}
+
+	auto life = get_strong();
+	bool* flag = &shown;
+	board.Completed([life, card, flag](IInspectable const&, IInspectable const&) {
+		if (*flag) {
+			return;
+		}
+
+		card.Visibility(mux::Visibility::Collapsed);
+		motion::snap(card);
+	});
+	Hold(board);
+}
+
 void MainWindow::HookSwitch(controls::Primitives::ToggleButton const& button) {
 	button.Loaded([this, button](auto&&, auto&&) { ShowSwitch(button, false); });
 	button.Checked([this, button](auto&&, auto&&) { ShowSwitch(button, !quiet && button.IsLoaded()); });
@@ -554,7 +603,9 @@ void MainWindow::PaintChrome() {
 	caption(DirectButton(), "Direct");
 	caption(ThroughButton(), "Through");
 	label(LanTitle(), "Local network directly");
-	label(RulesNote(), "A domain matches that name and its subdomains. An app is matched by its process path while connected.");
+	label(QuicTitle(), "Block browser QUIC");
+	label(QuicBody(), "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes.");
+	label(RulesNote(), "IPs, domains, and apps for the Direct / Through mode.");
 	label(RulesEmpty(), "Nothing here yet. Add an IP, a domain, or an app.");
 	caption(AddRouteButton(), "Add route");
 	caption(AddAppButton(), "Add app");
@@ -566,7 +617,7 @@ void MainWindow::PaintChrome() {
 	label(LanguageTitle(), "Language");
 	label(LanguageBody(), "Language of the Fairlead interface. Auto follows the system language.");
 	label(DefaultTitle(), "Default tunnel");
-	label(DefaultBody(), "Fairlead selects this tunnel when it opens and connects it.");
+	label(DefaultBody(), "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens.");
 	caption(ConfigFolderButton(), "Config folder");
 	caption(StartHelperButton(), "Start helper");
 	caption(SettingsClose(), "Close");
@@ -599,10 +650,8 @@ void MainWindow::Paint() {
 	bool has = tunnel != nullptr;
 	Empty().Visibility(shown(!has));
 	Detail().Visibility(shown(has));
-	NoticeCard().Visibility(shown(!session.notice.empty()));
-	NoticeText().Text(H(session.notice));
-	Banner().Visibility(shown(!session.banner.empty()));
-	BannerText().Text(H(session.banner));
+	PaintNotice(NoticeCard(), NoticeText(), session.notice, notice_shown);
+	PaintNotice(Banner(), BannerText(), session.banner, banner_shown);
 	TitleText().Text(H(tunnel ? tunnel->name : ""));
 	EndpointText().Text(H(tunnel ? tunnel->endpoint : ""));
 	AddressText().Text(H(tunnel ? tunnel->address : ""));
@@ -643,6 +692,7 @@ void MainWindow::NoteSelection() {
 	DetailScroll().ChangeView(nullptr, winrt::box_value(0.0).as<winrt::Windows::Foundation::IReference<double>>(), nullptr, true);
 	quiet = true;
 	LanSwitch().IsChecked(session.selected ? session.selected->exclude_lan : true);
+	QuicSwitch().IsChecked(session.selected ? session.selected->block_quic : true);
 	quiet = false;
 	if (!session.selected) {
 		PaintAwg(false);
@@ -886,11 +936,12 @@ void MainWindow::PaintRules() {
 
 		return l10n::addresses(addresses);
 	};
-	auto add = [&](std::string const& kind, std::string const& title, std::string const& sub, bool on, std::wstring const& icon_path, bool missing, std::function<void(bool)> set, std::function<void()> remove, std::function<void()> look) {
+	/* Leading 28×28 mark: list glyph or app icon. No text tags — keeps rows aligned across languages. */
+	auto add = [&](bool is_app, std::string const& title, std::string const& sub, bool on, std::wstring const& icon_path, bool missing, std::function<void(bool)> set, std::function<void()> remove, std::function<void()> look) {
 		controls::Grid grid;
 		grid.Padding({ 11, 11, 11, 11 });
 		grid.Margin({ 0, 0, 0, 8 });
-		grid.ColumnSpacing(8);
+		grid.ColumnSpacing(10);
 		grid.CornerRadius({ 10, 10, 10, 10 });
 		grid.Background(media::SolidColorBrush(rgba(8, 255, 255, 255)));
 		grid.BorderBrush(brush(L"LineBrush"));
@@ -904,14 +955,34 @@ void MainWindow::PaintRules() {
 		grid.ColumnDefinitions().Append(c0);
 		grid.ColumnDefinitions().Append(c1);
 		grid.ColumnDefinitions().Append(c2);
-		controls::TextBlock k;
-		k.Text(H(l10n::text(kind)));
-		k.FontSize(10);
-		k.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
-		k.Foreground(brush(L"MutedBrush"));
-		k.VerticalAlignment(mux::VerticalAlignment::Center);
-		k.MinWidth(28);
-		k.Margin({ 0, 0, 2, 0 });
+
+		controls::Grid mark;
+		mark.Width(28);
+		mark.Height(28);
+		mark.VerticalAlignment(mux::VerticalAlignment::Center);
+		if (is_app) {
+			controls::Image icon;
+			icon.Width(28);
+			icon.Height(28);
+			icon.Opacity(missing ? 0.4 : 1);
+			if (!icon_path.empty()) {
+				if (auto source = IconFor(icon_path)) {
+					icon.Source(source);
+				}
+			}
+
+			mark.Children().Append(icon);
+		} else {
+			controls::TextBlock list_icon;
+			list_icon.Text(L"\uE8FD");
+			list_icon.FontFamily(media::FontFamily(L"Segoe Fluent Icons, Segoe MDL2 Assets"));
+			list_icon.FontSize(14);
+			list_icon.Foreground(brush(L"MutedBrush"));
+			list_icon.HorizontalAlignment(mux::HorizontalAlignment::Center);
+			list_icon.VerticalAlignment(mux::VerticalAlignment::Center);
+			mark.Children().Append(list_icon);
+		}
+
 		controls::StackPanel text;
 		text.Spacing(2);
 		text.VerticalAlignment(mux::VerticalAlignment::Center);
@@ -931,23 +1002,6 @@ void MainWindow::PaintRules() {
 			text.Children().Append(line);
 		}
 
-		controls::StackPanel body;
-		body.Orientation(controls::Orientation::Horizontal);
-		body.Spacing(10);
-		body.VerticalAlignment(mux::VerticalAlignment::Center);
-		if (!icon_path.empty()) {
-			controls::Image icon;
-			icon.Width(28);
-			icon.Height(28);
-			icon.Opacity(missing ? 0.4 : 1);
-			if (auto source = IconFor(icon_path)) {
-				icon.Source(source);
-			}
-
-			body.Children().Append(icon);
-		}
-
-		body.Children().Append(text);
 		controls::StackPanel actions;
 		actions.Orientation(controls::Orientation::Horizontal);
 		actions.Spacing(8);
@@ -1002,16 +1056,16 @@ void MainWindow::PaintRules() {
 		});
 		actions.Children().Append(toggle);
 		actions.Children().Append(remove_button);
-		grid.Children().Append(k);
-		grid.Children().Append(body);
+		grid.Children().Append(mark);
+		grid.Children().Append(text);
 		grid.Children().Append(actions);
-		controls::Grid::SetColumn(body, 1);
+		controls::Grid::SetColumn(text, 1);
 		controls::Grid::SetColumn(actions, 2);
 		Rules().Children().Append(grid);
 	};
 	for (auto const& list : tunnel->lists) {
 		RouteList* item = list.get();
-		add("List", item->name, summary(item), item->enabled, L"", false, [item](bool value) { item->enabled = value; }, [this, tunnel, item] {
+		add(false, item->name, summary(item), item->enabled, L"", false, [item](bool value) { item->enabled = value; }, [this, tunnel, item] {
 			std::erase_if(tunnel->lists, [&](std::unique_ptr<RouteList> const& one) { return one.get() == item; });
 		}, [this, item] { OpenList(item); });
 	}
@@ -1020,7 +1074,7 @@ void MainWindow::PaintRules() {
 		AppRule* item = app.get();
 		bool missing = !std::filesystem::exists(std::filesystem::path(widen(item->path)));
 		std::string sub = l10n::text(missing ? "App not found" : "Process rule");
-		add("App", item->name, sub, item->enabled, widen(item->path), missing, [item](bool value) { item->enabled = value; }, [tunnel, item] {
+		add(true, item->name, sub, item->enabled, widen(item->path), missing, [item](bool value) { item->enabled = value; }, [tunnel, item] {
 			std::erase_if(tunnel->apps, [&](std::unique_ptr<AppRule> const& one) { return one.get() == item; });
 		}, [this, item] { OpenApp(item); });
 	}
@@ -1773,6 +1827,16 @@ void MainWindow::LanToggled(IInspectable const&, mux::RoutedEventArgs const&) {
 	}
 
 	session.SetLan(is_on(LanSwitch()));
+	Paint();
+	PushBypassAsync(session.selected);
+}
+
+void MainWindow::QuicToggled(IInspectable const&, mux::RoutedEventArgs const&) {
+	if (quiet || !session.selected) {
+		return;
+	}
+
+	session.SetBlockQuic(is_on(QuicSwitch()));
 	Paint();
 	PushBypassAsync(session.selected);
 }

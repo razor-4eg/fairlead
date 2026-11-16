@@ -9,6 +9,7 @@
 import Darwin
 import Foundation
 import FairleadCore
+import notify
 
 let mihomoInterface = "mihomo"
 
@@ -20,6 +21,7 @@ struct MihomoRules {
     var domains: [String]
     var apps: [String]
     var excludeLAN: Bool
+    var blockQUIC: Bool
     var selected: Bool
 }
 
@@ -180,6 +182,7 @@ private func writeYAML(wg: String, rules: MihomoRules, secret: String) -> String
         wg: wg,
         selected: rules.selected,
         excludeLAN: rules.excludeLAN,
+        blockQUIC: rules.blockQUIC,
         cidrs: rules.cidrs,
         domains: rules.domains,
         apps: rules.apps,
@@ -355,6 +358,8 @@ Turn the TUN off through the controller so mihomo drops the adapter and routes, 
 private func stopProcess() {
     let pid = mihomoPID
     if mihomoRunning() {
+        // Drop live flows before tearing the TUN down so Chrome can reopen on the real path.
+        closeConnections()
         _ = mihomoAPI("PATCH", "/configs", secret: mihomoSecret, body: "{\"tun\":{\"enable\":false}}", timeout: 1)
         let quiet = Date().addingTimeInterval(0.5)
         while mihomoRunning(), Date() < quiet {
@@ -543,10 +548,13 @@ func mihomoReload(wg: String, rules: MihomoRules) -> String? {
 ===============
 closeConnections
 Drop live flows so new rules apply. Leave DNS caches alone.
+Nudge the system network-change watchers so Chrome abandons poisoned QUIC/HTTP3 sessions
+without a full browser restart (UDP/443 is also REJECT'd in the mihomo config).
 ===============
 */
 private func closeConnections() {
     _ = mihomoAPI("DELETE", "/connections", secret: mihomoSecret, timeout: 3)
+    notify_post("com.apple.system.config.network_change")
 }
 
 /*

@@ -30,13 +30,13 @@
 "%@  ·  %@" = "%@  ·  %@";
 "Close" = "Fermer";
 "Set up" = "Configurer";
-"Direct" = "Direct";
+"Direct" = "Hors tunnel";
 "These addresses stay out of the tunnel and use the regular network." = "Ces adresses restent hors du tunnel et passent par le réseau habituel.";
-"Apps" = "Apps";
+"Apps" = "Applications";
 "Add app" = "Ajouter une app";
 "Local network directly" = "Réseau local en direct";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 ou 10.1.0.0/16";
-"Note" = "Note";
+"Note" = "Remarque";
 "App not found" = "App introuvable";
 "Config" = "Configuration";
 "Fields" = "Champs";
@@ -48,7 +48,7 @@
 "Copy" = "Copier";
 "Save" = "Enregistrer";
 "Public key  %@" = "Clé publique %@";
-"auto" = "auto";
+"auto" = "automatique";
 "key" = "clé";
 "Hide" = "Masquer";
 "Show" = "Afficher";
@@ -169,12 +169,12 @@
 "Except the list" = "Sauf la liste";
 "Only the list" = "Seulement la liste";
 "Only these addresses use the tunnel. Everything else stays on the regular network." = "Seules ces adresses passent par le tunnel. Le reste continue sur le réseau habituel.";
-"Through the tunnel" = "Par le tunnel";
+"Through the tunnel" = "Via le tunnel";
 "Address %@ covers the whole internet. Use the other filter for that." = "L'adresse %@ couvre tout internet. Utilisez l'autre filtre pour cela.";
-"Through" = "Tunnel";
+"Through" = "Via le tunnel";
 "IP" = "IP";
 "Domain" = "Domaine";
-"App" = "App";
+"App" = "Application";
 "Nothing here yet. Add an IP, a domain, or an app." = "Rien pour l'instant. Ajoutez une IP, un domaine ou une app.";
 "Enter an IP, a network, or a domain." = "Saisissez une IP, un réseau ou un domaine.";
 "203.0.113.10 or example.com" = "203.0.113.10 ou example.com";
@@ -189,7 +189,7 @@
 "%d domains.many" = "%d domaines";
 "%d domains.other" = "%d domaines";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Un domaine correspond à ce nom et à ses sous-domaines. Une app est reconnue par le chemin de son processus tant que la connexion est active.";
+"IPs, domains, and apps for the Direct / Through mode." = "IP, domaines et apps pour le mode Hors tunnel / Via le tunnel.";
 "The tunnel exited. %@" = "Le tunnel s’est arrêté. %@";
 "The tunnel did not answer on %@." = "Le tunnel n’a pas répondu sur %@.";
 "The tunnel could not start the network adapter. %@" = "Le tunnel n’a pas pu démarrer l’adaptateur réseau. %@";
@@ -222,3 +222,13 @@
 "The tunnel did not start." = "Le tunnel n’a pas démarré.";
 "The tunnel started without a network adapter." = "Le tunnel a démarré sans adaptateur réseau.";
 "The tunnel could not be reached." = "Le tunnel ne répond pas.";
+"None" = "Aucun";
+"Could not sign the helper." = "Impossible de signer le service.";
+"The controller address is missing." = "L’adresse du contrôleur est manquante.";
+"The config has no peer." = "La configuration n’a pas de pair.";
+"Interface Address is required." = "L’adresse d’interface est requise.";
+"Out of memory." = "Mémoire insuffisante.";
+"PrivateKey and PublicKey are required." = "PrivateKey et PublicKey sont requis.";
+"Block browser QUIC" = "Bloquer le QUIC du navigateur";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Coupe HTTP/3 pour le trafic du tunnel afin que les navigateurs se remettent après un changement de règles.";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "« Aucun » laisse les tunnels éteints. « Dernier actif » ou un tunnel nommé est sélectionné et connecté à l’ouverture.";

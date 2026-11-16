@@ -189,7 +189,7 @@
 "%d domains.many" = "%d доменов";
 "%d domains.other" = "%d домена";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Домен совпадает с этим именем и его поддоменами. Приложение сопоставляется по пути процесса, пока туннель включён.";
+"IPs, domains, and apps for the Direct / Through mode." = "IP, домены и приложения для режима «Напрямую» / «В туннель».";
 "The tunnel exited. %@" = "Туннель завершился. %@";
 "The tunnel did not answer on %@." = "Туннель не ответил на %@.";
 "The tunnel could not start the network adapter. %@" = "Туннель не смог запустить сетевой адаптер. %@";
@@ -222,3 +222,13 @@
 "The tunnel did not start." = "Туннель не запустился.";
 "The tunnel started without a network adapter." = "Туннель запустился без сетевого адаптера.";
 "The tunnel could not be reached." = "Туннель не отвечает.";
+"None" = "Нет";
+"Could not sign the helper." = "Не удалось подписать службу.";
+"The controller address is missing." = "Не указан адрес контроллера.";
+"The config has no peer." = "В конфиге нет пира.";
+"Interface Address is required." = "Нужен адрес интерфейса (Address).";
+"Out of memory." = "Недостаточно памяти.";
+"PrivateKey and PublicKey are required." = "Нужны PrivateKey и PublicKey.";
+"Block browser QUIC" = "Блокировать QUIC в браузере";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Отключает HTTP/3 для трафика через туннель, чтобы браузеры не «залипали» после смены правил.";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "«Нет» — туннели не поднимаются. «Последний активный» или выбранный туннель выбирается и подключается при запуске Fairlead.";

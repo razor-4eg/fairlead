@@ -32,7 +32,7 @@
 "Set up" = "Configurar";
 "Direct" = "Direto";
 "These addresses stay out of the tunnel and use the regular network." = "Estes endereços ficam fora do túnel e usam a rede normal.";
-"Apps" = "Apps";
+"Apps" = "Aplicativos";
 "Add app" = "Adicionar app";
 "Local network directly" = "Rede local em direto";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 ou 10.1.0.0/16";
@@ -48,7 +48,7 @@
 "Copy" = "Copiar";
 "Save" = "Guardar";
 "Public key  %@" = "Chave pública %@";
-"auto" = "auto";
+"auto" = "automático";
 "key" = "chave";
 "Hide" = "Ocultar";
 "Show" = "Mostrar";
@@ -171,10 +171,10 @@
 "Only these addresses use the tunnel. Everything else stays on the regular network." = "Só estes endereços usam o túnel. O resto fica na rede normal.";
 "Through the tunnel" = "Pelo túnel";
 "Address %@ covers the whole internet. Use the other filter for that." = "O endereço %@ cobre toda a internet. Use o outro filtro para isso.";
-"Through" = "Túnel";
+"Through" = "Pelo túnel";
 "IP" = "IP";
 "Domain" = "Domínio";
-"App" = "App";
+"App" = "Aplicativo";
 "Nothing here yet. Add an IP, a domain, or an app." = "Ainda não há nada. Adicione um IP, um domínio ou uma app.";
 "Enter an IP, a network, or a domain." = "Introduza um IP, uma rede ou um domínio.";
 "203.0.113.10 or example.com" = "203.0.113.10 ou example.com";
@@ -189,7 +189,7 @@
 "%d domains.many" = "%d domínios";
 "%d domains.other" = "%d domínios";
 
-"A domain matches that name and its subdomains. An app is matched by its process path while connected." = "Um domínio corresponde a esse nome e aos seus subdomínios. Uma app é reconhecida pelo caminho do seu processo enquanto há ligação.";
+"IPs, domains, and apps for the Direct / Through mode." = "IPs, domínios e apps para o modo Direto / Pelo túnel.";
 "The tunnel exited. %@" = "O túnel terminou. %@";
 "The tunnel did not answer on %@." = "O túnel não respondeu em %@.";
 "The tunnel could not start the network adapter. %@" = "O túnel não conseguiu iniciar o adaptador de rede. %@";
@@ -222,3 +222,13 @@
 "The tunnel did not start." = "O túnel não iniciou.";
 "The tunnel started without a network adapter." = "O túnel iniciou sem adaptador de rede.";
 "The tunnel could not be reached." = "O túnel não responde.";
+"None" = "Nenhum";
+"Could not sign the helper." = "Não foi possível assinar o serviço.";
+"The controller address is missing." = "Falta o endereço do controlador.";
+"The config has no peer." = "A configuração não tem um peer.";
+"Interface Address is required." = "O endereço da interface é obrigatório.";
+"Out of memory." = "Memória insuficiente.";
+"PrivateKey and PublicKey are required." = "PrivateKey e PublicKey são obrigatórios.";
+"Block browser QUIC" = "Bloquear QUIC do navegador";
+"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Mantém HTTP/3 desligado no tráfego do túnel para os navegadores recuperarem após mudar regras.";
+"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "«Nenhum» deixa os túneis desligados. «Último ativo» ou um túnel nomeado é selecionado e ligado ao abrir o Fairlead.";
