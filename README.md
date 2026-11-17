@@ -29,10 +29,11 @@ WireGuard is a trademark of Jason A. Donenfeld. Fairlead is an independent clien
 - **WireGuard and AmneziaWG** in one app — Amnezia configs show an AmneziaWG badge
 - **Import** `.conf` files, JSON shares, or Amnezia `vpn://` links; drag and drop onto the window
 - **Direct / Through** routing — either exclude a list from the tunnel, or send only that list through it
-- **Live filter updates** — Direct / Through rules apply while connected; no reconnect needed
+- **Live filter updates** — Direct / Through rules apply while connected (engine restarts cleanly so routes stay honest)
 - **Routes by IP, domain, or app** — match running programs by path, not by addresses learned earlier
 - **Local network** can stay off the tunnel
-- **Optional QUIC block** for tunnel traffic, so browsers recover cleanly when rules change
+- **Optional QUIC block** — rejects UDP/443 so browsers use TCP through the tunnel (needed for YouTube/Chrome)
+- **Honest status** — Connected only when the system path actually uses the tunnel, not just an internal probe
 - **Live metrics** — rates, totals, and reachability while connected
 - **Menu bar (macOS) / tray (Windows)** — close the window without disconnecting
 - **Open at login**, start hidden, and a **default tunnel** that can connect on launch

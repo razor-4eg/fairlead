@@ -42,8 +42,8 @@ struct BypassPane: View {
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(Theme.text)
                     Text(FairleadL10n.text(tunnel.routePolicy == .selected
-                         ? "Only these addresses use the tunnel. Everything else stays on the regular network."
-                         : "These addresses stay out of the tunnel and use the regular network."))
+                         ? "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network."
+                         : "These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel."))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -147,7 +147,7 @@ struct BypassPane: View {
                 Text(FairleadL10n.text("Block browser QUIC"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.text)
-                Text(FairleadL10n.text("Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes."))
+                Text(FairleadL10n.text("Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change."))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)

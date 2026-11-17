@@ -29,9 +29,7 @@
 #define CONTROLLER_HOST L"127.0.0.1"
 #define CONTROLLER_PORT 18984
 #define CONTROLLER_ADDR "127.0.0.1:18984"
-#define PROXY_NAME "fairlead"
 
-#define PROBE_PATH "/proxies/" PROXY_NAME "/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=1500&expected=204"
 #define PROBE_EVERY_SEC 15
 #define PROBE_RETRY_SEC 1
 #define PROBE_STALE_SEC 45
@@ -69,6 +67,8 @@ typedef struct session_s {
 } session_t;
 
 static session_t s_session;
+
+static int tunnel_path_ready(void);
 
 /*
 ===============
@@ -527,7 +527,7 @@ static int tun_enabled(void) {
 /*
 ===============
 wait_ready
-Wait for the controller, then for tun.enable. TUN can take tens of seconds to fail or come up.
+Wait for the controller, then for the system path into Meta/Wintun.
 ===============
 */
 static int wait_ready(char *err, int err_cap) {
@@ -558,7 +558,7 @@ static int wait_ready(char *err, int err_cap) {
 		return 0;
 	}
 
-	/* mihomo retries TUN for ~45s before giving up and leaving tun.enable false. */
+	/* mihomo retries TUN for ~45s; then wait until system traffic enters Meta/Wintun. */
 	for (i = 0; i < 100; i++) {
 		if (!is_running()) {
 			last_line(line, (int)sizeof(line));
@@ -566,7 +566,7 @@ static int wait_ready(char *err, int err_cap) {
 			return 0;
 		}
 
-		if (tun_enabled()) {
+		if (tunnel_path_ready()) {
 			return 1;
 		}
 
@@ -578,7 +578,13 @@ static int wait_ready(char *err, int err_cap) {
 			return 0;
 		}
 
-		Sleep(200);
+		Sleep(500);
+	}
+
+	if (tun_enabled()) {
+		snprintf(err, (size_t)err_cap,
+			"The tunnel adapter is up, but system routes still point at the regular network.");
+		return 0;
 	}
 
 	snprintf(err, (size_t)err_cap, "The tunnel started without a network adapter.");
@@ -729,6 +735,48 @@ static int nic_score(MIB_IFROW *row) {
 	}
 
 	return 0;
+}
+
+/*
+===============
+tun_routes_active
+True when general IPv4 traffic is steered into Meta/Wintun (mihomo auto-route).
+Same idea as Mac `route get 1.1.1.1` → utun.
+===============
+*/
+static int tun_routes_active(void) {
+	struct in_addr	dest;
+	DWORD			ifindex;
+	MIB_IFROW		row;
+
+	if (InetPtonA(AF_INET, "1.1.1.1", &dest) != 1) {
+		return 0;
+	}
+
+	ifindex = 0;
+
+	if (GetBestInterface(dest.S_un.S_addr, &ifindex) != NO_ERROR || ifindex == 0) {
+		return 0;
+	}
+
+	memset(&row, 0, sizeof(row));
+	row.dwIndex = ifindex;
+
+	if (GetIfEntry(&row) != NO_ERROR) {
+		return 0;
+	}
+
+	return nic_score(&row) > 0;
+}
+
+/*
+===============
+tunnel_path_ready
+TUN is enabled in mihomo and the system default path actually enters that adapter.
+===============
+*/
+static int tunnel_path_ready(void) {
+	return tun_enabled() && tun_routes_active();
 }
 
 /*
@@ -1063,40 +1111,6 @@ static void reset_app_tcp(wchar_t (*names)[MAX_PATH], int count) {
 
 /*
 ===============
-probe_delay
-HTTP probe through the WireGuard outbound. Returns delay ms, or 0 on failure.
-===============
-*/
-static int probe_delay(void) {
-	char	reply[256];
-	int		status;
-	char	*p;
-	int		delay;
-
-	status = 0;
-	delay = 0;
-
-	/* Delay alone is not enough — WireGuard can answer with TUN disabled. */
-	if (!tun_enabled()) {
-		return 0;
-	}
-
-	if (!api("GET", PROBE_PATH, NULL, reply, (int)sizeof(reply), &status, 2500) || status != 200) {
-		return 0;
-	}
-
-	p = strstr(reply, "\"delay\":");
-
-	if (!p) {
-		return 0;
-	}
-
-	delay = atoi(p + 8);
-	return delay > 0 ? delay : 0;
-}
-
-/*
-===============
 resolve_endpoint_ip
 DNS lookup before TUN is up. Stores an IPv4 address for ICMP ping.
 ===============
@@ -1322,7 +1336,8 @@ static void refresh_traffic(win_tun_result_t *out) {
 /*
 ===============
 fill_result
-Counters, HTTP probe for tunnel liveness, ICMP ping for the UI (only after the tunnel is up).
+Counters, path-ready Connected, ICMP ping for the UI (only after the tunnel is up).
+Connected = system path enters Meta/Wintun — never the HTTP delay probe.
 ===============
 */
 static void fill_result(win_tun_result_t *out) {
@@ -1330,7 +1345,7 @@ static void fill_result(win_tun_result_t *out) {
 	int		need_probe;
 	int		need_ping;
 	int		gap;
-	int		delay;
+	int		path_ready;
 	int		ping;
 
 	fill_identity(out);
@@ -1361,81 +1376,75 @@ static void fill_result(win_tun_result_t *out) {
 		return;
 	}
 
-	/* After a respawn, wait for TUN before counting probe failures. */
-	if (s_session.recover_until != 0 && now < s_session.recover_until && !tun_enabled()) {
+	/* After a respawn, wait for the system path before counting failures. */
+	if (s_session.recover_until != 0 && now < s_session.recover_until && !tunnel_path_ready()) {
 		snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
 		return;
 	}
 
-	if (s_session.recover_until != 0 && (now >= s_session.recover_until || tun_enabled())) {
+	if (s_session.recover_until != 0 && (now >= s_session.recover_until || tunnel_path_ready())) {
 		s_session.recover_until = 0;
 	}
 
 	/*
-	 * While connecting, retry often. Once reachable, re-check every PROBE_EVERY_SEC.
-	 * Keep the stage on "Checking…" after the first attempt — "Opening…" between retries
-	 * looked like a hang when WireGuard was slow after a rapid reconnect.
+	 * Connected = system path enters our TUN (what Chrome/curl use).
+	 * HTTP delay is not used — gstatic can time out on a working tunnel.
 	 */
-	gap = s_session.last_ok == 0 ? PROBE_RETRY_SEC : PROBE_EVERY_SEC;
-	need_probe = s_session.last_probe == 0 ||
-		(now >= s_session.last_probe && (now - s_session.last_probe) >= gap);
+	path_ready = tunnel_path_ready();
 
-	if (s_session.last_ok == 0) {
+	if (path_ready) {
+		s_session.last_ok = now;
+		s_session.probe_fails = 0;
+		s_session.recover_until = 0;
+		out->stage[0] = '\0';
+	} else {
+		s_session.last_ok = 0;
+		s_session.last_delay_ms = 0;
 		snprintf(out->stage, sizeof(out->stage),
 			s_session.last_probe == 0 ? "Opening the tunnel…" : "Checking the tunnel…");
 	}
 
+	gap = path_ready ? PROBE_EVERY_SEC : PROBE_RETRY_SEC;
+	need_probe = s_session.last_probe == 0 ||
+		(now >= s_session.last_probe && (now - s_session.last_probe) >= gap);
+
 	if (need_probe) {
 		s_session.last_probe = now;
-		snprintf(out->stage, sizeof(out->stage), "Checking the tunnel…");
-		delay = probe_delay();
 
-		if (delay > 0) {
-			s_session.last_ok = now;
-			s_session.last_delay_ms = delay;
-			s_session.probe_fails = 0;
-			s_session.recover_until = 0;
-		} else {
-			/* TUN off means Connected must drop now — WireGuard delay can still succeed alone. */
-			if (!tun_enabled()) {
+		if (!path_ready) {
+			s_session.probe_fails++;
+
+			/*
+			 * Rapid down/up can leave WireGuard stuck until mihomo is restarted.
+			 * A few recoveries per session; grace window avoids burning them while TUN rises.
+			 */
+			if (s_session.probe_fails >= PROBE_FAIL_RESTART &&
+				s_session.recoveries < PROBE_MAX_RECOVER && s_session.wg) {
+				log_line("fairlead: tunnel path lost, restarting mihomo");
+				s_session.recoveries++;
+				s_session.probe_fails = 0;
+				s_session.last_probe = 0;
 				s_session.last_ok = 0;
-				s_session.last_delay_ms = 0;
-			}
+				s_session.recover_until = now + 45;
+				stop_proc();
 
-			if (s_session.last_ok == 0) {
-				s_session.probe_fails++;
-
-				/*
-				 * Rapid down/up can leave WireGuard stuck until mihomo is restarted.
-				 * A few recoveries per session; grace window avoids burning them while TUN rises.
-				 */
-				if (s_session.probe_fails >= PROBE_FAIL_RESTART &&
-					s_session.recoveries < PROBE_MAX_RECOVER && s_session.wg) {
-					log_line("fairlead: tunnel not reachable, restarting mihomo");
-					s_session.recoveries++;
-					s_session.probe_fails = 0;
-					s_session.last_probe = 0;
-					s_session.last_ok = 0;
-					s_session.recover_until = now + 45;
-					stop_proc();
-
-					if (spawn_mihomo()) {
-						snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
-					} else {
-						snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
-						add_warning(out, "The tunnel could not be restarted.");
-					}
-				} else if (s_session.recoveries >= PROBE_MAX_RECOVER &&
-					s_session.probe_fails >= PROBE_FAIL_RESTART) {
+				if (spawn_mihomo()) {
+					snprintf(out->stage, sizeof(out->stage), "Opening the tunnel…");
+				} else {
 					snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
+					add_warning(out, "The tunnel could not be restarted.");
 				}
+			} else if (s_session.recoveries >= PROBE_MAX_RECOVER &&
+				s_session.probe_fails >= PROBE_FAIL_RESTART) {
+				snprintf(out->stage, sizeof(out->stage), "The tunnel could not be reached.");
 			}
 		}
 	}
 
-	if (s_session.last_ok != 0 && now >= s_session.last_ok && (now - s_session.last_ok) <= PROBE_STALE_SEC) {
+	if (path_ready && s_session.last_ok != 0 &&
+		now >= s_session.last_ok && (now - s_session.last_ok) <= PROBE_STALE_SEC) {
 		out->handshake = (int)s_session.last_ok;
-		out->delay_ms = s_session.last_delay_ms;
+		out->delay_ms = 0;
 		out->stage[0] = '\0';
 		/* Tiny ICMP to the endpoint IP. Every few seconds is enough for the UI. */
 		need_ping = s_session.last_ping_at == 0 ||
@@ -1482,32 +1491,6 @@ static void json_path(const char *src, char *dst, int cap) {
 	}
 
 	dst[n] = '\0';
-}
-
-/*
-===============
-reload
-Ask the running mihomo to read config.yaml again. Soft first; force only when asked.
-===============
-*/
-static int reload(int force) {
-	char	path[MAX_PATH * 2];
-	char	body[MAX_PATH * 2 + 32];
-	char	reply[256];
-	char	route[64];
-	int		status;
-
-	status = 0;
-	json_path(s_session.config_path, path, (int)sizeof(path));
-	snprintf(body, sizeof(body), "{\"path\":\"%s\"}", path);
-	snprintf(route, sizeof(route), force ? "/configs?force=true" : "/configs");
-
-	/* Rule-only reloads often exceed a few seconds while TUN/routes settle. */
-	if (!api("PUT", route, body, reply, (int)sizeof(reply), &status, 20000)) {
-		return 0;
-	}
-
-	return status >= 200 && status < 300;
 }
 
 /*
@@ -1787,41 +1770,42 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 	}
 
 	/*
-	 * Soft-reload rules, then drop mihomo's flows and RST the listed apps' TCP
-	 * so an already running program reconnects under the new process rule.
-	 * A full process restart is the fallback when the reload itself is refused.
+	 * Soft PUT /configs recreates proxies/DNS inside a live process and can leave
+	 * apps on the physical path while the internal delay probe still succeeds.
+	 * Restart so TUN, routes, and WireGuard come up together, then RST listed apps.
 	 */
-	if (reload(0)) {
-		close_connections();
-		reset_app_tcp(exes, exe_count);
-	} else {
-		log_line("fairlead: rule reload failed, restarting mihomo");
+	log_line("fairlead: applying rules with mihomo restart");
+	close_connections();
+	stop_proc();
+
+	if (!spawn_mihomo() || !wait_ready(err, (int)sizeof(err))) {
+		snprintf(out->error, sizeof(out->error), "The tunnel could not be restarted.");
 		stop_proc();
-
-		if (!spawn_mihomo() || !wait_ready(err, (int)sizeof(err))) {
-			snprintf(out->error, sizeof(out->error), "The tunnel could not be restarted.");
-			stop_proc();
-			session_clear();
-			free(exes);
-			return 0;
-		}
-
-		s_session.recoveries = 0;
-		s_session.probe_fails = 0;
-		s_session.last_probe = 0;
-		s_session.last_ok = 0;
-		s_session.traffic_tick = 0;
-		s_session.down_bps = 0;
-		s_session.up_bps = 0;
-		s_session.recover_until = time(NULL) + 45;
+		session_clear();
+		free(exes);
+		return 0;
 	}
+
+	s_session.recoveries = 0;
+	s_session.probe_fails = 0;
+	s_session.last_probe = 0;
+	s_session.last_ok = 0;
+	s_session.last_delay_ms = 0;
+	s_session.traffic_tick = 0;
+	s_session.down_bps = 0;
+	s_session.up_bps = 0;
+	s_session.recover_until = time(NULL) + 45;
+	reset_app_tcp(exes, exe_count);
 
 	out->ok = 1;
 	fill_identity(out);
 
-	if (tun_enabled() && s_session.last_ok != 0) {
+	/* wait_ready already required path-ready; confirm before claiming Connected. */
+	if (tunnel_path_ready()) {
+		s_session.last_ok = time(NULL);
+		s_session.recover_until = 0;
 		out->handshake = (int)s_session.last_ok;
-		out->delay_ms = s_session.last_delay_ms;
+		out->delay_ms = 0;
 		out->ping_ms = s_session.last_ping_ms;
 	} else {
 		snprintf(out->stage, sizeof(out->stage), "Checking the tunnel…");

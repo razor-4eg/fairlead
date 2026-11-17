@@ -289,7 +289,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="3" VerticalAlignment="Center">
                                         <TextBlock x:Name="QuicTitle" Text="Block browser QUIC" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                                        <TextBlock x:Name="QuicBody" Text="Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="QuicBody" Text="Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="QuicSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="QuicToggled"/>
                                 </Grid>

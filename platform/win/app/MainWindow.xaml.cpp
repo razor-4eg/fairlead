@@ -632,7 +632,7 @@ void MainWindow::PaintChrome() {
 	caption(ThroughButton(), "Through");
 	label(LanTitle(), "Local network directly");
 	label(QuicTitle(), "Block browser QUIC");
-	label(QuicBody(), "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes.");
+	label(QuicBody(), "Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change.");
 	label(RulesNote(), "IPs, domains, and apps for the Direct / Through mode.");
 	label(RulesEmpty(), "Nothing here yet. Add an IP, a domain, or an app.");
 	caption_icon(AddRouteButton(), "Add route", L"\uE710");

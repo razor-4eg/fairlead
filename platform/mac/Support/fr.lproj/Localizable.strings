@@ -198,6 +198,7 @@
 "Edit list" = "Modifier la liste";
 "Saving the list" = "Enregistrement de la liste";
 "Opening the tunnel…" = "Ouverture du tunnel…";
+"Updating routes…" = "Mise à jour des routes…";
 "Stopping the tunnel…" = "Arrêt du tunnel…";
 "Tunnel is off" = "Le tunnel est désactivé";
 "Private LAN ranges stay off the tunnel when this is on." = "Les plages LAN privées restent hors du tunnel lorsque cette option est activée.";
@@ -221,6 +222,7 @@
 "That file is not a WireGuard or AmneziaWG config." = "Ce fichier n’est pas une configuration WireGuard ou AmneziaWG.";
 "The tunnel did not start." = "Le tunnel n’a pas démarré.";
 "The tunnel started without a network adapter." = "Le tunnel a démarré sans adaptateur réseau.";
+"The tunnel adapter is up, but system routes still point at the regular network." = "L’adaptateur du tunnel est actif, mais les routes système pointent encore vers le réseau normal.";
 "The tunnel could not be reached." = "Le tunnel ne répond pas.";
 "None" = "Aucun";
 "Could not sign the helper." = "Impossible de signer le service.";
@@ -231,4 +233,12 @@
 "PrivateKey and PublicKey are required." = "PrivateKey et PublicKey sont requis.";
 "Block browser QUIC" = "Bloquer le QUIC du navigateur";
 "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Coupe HTTP/3 pour le trafic du tunnel afin que les navigateurs se remettent après un changement de règles.";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "Force le HTTPS en TCP dans le tunnel. Nécessaire pour YouTube et un Chrome stable quand les règles changent.";
 "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "« Aucun » laisse les tunnels éteints. « Dernier actif » ou un tunnel nommé est sélectionné et connecté à l’ouverture.";
+"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "Seules ces adresses et apps utilisent le tunnel. Domaines et IP priment sur les apps. Le reste reste sur le réseau normal.";
+
+"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "Ces adresses restent hors du tunnel. Domaines et IP priment sur les apps — un domaine Direct fonctionne même dans une app Through.";
+
+"Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "Seules ces adresses et apps utilisent le tunnel. Domaines et IP sont évalués avant les apps. Le reste reste sur le réseau normal.";
+
+"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "Ces adresses restent hors du tunnel. Domaines et IP avant les apps — un domaine Direct fonctionne même depuis Chrome qui utilise sinon le tunnel.";

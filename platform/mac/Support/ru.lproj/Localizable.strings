@@ -198,6 +198,7 @@
 "Edit list" = "Изменить список";
 "Saving the list" = "Сохранение списка";
 "Opening the tunnel…" = "Поднимаю туннель…";
+"Updating routes…" = "Обновляю маршруты…";
 "Stopping the tunnel…" = "Останавливаю туннель…";
 "Tunnel is off" = "Туннель выключен";
 "Private LAN ranges stay off the tunnel when this is on." = "Локальные сети остаются вне туннеля, пока это включено.";
@@ -221,6 +222,7 @@
 "That file is not a WireGuard or AmneziaWG config." = "Этот файл не является конфигом WireGuard или AmneziaWG.";
 "The tunnel did not start." = "Туннель не запустился.";
 "The tunnel started without a network adapter." = "Туннель запустился без сетевого адаптера.";
+"The tunnel adapter is up, but system routes still point at the regular network." = "Адаптер туннеля поднят, но системные маршруты всё ещё идут в обычную сеть.";
 "The tunnel could not be reached." = "Туннель не отвечает.";
 "None" = "Нет";
 "Could not sign the helper." = "Не удалось подписать службу.";
@@ -231,4 +233,12 @@
 "PrivateKey and PublicKey are required." = "Нужны PrivateKey и PublicKey.";
 "Block browser QUIC" = "Блокировать QUIC в браузере";
 "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Отключает HTTP/3 для трафика через туннель, чтобы браузеры не «залипали» после смены правил.";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "Гонит HTTPS по TCP через туннель. Нужно для YouTube и стабильного Chrome при смене правил.";
 "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "«Нет» — туннели не поднимаются. «Последний активный» или выбранный туннель выбирается и подключается при запуске Fairlead.";
+"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "Только эти адреса и приложения идут через туннель. Домены и IP важнее приложений. Всё остальное — обычная сеть.";
+
+"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "Эти адреса обходят туннель. Домены и IP важнее приложений — Direct-домен открывается даже из Through-приложения.";
+
+"Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "Только эти адреса и приложения идут через туннель. Домены и IP проверяются раньше приложений. Всё остальное — обычная сеть.";
+
+"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "Эти адреса обходят туннель. Домены и IP важнее приложений — Direct-домен открывается даже из Chrome, который иначе идёт через туннель.";

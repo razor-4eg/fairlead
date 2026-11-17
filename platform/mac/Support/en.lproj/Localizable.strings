@@ -198,6 +198,7 @@
 "Edit list" = "Edit list";
 "Saving the list" = "Saving the list";
 "Opening the tunnel…" = "Opening the tunnel…";
+"Updating routes…" = "Updating routes…";
 "Stopping the tunnel…" = "Stopping the tunnel…";
 "Tunnel is off" = "Tunnel is off";
 "Private LAN ranges stay off the tunnel when this is on." = "Private LAN ranges stay off the tunnel when this is on.";
@@ -221,6 +222,7 @@
 "That file is not a WireGuard or AmneziaWG config." = "That file is not a WireGuard or AmneziaWG config.";
 "The tunnel did not start." = "The tunnel did not start.";
 "The tunnel started without a network adapter." = "The tunnel started without a network adapter.";
+"The tunnel adapter is up, but system routes still point at the regular network." = "The tunnel adapter is up, but system routes still point at the regular network.";
 "The tunnel could not be reached." = "The tunnel could not be reached.";
 "None" = "None";
 "Could not sign the helper." = "Could not sign the helper.";
@@ -231,5 +233,14 @@
 "PrivateKey and PublicKey are required." = "PrivateKey and PublicKey are required.";
 "Block browser QUIC" = "Block browser QUIC";
 "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes.";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change.";
 "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens.";
 
+
+"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network.";
+
+"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app.";
+
+"Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network.";
+
+"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel.";

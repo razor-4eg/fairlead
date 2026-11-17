@@ -385,11 +385,13 @@ match_proxy: MATCH goes to PROXY when 1.
 /*
 ===============
 emit_quic_reject
-Chrome/YouTube HTTP/3 (QUIC, UDP/443) keeps a session across path changes. When a
-process flips between PROXY and DIRECT the QUIC flow is poisoned and the tab shows
-"no internet" until Chrome restarts. Force TCP HTTPS for remaining traffic.
+Chrome/YouTube HTTP/3 (QUIC, UDP/443) keeps a session across path changes and is
+unreliable through mihomo's userspace WireGuard outbound. Reject UDP/443 so the
+browser falls back to TCP HTTPS through PROXY.
 DIRECT process rules are emitted before this so excluded apps can still use QUIC.
 Only UDP/443 is blocked — game/voice UDP on other ports is untouched.
+Note: mihomo REJECT for UDP is a silent blackhole (no ICMP), so fallback can take
+a couple of seconds per attempt — still required for stable YouTube/Chrome.
 ===============
 */
 static void emit_quic_reject(ybuf_t *b) {
@@ -464,22 +466,29 @@ static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_s
 	}
 
 	/*
-	 * Exceptions mode: listed apps go DIRECT before the QUIC reject so Chrome
-	 * outside the tunnel can keep HTTP/3. Through mode lists apps after reject.
+	 * Host (domain/IP) rules before process rules so a Direct domain still wins when
+	 * Chrome is Through the tunnel (PROCESS would otherwise catch every Chrome flow).
+	 *
+	 * Exceptions: hosts DIRECT → apps DIRECT (before QUIC so excluded apps keep HTTP/3)
+	 *             → QUIC reject → MATCH PROXY.
+	 * Through:    QUIC reject → hosts PROXY → apps PROXY → MATCH DIRECT.
 	 */
 	if (!policy_selected) {
+		emit_host_rules(b, rules, hit);
+		emit_app_rules(b, rules, hit);
+
+		if (block_quic) {
+			emit_quic_reject(b);
+		}
+	} else {
+		if (block_quic) {
+			emit_quic_reject(b);
+		}
+
+		emit_host_rules(b, rules, hit);
 		emit_app_rules(b, rules, hit);
 	}
 
-	if (block_quic) {
-		emit_quic_reject(b);
-	}
-
-	if (policy_selected) {
-		emit_app_rules(b, rules, hit);
-	}
-
-	emit_host_rules(b, rules, hit);
 	y_fmt(b, "  - MATCH,%s\n", miss);
 }
 
@@ -604,7 +613,12 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 	y_add(&b, "bind-address: 127.0.0.1\n");
 	y_add(&b, "mode: rule\n");
 	y_add(&b, "log-level: warning\n");
-	y_add(&b, "ipv6: true\n");
+	/*
+	 * Only enable IPv6 when the WireGuard Address has a v6 token. Otherwise
+	 * Chrome Happy Eyeballs / QUIC can prefer broken v6 while the probe (IPv4)
+	 * still succeeds and the UI looks Connected.
+	 */
+	y_fmt(&b, "ipv6: %s\n", ip6[0] ? "true" : "false");
 	y_add(&b, "find-process-mode: always\n");
 	y_add(&b, "external-controller: ");
 	y_add(&b, controller);
@@ -631,8 +645,11 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 		y_add(&b, "    - 172.16.0.0/12\n");
 		y_add(&b, "    - 192.168.0.0/16\n");
 		y_add(&b, "    - 169.254.0.0/16\n");
-		y_add(&b, "    - fc00::/7\n");
-		y_add(&b, "    - fe80::/10\n");
+
+		if (ip6[0]) {
+			y_add(&b, "    - fc00::/7\n");
+			y_add(&b, "    - fe80::/10\n");
+		}
 	}
 
 	/* Keep the WireGuard endpoint off the TUN when it is a literal IP. */
@@ -687,6 +704,24 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 	y_add(&b, "    - 1.1.1.1\n");
 	y_add(&b, "    - 8.8.8.8\n");
 
+	/*
+	 * Chrome Secure DNS (DoH) bypasses dns-hijack, so DOMAIN-SUFFIX never sees a host
+	 * unless we sniff TLS/QUIC SNI. force-dns-mapping + parse-pure-ip make Direct
+	 * domains work when the process itself is Through (MATCH PROXY, app switch off).
+	 */
+	y_add(&b, "sniffer:\n");
+	y_add(&b, "  enable: true\n");
+	y_add(&b, "  force-dns-mapping: true\n");
+	y_add(&b, "  parse-pure-ip: true\n");
+	y_add(&b, "  override-destination: false\n");
+	y_add(&b, "  sniff:\n");
+	y_add(&b, "    HTTP:\n");
+	y_add(&b, "      ports: [80, 8080-8880]\n");
+	y_add(&b, "    TLS:\n");
+	y_add(&b, "      ports: [443, 8443]\n");
+	y_add(&b, "    QUIC:\n");
+	y_add(&b, "      ports: [443]\n");
+
 	y_add(&b, "proxies:\n");
 	y_add(&b, "  - name: fairlead\n");
 	y_add(&b, "    type: wireguard\n");
@@ -737,7 +772,10 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 	y_add(&b, "    udp: true\n");
 	y_add(&b, "    allowed-ips:\n");
 	y_add(&b, "      - 0.0.0.0/0\n");
-	y_add(&b, "      - ::/0\n");
+
+	if (ip6[0]) {
+		y_add(&b, "      - ::/0\n");
+	}
 
 	if (dns_n > 0) {
 		y_add(&b, "    remote-dns-resolve: true\n");
@@ -814,13 +852,13 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 			y_add(&b, "  - GEOIP,LAN,DIRECT\n");
 		}
 
+		/* Hosts before apps — same priority as the full-tunnel path. */
+		emit_host_rules(&b, rules, "DIRECT");
 		emit_app_rules(&b, rules, "DIRECT");
 
 		if (block_quic) {
 			emit_quic_reject(&b);
 		}
-
-		emit_host_rules(&b, rules, "DIRECT");
 
 		for (i = 0; i < n; i++) {
 			y_add(&b, "  - IP-CIDR,");

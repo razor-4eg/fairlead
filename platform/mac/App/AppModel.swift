@@ -1155,6 +1155,16 @@ pushRoutes
     private func pushRoutes(for tunnel: Tunnel) async {
         routesBusy += 1
         defer { routesBusy = max(0, routesBusy - 1) }
+
+        let wasConnected = live(tunnel.id).phase == .connected
+        if isUp(tunnel.id) {
+            mutate(tunnel.id) { live in
+                live.phase = .connecting
+                live.stage = FairleadL10n.text("Updating routes…")
+                live.handshake = nil
+            }
+        }
+
         let response = await rpc(
             RPCRequest(
                 op: "bypass",
@@ -1168,12 +1178,33 @@ pushRoutes
             ),
             timeout: 120
         )
-        guard let response else { return }
+        guard let response else {
+            if wasConnected {
+                mutate(tunnel.id) {
+                    $0.phase = .idle
+                    $0.stage = nil
+                    $0.handshake = nil
+                }
+            }
+            return
+        }
         if let managed = response.managed?.first(where: { $0.name == tunnel.slug }) {
-            // Keep Connecting until a real handshake — bypass must not claim Connected.
-            let phase = live(tunnel.id).phase
-            apply(managed, to: tunnel.id, phase: phase == .idle ? .connecting : phase)
+            // Keep Connecting until the path is ready — bypass must not claim Connected early.
+            apply(managed, to: tunnel.id, phase: .connecting)
+            if let devices = response.devices {
+                absorb(devices, interface: managed.realInterface, id: tunnel.id)
+            }
             promoteIfHandshaken(tunnel.id)
+            if live(tunnel.id).phase == .connecting {
+                await refresh()
+                promoteIfHandshaken(tunnel.id)
+            }
+        } else if wasConnected {
+            mutate(tunnel.id) {
+                $0.phase = .idle
+                $0.stage = nil
+                $0.handshake = nil
+            }
         }
 
         if let warnings = response.warnings {

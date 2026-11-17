@@ -221,9 +221,17 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::DisconnectAsync(Tunnel* tun
 winrt::Windows::Foundation::IAsyncAction MainWindow::PushBypassAsync(Tunnel* tunnel) {
 	auto life = get_strong();
 	auto queue = DispatcherQueue();
-	if (!tunnel || !tunnel->connected) {
+	/* Same as Mac isUp — allow while Connecting so rules apply mid-reconnect. */
+	if (!tunnel || !(tunnel->connected || tunnel->phase == "Connecting")) {
 		co_return;
 	}
+
+	bool was_connected = tunnel->connected;
+	tunnel->phase = "Connecting";
+	tunnel->connected = false;
+	tunnel->handshake = 0;
+	tunnel->detail = l10n::text("Updating routes…");
+	Paint();
 
 	auto body = session.Rpc("bypass", tunnel, true);
 	co_await winrt::resume_background();
@@ -239,6 +247,15 @@ winrt::Windows::Foundation::IAsyncAction MainWindow::PushBypassAsync(Tunnel* tun
 		co_return;
 	}
 
+	tunnel->connected = false;
+	tunnel->handshake = 0;
+	if (was_connected) {
+		tunnel->phase = "Off";
+		tunnel->detail = l10n::text("Tunnel is off");
+	} else {
+		tunnel->phase = "Connecting";
+		tunnel->detail = l10n::text("Checking the tunnel…");
+	}
 	session.banner = l10n::display(session.ErrorOf(reply));
 	if (session.banner.empty()) {
 		session.banner = l10n::text("Could not update routes on the live tunnel.");

@@ -198,6 +198,7 @@
 "Edit list" = "编辑列表";
 "Saving the list" = "正在保存列表";
 "Opening the tunnel…" = "正在打开隧道…";
+"Updating routes…" = "正在更新路由…";
 "Stopping the tunnel…" = "正在停止隧道…";
 "Tunnel is off" = "隧道已关闭";
 "Private LAN ranges stay off the tunnel when this is on." = "开启后，私有局域网地址段不经过隧道。";
@@ -221,6 +222,7 @@
 "That file is not a WireGuard or AmneziaWG config." = "该文件不是 WireGuard 或 AmneziaWG 配置。";
 "The tunnel did not start." = "隧道未能启动。";
 "The tunnel started without a network adapter." = "隧道已启动但没有网络适配器。";
+"The tunnel adapter is up, but system routes still point at the regular network." = "隧道适配器已启动，但系统路由仍指向普通网络。";
 "The tunnel could not be reached." = "无法连通隧道。";
 "None" = "无";
 "Could not sign the helper." = "无法为服务签名。";
@@ -231,4 +233,12 @@
 "PrivateKey and PublicKey are required." = "需要 PrivateKey 和 PublicKey。";
 "Block browser QUIC" = "阻止浏览器 QUIC";
 "Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "对隧道流量关闭 HTTP/3，避免浏览器在规则切换后卡住。";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "强制隧道内 HTTPS 走 TCP。YouTube 与规则切换后的 Chrome 稳定性需要此项。";
 "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "「无」不自动连接。选择「上次活动」或指定隧道时，打开 Fairlead 会选中并连接它。";
+"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "仅这些地址和应用走隧道。域名和 IP 优先于应用。其余仍走普通网络。";
+
+"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "这些地址不走隧道。域名和 IP 优先于应用，因此 Direct 域名在 Through 应用内仍可直连。";
+
+"Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "仅这些地址和应用走隧道。域名和 IP 先于应用匹配。其余仍走普通网络。";
+
+"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "这些地址不走隧道。域名和 IP 先于应用匹配，因此 Direct 域名即使在平时走隧道的 Chrome 里也能直连。";
