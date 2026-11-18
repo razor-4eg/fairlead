@@ -31,6 +31,7 @@ struct MainWindow : MainWindowT<MainWindow> {
 	void OnEscape(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&, Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
 	void SearchChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::TextChangedEventArgs const&);
 	void TunnelChosen(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+	void TunnelReorder(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const& args);
 	void NewTunnel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void ImportTunnel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void TogglePower(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -166,6 +167,7 @@ private:
 	void OpenApp(AppRule* app);
 	void AskDeleteTunnel(Tunnel* tunnel);
 	void OnTunnelMenu(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::RightTappedRoutedEventArgs const& args);
+	void SyncTunnelReorder(bool allow);
 	void HookHwnd();
 	void RestoreBounds();
 	void SaveBounds();

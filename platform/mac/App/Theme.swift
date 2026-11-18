@@ -35,6 +35,8 @@ enum Motion {
     static let press = Animation.spring(response: 0.28, dampingFraction: 0.55, blendDuration: 0)
     /// Amnezia badge and other one-shot slide-ins.
     static let slideIn = Animation.spring(response: 0.48, dampingFraction: 0.78, blendDuration: 0)
+    /// Drag handoff: proxy flies from the cursor into its list slot.
+    static let settle = Animation.spring(response: 0.38, dampingFraction: 0.86, blendDuration: 0)
 }
 
 /// Scale press like the Windows Composition spring on power / list rows.

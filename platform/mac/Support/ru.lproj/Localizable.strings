@@ -9,6 +9,10 @@
 "Connect" = "Подключить";
 "Edit" = "Изменить";
 "Export…" = "Экспорт…";
+"Duplicate" = "Дублировать";
+"%@ copy" = "%@ — копия";
+"%@ copy %d" = "%@ — копия %d";
+
 "Delete" = "Удалить";
 "Delete the tunnel “%@”?" = "Удалить туннель «%@»?";
 "Cancel" = "Отмена";
@@ -31,10 +35,9 @@
 "Close" = "Закрыть";
 "Set up" = "Настроить";
 "Direct" = "Напрямую";
-"These addresses stay out of the tunnel and use the regular network." = "Эти адреса не входят в туннель и уходят через обычную сеть.";
 "Apps" = "Приложения";
 "Add app" = "Добавить приложение";
-"Local network directly" = "Локальная сеть напрямую";
+"Keep local network direct" = "Локальная сеть напрямую";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 или 10.1.0.0/16";
 "Note" = "Заметка";
 "App not found" = "Приложение не найдено";
@@ -142,11 +145,10 @@
 "Settings…" = "Настройки…";
 "Open at login" = "Запускать при входе";
 "Start hidden" = "Запускать скрытым";
-"Fairlead starts when you sign in. A default tunnel connects on its own." = "Fairlead открывается при входе в систему. Туннель по умолчанию подключается сам.";
+"Fairlead starts when you sign in. If a default tunnel is set, it connects automatically." = "Fairlead открывается при входе в систему. Если задан туннель по умолчанию — он подключается сам.";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "Только в строке меню. Окно откроется по щелчку на значке Fairlead.";
 "Default tunnel" = "Туннель по умолчанию";
 "Last active" = "Последний активный";
-"Fairlead selects this tunnel when it opens and connects it." = "Fairlead выбирает этот туннель при запуске и подключает его.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS ждёт разрешения. Откройте Системные настройки → Основные → Объекты входа и разрешите Fairlead.";
 "The running helper is an older copy. Fairlead will replace it." = "Запущена старая служба. Fairlead заменит её.";
 "Enter a domain, for example example.com." = "Введите домен, например example.com.";
@@ -166,9 +168,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers и DisableCookies должны быть true или false.";
 "Signature packets must stay on one line." = "Пакеты подписи должны быть в одной строке.";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive должен быть числом или диапазоном, например 20-30.";
-"Except the list" = "Кроме списка";
-"Only the list" = "Только список";
-"Only these addresses use the tunnel. Everything else stays on the regular network." = "Через туннель идут только эти адреса. Остальное остаётся в обычной сети.";
 "Through the tunnel" = "Через туннель";
 "Address %@ covers the whole internet. Use the other filter for that." = "Адрес %@ охватывает весь интернет. Для этого выберите другой фильтр.";
 "Through" = "В туннель";
@@ -182,7 +181,7 @@
 "One address or domain per line." = "Один адрес или домен на строку.";
 "example.com\n203.0.113.10\n10.1.0.0/16" = "example.com\n203.0.113.10\n10.1.0.0/16";
 "List" = "Список";
-"Adding the list" = "Добавляем список";
+"Adding the list" = "Добавление списка…";
 "A list can hold 4096 entries." = "В списке может быть не больше 4096 записей.";
 "%d domains.one" = "%d домен";
 "%d domains.few" = "%d домена";
@@ -197,9 +196,9 @@
 "Could not build the tunnel config." = "Не удалось собрать конфиг туннеля.";
 "Edit list" = "Изменить список";
 "Saving the list" = "Сохранение списка";
-"Opening the tunnel…" = "Поднимаю туннель…";
-"Updating routes…" = "Обновляю маршруты…";
-"Stopping the tunnel…" = "Останавливаю туннель…";
+"Opening the tunnel…" = "Подключение туннеля…";
+"Updating routes…" = "Обновление маршрутов…";
+"Stopping the tunnel…" = "Остановка туннеля…";
 "Tunnel is off" = "Туннель выключен";
 "Private LAN ranges stay off the tunnel when this is on." = "Локальные сети остаются вне туннеля, пока это включено.";
 "Auto" = "Авто";
@@ -208,7 +207,7 @@
 
 /* Windows */
 "Process rule" = "Правило для процесса";
-"Looking for apps…" = "Ищу приложения…";
+"Looking for apps…" = "Поиск приложений…";
 "Browse…" = "Обзор…";
 "No apps found. Use Browse… to pick an .exe." = "Приложения не найдены. Выберите .exe через «Обзор…».";
 "No matches." = "Ничего не найдено.";
@@ -232,13 +231,9 @@
 "Out of memory." = "Недостаточно памяти.";
 "PrivateKey and PublicKey are required." = "Нужны PrivateKey и PublicKey.";
 "Block browser QUIC" = "Блокировать QUIC в браузере";
-"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Отключает HTTP/3 для трафика через туннель, чтобы браузеры не «залипали» после смены правил.";
-"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "Гонит HTTPS по TCP через туннель. Нужно для YouTube и стабильного Chrome при смене правил.";
-"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "«Нет» — туннели не поднимаются. «Последний активный» или выбранный туннель выбирается и подключается при запуске Fairlead.";
-"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "Только эти адреса и приложения идут через туннель. Домены и IP важнее приложений. Всё остальное — обычная сеть.";
-
-"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "Эти адреса обходят туннель. Домены и IP важнее приложений — Direct-домен открывается даже из Through-приложения.";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change." = "Переводит HTTPS на TCP в туннеле. Нужно для YouTube и стабильной работы браузеров при смене правил.";
+"None keeps tunnels off. Otherwise Fairlead selects Last active or the chosen tunnel and connects it when it opens." = "«Нет» — туннели не поднимаются. Иначе при запуске выбирается и подключается «Последний активный» или указанный туннель.";
 
 "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "Только эти адреса и приложения идут через туннель. Домены и IP проверяются раньше приложений. Всё остальное — обычная сеть.";
 
-"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "Эти адреса обходят туннель. Домены и IP важнее приложений — Direct-домен открывается даже из Chrome, который иначе идёт через туннель.";
+"These stay off the tunnel. Domains and IPs are matched before apps — so a listed domain bypasses the tunnel even from an app that otherwise uses it." = "Эти адреса обходят туннель. Домены и IP важнее приложений — домен из списка обходит туннель даже из приложения, которое иначе идёт через туннель.";

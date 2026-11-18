@@ -118,6 +118,8 @@ struct Session {
 	std::unique_ptr<Tunnel> MakeDraft();
 	void Adopt(std::unique_ptr<Tunnel> tunnel);
 	bool ImportFile(std::string const& path);
+	Tunnel* Duplicate(Tunnel* tunnel);
+	bool Reorder(std::vector<std::string> const& ids);
 	void Delete(Tunnel* tunnel);
 	void SaveConfig(Tunnel* tunnel, std::string config);
 	void RememberLast(std::string const& id);

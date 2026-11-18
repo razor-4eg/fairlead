@@ -347,8 +347,8 @@ std::string Session::PolicyTitle() const {
 
 std::string Session::PolicyBody() const {
 	return l10n::text(selected && selected->selected_policy
-		? "Only these addresses use the tunnel. Everything else stays on the regular network."
-		: "These addresses stay out of the tunnel and use the regular network.");
+		? "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network."
+		: "These stay off the tunnel. Domains and IPs are matched before apps — so a listed domain bypasses the tunnel even from an app that otherwise uses it.");
 }
 
 std::vector<Tunnel*> Session::Filtered() const {
@@ -737,6 +737,124 @@ void Session::Adopt(std::unique_ptr<Tunnel> tunnel) {
 
 	selected = tunnel.get();
 	tunnels.push_back(std::move(tunnel));
+}
+
+static std::string unique_copy_name(std::vector<std::unique_ptr<Tunnel>> const& tunnels, std::string const& base) {
+	std::string first = l10n::format("%@ copy", base);
+	auto taken = [&](std::string const& name) {
+		for (auto const& tunnel : tunnels) {
+			if (tunnel->name == name) {
+				return true;
+			}
+		}
+
+		return false;
+	};
+	if (!taken(first)) {
+		return first;
+	}
+
+	for (int n = 2;; n++) {
+		std::string name = l10n::format("%@ copy %d", base, n);
+		if (!taken(name)) {
+			return name;
+		}
+	}
+}
+
+Tunnel* Session::Duplicate(Tunnel* tunnel) {
+	if (!tunnel || tunnels.size() >= 24) {
+		return nullptr;
+	}
+
+	auto copy = new_tunnel(unique_copy_name(tunnels, tunnel->name), tunnel->config);
+	copy->exclude_lan = tunnel->exclude_lan;
+	copy->block_quic = tunnel->block_quic;
+	copy->selected_policy = tunnel->selected_policy;
+	for (auto const& list : tunnel->lists) {
+		auto next = std::make_unique<RouteList>();
+		next->id = hex_id(8);
+		next->name = list->name;
+		next->enabled = list->enabled;
+		for (auto const& entry : list->entries) {
+			RouteEntry row;
+			row.id = hex_id(8);
+			row.kind = entry.kind;
+			row.value = entry.value;
+			next->entries.push_back(std::move(row));
+		}
+
+		copy->lists.push_back(std::move(next));
+	}
+
+	for (auto const& app : tunnel->apps) {
+		auto next = std::make_unique<AppRule>();
+		next->id = hex_id(8);
+		next->path = app->path;
+		next->name = app->name;
+		next->enabled = app->enabled;
+		copy->apps.push_back(std::move(next));
+	}
+
+	localize_idle(*copy);
+	RefreshLabels(copy.get());
+	size_t at = tunnels.size();
+	for (size_t i = 0; i < tunnels.size(); i++) {
+		if (tunnels[i].get() == tunnel) {
+			at = i + 1;
+			break;
+		}
+	}
+
+	Tunnel* live = copy.get();
+	selected = live;
+	tunnels.insert(tunnels.begin() + (std::ptrdiff_t)at, std::move(copy));
+	Save();
+	return live;
+}
+
+bool Session::Reorder(std::vector<std::string> const& ids) {
+	if (ids.size() != tunnels.size() || tunnels.empty()) {
+		return false;
+	}
+
+	std::vector<size_t> order;
+	order.reserve(ids.size());
+	std::vector<bool> used(tunnels.size(), false);
+	bool changed = false;
+	for (size_t step = 0; step < ids.size(); step++) {
+		size_t at = tunnels.size();
+		for (size_t i = 0; i < tunnels.size(); i++) {
+			if (!used[i] && tunnels[i]->id == ids[step]) {
+				at = i;
+				break;
+			}
+		}
+
+		if (at == tunnels.size()) {
+			return false;
+		}
+
+		used[at] = true;
+		order.push_back(at);
+		if (at != step) {
+			changed = true;
+		}
+	}
+
+	if (!changed) {
+		return false;
+	}
+
+	std::vector<std::unique_ptr<Tunnel>> next;
+	next.reserve(tunnels.size());
+	for (size_t at : order) {
+		next.push_back(std::move(tunnels[at]));
+	}
+
+	tunnels = std::move(next);
+	Save();
+	return true;
 }
 
 bool Session::ImportFile(std::string const& path) {

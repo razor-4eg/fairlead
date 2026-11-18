@@ -91,6 +91,11 @@ loadDrop
 struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var pendingDelete: Tunnel?
+    @State private var draggedID: UUID?
+
+    private var canReorder: Bool {
+        model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -148,9 +153,15 @@ struct SidebarView: View {
                 .padding(.bottom, 8)
 
             ScrollView {
-                LazyVStack(spacing: 2) {
+                // VStack (not Lazy): macOS onDrag hit-testing is unreliable in LazyVStack.
+                VStack(spacing: 2) {
                     ForEach(model.filtered) { tunnel in
-                        SidebarRow(tunnel: tunnel, pendingDelete: $pendingDelete)
+                        SidebarRow(
+                            tunnel: tunnel,
+                            pendingDelete: $pendingDelete,
+                            draggedID: $draggedID,
+                            canReorder: canReorder
+                        )
                     }
                 }
                 .padding(.horizontal, 10)
@@ -165,6 +176,11 @@ struct SidebarView: View {
             .padding(14)
         }
         .background(Theme.sidebar)
+        .onChange(of: canReorder) { _, ok in
+            if !ok {
+                draggedID = nil
+            }
+        }
     }
 
     private var helperStatus: String {
@@ -177,50 +193,227 @@ struct SidebarRow: View {
     @EnvironmentObject private var model: AppModel
     var tunnel: Tunnel
     @Binding var pendingDelete: Tunnel?
+    @Binding var draggedID: UUID?
+    var canReorder: Bool
     @State private var hovered = false
+    @State private var pressed = false
 
     private var selected: Bool { model.selection == tunnel.id }
     private var connected: Bool { model.live(tunnel.id).phase == .connected }
+    private var dragging: Bool { draggedID == tunnel.id }
+    private var showPress: Bool { pressed && !dragging }
 
     var body: some View {
-        Button {
-            model.selection = tunnel.id
-        } label: {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(connected ? Theme.accent : Theme.faint)
-                    .frame(width: 7, height: 7)
-                    .animation(Motion.soft, value: connected)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tunnel.name)
-                        .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                    Text(tunnel.endpointLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
+        HStack(spacing: 10) {
+            Circle()
+                .fill(connected ? Theme.accent : Theme.faint)
+                .frame(width: 7, height: 7)
+                .animation(Motion.soft, value: connected)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tunnel.name)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Text(tunnel.endpointLabel)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(selected ? Color.white.opacity(0.07) : (hovered ? Color.white.opacity(0.035) : Color.clear))
-                    .animation(Motion.soft, value: selected)
-                    .animation(.easeOut(duration: 0.12), value: hovered)
-            )
+
+            Spacer(minLength: 0)
         }
-        .buttonStyle(FairleadPressStyle(pressedScale: 0.97))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Color.white.opacity(0.07) : (hovered || showPress ? Color.white.opacity(0.035) : Color.clear))
+                .animation(Motion.soft, value: selected)
+                .animation(.easeOut(duration: 0.12), value: hovered)
+        )
+        .scaleEffect(showPress ? 0.97 : 1)
+        .animation(Motion.press, value: showPress)
+        .contentShape(Rectangle())
+        .background(RowPressMonitor(pressed: $pressed, onClick: {
+            draggedID = nil
+            model.selection = tunnel.id
+        }))
         .onHover { hovered = $0 }
+        .modifier(
+            TunnelRowDrag(
+                enabled: canReorder,
+                tunnelID: tunnel.id,
+                draggedID: $draggedID,
+                begin: {
+                    pressed = false
+                    model.selection = tunnel.id
+                },
+                move: { id, target in model.moveTunnel(id, over: target, save: false) },
+                commit: { model.saveOrder() }
+            )
+        )
         .contextMenu {
             Button(FairleadL10n.text(connected ? "Disconnect" : "Connect")) { model.toggle(tunnel.id) }
             Button(FairleadL10n.text("Edit")) { model.editing = tunnel }
+            Button(FairleadL10n.text("Duplicate")) { model.duplicate(tunnel) }
             Button(FairleadL10n.text("Export…")) { model.export(tunnel) }
             Divider()
             Button(FairleadL10n.text("Delete"), role: .destructive) { pendingDelete = tunnel }
         }
+    }
+}
+
+/// AppKit mouse monitor: press spring without stealing hits from onDrag.
+private struct RowPressMonitor: NSViewRepresentable {
+    @Binding var pressed: Bool
+    var onClick: () -> Void
+
+    func makeNSView(context: Context) -> MonitorView {
+        let view = MonitorView()
+        view.onPressed = { pressed = $0 }
+        view.onClick = onClick
+        return view
+    }
+
+    func updateNSView(_ view: MonitorView, context: Context) {
+        view.onPressed = { pressed = $0 }
+        view.onClick = onClick
+    }
+
+    final class MonitorView: NSView {
+        var onPressed: ((Bool) -> Void)?
+        var onClick: (() -> Void)?
+        private var monitor: Any?
+        private var downInside = false
+        private var dragSlop = false
+        private var downPoint: NSPoint?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            clearMonitor()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged]) { [weak self] event in
+                self?.handle(event)
+                return event
+            }
+        }
+
+        override func removeFromSuperview() {
+            clearMonitor()
+            super.removeFromSuperview()
+        }
+
+        deinit { clearMonitor() }
+
+        private func clearMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        private func handle(_ event: NSEvent) {
+            guard let window, event.window == window else { return }
+            let local = convert(event.locationInWindow, from: nil)
+            let inside = bounds.contains(local)
+            switch event.type {
+            case .leftMouseDown:
+                guard inside else { return }
+                downInside = true
+                dragSlop = false
+                downPoint = event.locationInWindow
+                onPressed?(true)
+            case .leftMouseDragged:
+                guard downInside else { return }
+                if !dragSlop, let downPoint {
+                    let distance = hypot(event.locationInWindow.x - downPoint.x, event.locationInWindow.y - downPoint.y)
+                    if distance > 6 {
+                        dragSlop = true
+                        onPressed?(false)
+                    }
+                }
+                if !inside {
+                    onPressed?(false)
+                }
+            case .leftMouseUp:
+                let wasDown = downInside
+                let wasDrag = dragSlop
+                downInside = false
+                dragSlop = false
+                downPoint = nil
+                onPressed?(false)
+                if wasDown && inside && !wasDrag {
+                    onClick?()
+                }
+            default:
+                break
+            }
+        }
+    }
+}
+
+private struct TunnelRowDrag: ViewModifier {
+    var enabled: Bool
+    var tunnelID: UUID
+    @Binding var draggedID: UUID?
+    var begin: () -> Void
+    var move: (UUID, UUID) -> Bool
+    var commit: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                // Empty preview: live reorder already moves the row in the list; a cursor
+                // ghost on top of it just flickers.
+                .onDrag {
+                    begin()
+                    draggedID = tunnelID
+                    return NSItemProvider(object: tunnelID.uuidString as NSString)
+                } preview: {
+                    Color.clear.frame(width: 1, height: 1)
+                }
+                .onDrop(
+                    of: [.text, .utf8PlainText, .plainText],
+                    delegate: TunnelReorderDrop(
+                        targetID: tunnelID,
+                        draggedID: $draggedID,
+                        move: move,
+                        commit: commit
+                    )
+                )
+        } else {
+            content
+        }
+    }
+}
+
+private struct TunnelReorderDrop: DropDelegate {
+    var targetID: UUID
+    @Binding var draggedID: UUID?
+    var move: (UUID, UUID) -> Bool
+    var commit: () -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedID != nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: draggedID != nil ? .move : .cancel)
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedID, draggedID != targetID else { return }
+        withAnimation(Motion.soft) {
+            _ = move(draggedID, targetID)
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer { draggedID = nil }
+        guard draggedID != nil else { return false }
+        commit()
+        return true
     }
 }

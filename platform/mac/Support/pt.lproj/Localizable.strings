@@ -9,6 +9,10 @@
 "Connect" = "Conectar";
 "Edit" = "Editar";
 "Export…" = "Exportar…";
+"Duplicate" = "Duplicar";
+"%@ copy" = "%@ cópia";
+"%@ copy %d" = "%@ cópia %d";
+
 "Delete" = "Apagar";
 "Delete the tunnel “%@”?" = "Apagar o túnel “%@”?";
 "Cancel" = "Cancelar";
@@ -31,10 +35,9 @@
 "Close" = "Fechar";
 "Set up" = "Configurar";
 "Direct" = "Direto";
-"These addresses stay out of the tunnel and use the regular network." = "Estes endereços ficam fora do túnel e usam a rede normal.";
 "Apps" = "Aplicativos";
 "Add app" = "Adicionar app";
-"Local network directly" = "Rede local em direto";
+"Keep local network direct" = "Manter a rede local em direto";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 ou 10.1.0.0/16";
 "Note" = "Nota";
 "App not found" = "App não encontrada";
@@ -142,11 +145,10 @@
 "Settings…" = "Definições…";
 "Open at login" = "Abrir ao iniciar sessão";
 "Start hidden" = "Iniciar oculto";
-"Fairlead starts when you sign in. A default tunnel connects on its own." = "O Fairlead abre quando inicia sessão. Um túnel predefinido conecta-se sozinho.";
+"Fairlead starts when you sign in. If a default tunnel is set, it connects automatically." = "O Fairlead inicia ao iniciar sessão. Se houver um túnel predefinido, liga automaticamente.";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "Abrir só na barra de menus. Clique no ícone do Fairlead para mostrar a janela.";
 "Default tunnel" = "Túnel predefinido";
 "Last active" = "Último ativo";
-"Fairlead selects this tunnel when it opens and connects it." = "O Fairlead escolhe este túnel ao abrir e conecta-o.";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "O macOS ainda precisa de autorização. Abra Definições do Sistema → Geral → Itens de Início e permita o Fairlead.";
 "The running helper is an older copy. Fairlead will replace it." = "O serviço em execução é uma cópia antiga. O Fairlead vai substituí-lo.";
 "Enter a domain, for example example.com." = "Introduza um domínio, por exemplo example.com.";
@@ -166,9 +168,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers e DisableCookies têm de ser true ou false.";
 "Signature packets must stay on one line." = "Os pacotes de assinatura têm de ficar numa só linha.";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive tem de ser um número ou um intervalo, por exemplo 20-30.";
-"Except the list" = "Exceto a lista";
-"Only the list" = "Só a lista";
-"Only these addresses use the tunnel. Everything else stays on the regular network." = "Só estes endereços usam o túnel. O resto fica na rede normal.";
 "Through the tunnel" = "Pelo túnel";
 "Address %@ covers the whole internet. Use the other filter for that." = "O endereço %@ cobre toda a internet. Use o outro filtro para isso.";
 "Through" = "Pelo túnel";
@@ -232,13 +231,9 @@
 "Out of memory." = "Memória insuficiente.";
 "PrivateKey and PublicKey are required." = "PrivateKey e PublicKey são obrigatórios.";
 "Block browser QUIC" = "Bloquear QUIC do navegador";
-"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "Mantém HTTP/3 desligado no tráfego do túnel para os navegadores recuperarem após mudar regras.";
-"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "Força HTTPS por TCP no túnel. Necessário para YouTube e Chrome estável ao mudar regras.";
-"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "«Nenhum» deixa os túneis desligados. «Último ativo» ou um túnel nomeado é selecionado e ligado ao abrir o Fairlead.";
-"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "Só estes endereços e apps usam o túnel. Domínios e IPs vencem apps. Tudo o resto fica na rede normal.";
-
-"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "Estes endereços ficam fora do túnel. Domínios e IPs vencem apps — um domínio Direct funciona mesmo dentro de uma app Through.";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change." = "Força HTTPS por TCP no túnel. Necessário para YouTube e navegadores estáveis ao mudar regras.";
+"None keeps tunnels off. Otherwise Fairlead selects Last active or the chosen tunnel and connects it when it opens." = "«Nenhum» deixa os túneis desligados. Caso contrário, ao abrir o Fairlead seleciona e liga «Último ativo» ou o túnel escolhido.";
 
 "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "Só estes endereços e apps usam o túnel. Domínios e IPs são avaliados antes das apps. Tudo o resto fica na rede normal.";
 
-"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "Estes endereços ficam fora do túnel. Domínios e IPs antes das apps — um domínio Direct funciona mesmo a partir do Chrome que de outro modo usa o túnel.";
+"These stay off the tunnel. Domains and IPs are matched before apps — so a listed domain bypasses the tunnel even from an app that otherwise uses it." = "Estes endereços ficam fora do túnel. Domínios e IPs antes das apps — um domínio da lista contorna o túnel mesmo a partir de uma app que de outro modo o usa.";

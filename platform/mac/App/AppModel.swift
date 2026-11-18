@@ -599,6 +599,50 @@ importPanel
 
 /*
 ===============
+duplicate
+Clone config, Direct/Through settings, and route lists; insert after the source.
+===============
+*/
+    func duplicate(_ tunnel: Tunnel) {
+        guard let index = tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
+        let copy = tunnel.duplicated(name: uniqueCopyName(tunnel.name))
+        tunnels.insert(copy, at: index + 1)
+        selection = copy.id
+        persist()
+    }
+
+/*
+===============
+moveTunnel
+Reorder when the search field is empty. Uses List-style index math so dropEntered
+live-reorders the same way while dragging.
+===============
+*/
+    @discardableResult
+    func moveTunnel(_ id: UUID, over target: UUID, save: Bool = true) -> Bool {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.isEmpty, id != target else { return false }
+        guard let from = tunnels.firstIndex(where: { $0.id == id }),
+              let to = tunnels.firstIndex(where: { $0.id == target }) else { return false }
+        tunnels.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        if save {
+            persist()
+        }
+
+        return true
+    }
+
+/*
+===============
+saveOrder
+===============
+*/
+    func saveOrder() {
+        persist()
+    }
+
+/*
+===============
 export
 ===============
 */
@@ -1384,6 +1428,28 @@ rpc
         await Task.detached(priority: .userInitiated) {
             try? RPCClient.call(request, timeout: timeout)
         }.value
+    }
+
+/*
+===============
+uniqueCopyName
+===============
+*/
+    private func uniqueCopyName(_ base: String) -> String {
+        let first = FairleadL10n.format("%@ copy", base)
+        if !tunnels.contains(where: { $0.name == first }) {
+            return first
+        }
+
+        var n = 2
+        while true {
+            let name = FairleadL10n.format("%@ copy %d", base, n)
+            if !tunnels.contains(where: { $0.name == name }) {
+                return name
+            }
+
+            n += 1
+        }
     }
 
 /*

@@ -90,6 +90,7 @@ tunnelBody
 
                         FairleadButton(title: "Edit") { model.editing = tunnel }
                         Menu {
+                            Button(FairleadL10n.text("Duplicate")) { model.duplicate(tunnel) }
                             Button(FairleadL10n.text("Export…")) { model.export(tunnel) }
                             Button(FairleadL10n.text("Delete"), role: .destructive) { pendingDelete = tunnel }
                         } label: {

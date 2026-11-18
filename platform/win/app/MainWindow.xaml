@@ -57,7 +57,7 @@
             <FontIcon Glyph="&#xE721;" FontSize="12" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" IsHitTestVisible="False"/>
             </Grid>
             <TextBlock x:Name="TunnelsCaption" Grid.Row="2" Text="TUNNELS" Margin="4,18,0,8" FontSize="10" FontWeight="SemiBold" CharacterSpacing="80" Foreground="{StaticResource FaintBrush}"/>
-            <ListView x:Name="TunnelList" Grid.Row="3" SelectionChanged="TunnelChosen" Background="Transparent" BorderThickness="0" Padding="0" ItemContainerTransitions="{x:Null}">
+            <ListView x:Name="TunnelList" Grid.Row="3" SelectionChanged="TunnelChosen" CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="TunnelReorder" Background="Transparent" BorderThickness="0" Padding="0" ItemContainerTransitions="{x:Null}">
                     <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="Margin" Value="0,2"/>
@@ -275,7 +275,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="3" VerticalAlignment="Center">
-                                        <TextBlock x:Name="LanTitle" Text="Local network directly" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock x:Name="LanTitle" Text="Keep local network direct" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                         <TextBlock x:Name="LanBody" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="LanSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LanToggled"/>
@@ -289,7 +289,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="3" VerticalAlignment="Center">
                                         <TextBlock x:Name="QuicTitle" Text="Block browser QUIC" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                                        <TextBlock x:Name="QuicBody" Text="Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="QuicBody" Text="Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change." FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="QuicSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="QuicToggled"/>
                                 </Grid>
@@ -336,7 +336,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
                                         <TextBlock x:Name="LoginTitle" Text="Open at login" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                                        <TextBlock x:Name="LoginBody" Text="Fairlead starts when you sign in. A default tunnel connects on its own." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="LoginBody" Text="Fairlead starts when you sign in. If a default tunnel is set, it connects automatically." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleButton x:Name="LoginSwitch" Grid.Column="1" Style="{StaticResource CompactSwitch}" Click="LoginToggled"/>
                                 </Grid>
@@ -359,7 +359,7 @@
                                 <Border Height="1" Background="{StaticResource LineBrush}"/>
                                 <StackPanel Spacing="8">
                                     <TextBlock x:Name="DefaultTitle" Text="Default tunnel" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                                    <TextBlock x:Name="DefaultBody" Text="None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="DefaultBody" Text="None keeps tunnels off. Otherwise Fairlead selects Last active or the chosen tunnel and connects it when it opens." FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                     <ComboBox x:Name="DefaultCombo" HorizontalAlignment="Stretch" SelectionChanged="DefaultChanged"/>
                                 </StackPanel>
                             </StackPanel>

@@ -242,6 +242,37 @@ blank
         return Tunnel(name: name, configText: document.render())
     }
 
+/*
+===============
+duplicated
+Fresh ids for the tunnel, every list, entry, and app rule.
+===============
+*/
+    func duplicated(name: String) -> Tunnel {
+        Tunnel(
+            name: name,
+            configText: configText,
+            routeLists: routeLists.map { list in
+                RouteList(
+                    name: list.name,
+                    enabled: list.enabled,
+                    entries: list.entries.map { RouteEntry(kind: $0.kind, value: $0.value) }
+                )
+            },
+            appRules: appRules.map { rule in
+                AppRule(
+                    path: rule.path,
+                    bundleIdentifier: rule.bundleIdentifier,
+                    name: rule.name,
+                    enabled: rule.enabled
+                )
+            },
+            excludeLAN: excludeLAN,
+            blockQUIC: blockQUIC,
+            routePolicy: routePolicy
+        )
+    }
+
     var document: WGDocument { WGDocument.parse(configText) }
 
     var endpointLabel: String {

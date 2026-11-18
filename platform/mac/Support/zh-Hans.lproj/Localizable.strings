@@ -9,6 +9,10 @@
 "Connect" = "连接";
 "Edit" = "编辑";
 "Export…" = "导出…";
+"Duplicate" = "创建副本";
+"%@ copy" = "%@ 副本";
+"%@ copy %d" = "%@ 副本 %d";
+
 "Delete" = "删除";
 "Delete the tunnel “%@”?" = "删除隧道“%@”？";
 "Cancel" = "取消";
@@ -31,10 +35,9 @@
 "Close" = "关闭";
 "Set up" = "设置";
 "Direct" = "直连";
-"These addresses stay out of the tunnel and use the regular network." = "这些地址不走隧道，使用普通网络。";
 "Apps" = "应用";
 "Add app" = "添加应用";
-"Local network directly" = "本地网络直连";
+"Keep local network direct" = "本地网络保持直连";
 "203.0.113.10 or 10.1.0.0/16" = "203.0.113.10 或 10.1.0.0/16";
 "Note" = "备注";
 "App not found" = "找不到应用";
@@ -142,11 +145,10 @@
 "Settings…" = "设置…";
 "Open at login" = "登录时打开";
 "Start hidden" = "隐藏启动";
-"Fairlead starts when you sign in. A default tunnel connects on its own." = "登录后 Fairlead 会启动。默认隧道会自行连接。";
+"Fairlead starts when you sign in. If a default tunnel is set, it connects automatically." = "登录时启动 Fairlead。若设置了默认隧道，会自动连接。";
 "Open in the menu bar only. Click the Fairlead icon to show the window." = "只显示在菜单栏。点击 Fairlead 图标可打开窗口。";
 "Default tunnel" = "默认隧道";
 "Last active" = "上次使用";
-"Fairlead selects this tunnel when it opens and connects it." = "Fairlead 打开时会选中这条隧道并连接它。";
 "macOS still needs approval. Open System Settings → General → Login Items and allow Fairlead." = "macOS 还需要你的允许。请打开“系统设置”→“通用”→“登录项”，并允许 Fairlead。";
 "The running helper is an older copy. Fairlead will replace it." = "正在运行的服务是旧版本。Fairlead 会替换它。";
 "Enter a domain, for example example.com." = "输入域名，例如 example.com。";
@@ -166,9 +168,6 @@
 "RandomTrailers and DisableCookies must be true or false." = "RandomTrailers 和 DisableCookies 必须是 true 或 false。";
 "Signature packets must stay on one line." = "签名包必须写在一行里。";
 "PersistentKeepalive must be a number or a range such as 20-30." = "PersistentKeepalive 必须是数字或范围，例如 20-30。";
-"Except the list" = "除列表外";
-"Only the list" = "仅列表";
-"Only these addresses use the tunnel. Everything else stays on the regular network." = "只有这些地址走隧道。其余流量留在普通网络。";
 "Through the tunnel" = "通过隧道";
 "Address %@ covers the whole internet. Use the other filter for that." = "地址 %@ 覆盖整个互联网。若要这样，请改用另一种过滤。";
 "Through" = "隧道";
@@ -232,13 +231,9 @@
 "Out of memory." = "内存不足。";
 "PrivateKey and PublicKey are required." = "需要 PrivateKey 和 PublicKey。";
 "Block browser QUIC" = "阻止浏览器 QUIC";
-"Keeps HTTP/3 off for tunnel traffic so browsers recover after rule changes." = "对隧道流量关闭 HTTP/3，避免浏览器在规则切换后卡住。";
-"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change." = "强制隧道内 HTTPS 走 TCP。YouTube 与规则切换后的 Chrome 稳定性需要此项。";
-"None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens." = "「无」不自动连接。选择「上次活动」或指定隧道时，打开 Fairlead 会选中并连接它。";
-"Only these addresses and apps use the tunnel. Domains and IPs win over apps. Everything else stays on the regular network." = "仅这些地址和应用走隧道。域名和 IP 优先于应用。其余仍走普通网络。";
-
-"These addresses stay out of the tunnel. Domains and IPs win over apps, so a Direct domain still works inside a Through app." = "这些地址不走隧道。域名和 IP 优先于应用，因此 Direct 域名在 Through 应用内仍可直连。";
+"Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change." = "强制隧道内 HTTPS 走 TCP。YouTube 与规则切换后的浏览器稳定性需要此项。";
+"None keeps tunnels off. Otherwise Fairlead selects Last active or the chosen tunnel and connects it when it opens." = "「无」不自动连接。否则打开 Fairlead 时会选中并连接「上次活动」或指定隧道。";
 
 "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network." = "仅这些地址和应用走隧道。域名和 IP 先于应用匹配。其余仍走普通网络。";
 
-"These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel." = "这些地址不走隧道。域名和 IP 先于应用匹配，因此 Direct 域名即使在平时走隧道的 Chrome 里也能直连。";
+"These stay off the tunnel. Domains and IPs are matched before apps — so a listed domain bypasses the tunnel even from an app that otherwise uses it." = "这些地址不走隧道。域名和 IP 先于应用匹配，因此列表中的域名即使在平时走隧道的应用里也会直连。";

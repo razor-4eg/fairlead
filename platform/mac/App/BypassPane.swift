@@ -43,7 +43,7 @@ struct BypassPane: View {
                         .foregroundStyle(Theme.text)
                     Text(FairleadL10n.text(tunnel.routePolicy == .selected
                          ? "Only these addresses and apps use the tunnel. Domains and IPs are matched before apps. Everything else stays on the regular network."
-                         : "These stay off the tunnel. Domains and IPs are matched before apps — so a Direct domain works even from Chrome that otherwise uses the tunnel."))
+                         : "These stay off the tunnel. Domains and IPs are matched before apps — so a listed domain bypasses the tunnel even from an app that otherwise uses it."))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -123,7 +123,7 @@ struct BypassPane: View {
     private var lanRow: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(FairleadL10n.text("Local network directly"))
+                Text(FairleadL10n.text("Keep local network direct"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.text)
                 Text(lanCaption)
@@ -147,7 +147,7 @@ struct BypassPane: View {
                 Text(FairleadL10n.text("Block browser QUIC"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.text)
-                Text(FairleadL10n.text("Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change."))
+                Text(FairleadL10n.text("Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change."))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)

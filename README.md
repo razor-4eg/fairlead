@@ -32,7 +32,7 @@ WireGuard is a trademark of Jason A. Donenfeld. Fairlead is an independent clien
 - **Live filter updates** — Direct / Through rules apply while connected (engine restarts cleanly so routes stay honest)
 - **Routes by IP, domain, or app** — match running programs by path, not by addresses learned earlier
 - **Local network** can stay off the tunnel
-- **Optional QUIC block** — rejects UDP/443 so browsers use TCP through the tunnel (needed for YouTube/Chrome)
+- **Optional QUIC block** — rejects UDP/443 so browsers use TCP through the tunnel (needed for YouTube and stable browsers)
 - **Honest status** — Connected only when the system path actually uses the tunnel, not just an internal probe
 - **Live metrics** — rates, totals, and reachability while connected
 - **Menu bar (macOS) / tray (Windows)** — close the window without disconnecting
@@ -120,7 +120,7 @@ Add IPs or domains with **Add route**, or pick programs with **Add app**. Each r
 - **Open at login** — start Fairlead when you sign in  
 - **Start hidden** — menu bar / tray only until you open the window  
 - **Language** — Auto follows the system; or pick a fixed language  
-- **Default tunnel** — None leaves tunnels off; Last active or a named tunnel is selected and connected when Fairlead opens  
+- **Default tunnel** — None keeps tunnels off; otherwise Last active or a chosen tunnel is selected and connected when Fairlead opens  
 - **Start helper** — install or replace the system helper  
 - **Config folder** — open your local configs  
 

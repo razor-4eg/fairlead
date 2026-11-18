@@ -615,12 +615,21 @@ void MainWindow::PaintChrome() {
 	caption(EmptyCreate(), "Create");
 	caption(EditButton(), "Edit");
 	controls::MenuFlyout more;
+	controls::MenuFlyoutItem duplicate_item;
+	duplicate_item.Text(words("Duplicate"));
+	duplicate_item.Click([this](auto&&, auto&&) {
+		if (session.Duplicate(session.selected)) {
+			list_sig.clear();
+			Paint();
+		}
+	});
 	controls::MenuFlyoutItem export_item;
 	export_item.Text(words("Export…"));
 	export_item.Click([this](auto&&, auto&&) { ExportAsync(session.selected); });
 	controls::MenuFlyoutItem delete_item;
 	delete_item.Text(words("Delete"));
 	delete_item.Click([this](auto&&, auto&&) { AskDeleteTunnel(session.selected); });
+	more.Items().Append(duplicate_item);
 	more.Items().Append(export_item);
 	more.Items().Append(delete_item);
 	MoreButton().Flyout(more);
@@ -630,22 +639,22 @@ void MainWindow::PaintChrome() {
 	TxCaption().Text(capitals("Sent"));
 	caption(DirectButton(), "Direct");
 	caption(ThroughButton(), "Through");
-	label(LanTitle(), "Local network directly");
+	label(LanTitle(), "Keep local network direct");
 	label(QuicTitle(), "Block browser QUIC");
-	label(QuicBody(), "Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable Chrome when rules change.");
+	label(QuicBody(), "Forces HTTPS over TCP for tunnel traffic. Needed for YouTube and stable browsers when rules change.");
 	label(RulesNote(), "IPs, domains, and apps for the Direct / Through mode.");
 	label(RulesEmpty(), "Nothing here yet. Add an IP, a domain, or an app.");
 	caption_icon(AddRouteButton(), "Add route", L"\uE710");
 	caption_icon(AddAppButton(), "Add app", L"\uE710");
 	label(SettingsTitle(), "Settings");
 	label(LoginTitle(), "Open at login");
-	label(LoginBody(), "Fairlead starts when you sign in. A default tunnel connects on its own.");
+	label(LoginBody(), "Fairlead starts when you sign in. If a default tunnel is set, it connects automatically.");
 	label(HiddenTitle(), "Start hidden");
 	label(HiddenBody(), "Open in the tray only. Click the Fairlead icon to show the window.");
 	label(LanguageTitle(), "Language");
 	label(LanguageBody(), "Language of the Fairlead interface. Auto follows the system language.");
 	label(DefaultTitle(), "Default tunnel");
-	label(DefaultBody(), "None leaves tunnels off. Last active or a named tunnel is selected and connected when Fairlead opens.");
+	label(DefaultBody(), "None keeps tunnels off. Otherwise Fairlead selects Last active or the chosen tunnel and connects it when it opens.");
 	caption(ConfigFolderButton(), "Config folder");
 	caption(StartHelperButton(), "Start helper");
 	caption(SettingsClose(), "Close");
@@ -734,7 +743,48 @@ void MainWindow::NoteSelection() {
 	PaintRules();
 }
 
+void MainWindow::SyncTunnelReorder(bool allow) {
+	TunnelList().CanReorderItems(allow);
+	TunnelList().CanDragItems(allow);
+	TunnelList().AllowDrop(allow);
+}
+
+void MainWindow::TunnelReorder(IInspectable const&, controls::DragItemsCompletedEventArgs const&) {
+	if (!trim_copy(session.query).empty()) {
+		list_sig.clear();
+		RebuildList();
+		return;
+	}
+
+	std::vector<std::string> ids;
+	ids.reserve(TunnelList().Items().Size());
+	for (auto const& item : TunnelList().Items()) {
+		auto row = item.try_as<controls::ListViewItem>();
+		if (!row) {
+			continue;
+		}
+
+		auto tag = row.Tag().try_as<hstring>();
+		if (!tag) {
+			continue;
+		}
+
+		ids.push_back(S(*tag));
+	}
+
+	if (session.Reorder(ids)) {
+		list_sig.clear();
+		for (auto* tunnel : session.Filtered()) {
+			list_sig += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\n";
+		}
+	} else {
+		list_sig.clear();
+		RebuildList();
+	}
+}
+
 void MainWindow::RebuildList() {
+	SyncTunnelReorder(trim_copy(session.query).empty());
 	std::string content;
 	for (auto* tunnel : session.Filtered()) {
 		content += tunnel->id + "\t" + tunnel->name + "\t" + tunnel->endpoint + "\n";
@@ -1352,6 +1402,14 @@ void MainWindow::OnTunnelMenu(IInspectable const&, input::RightTappedRoutedEvent
 	controls::MenuFlyoutItem edit_item;
 	edit_item.Text(hstring(l10n::wtext("Edit")));
 	edit_item.Click([this](auto&&, auto&&) { OpenEditor(nullptr, nullptr); });
+	controls::MenuFlyoutItem dup;
+	dup.Text(hstring(l10n::wtext("Duplicate")));
+	dup.Click([this, tunnel](auto&&, auto&&) {
+		if (session.Duplicate(tunnel)) {
+			list_sig.clear();
+			Paint();
+		}
+	});
 	controls::MenuFlyoutItem exp;
 	exp.Text(hstring(l10n::wtext("Export…")));
 	exp.Click([this, tunnel](auto&&, auto&&) { ExportAsync(tunnel); });
@@ -1360,6 +1418,7 @@ void MainWindow::OnTunnelMenu(IInspectable const&, input::RightTappedRoutedEvent
 	del.Click([this, tunnel](auto&&, auto&&) { AskDeleteTunnel(tunnel); });
 	flyout.Items().Append(connect);
 	flyout.Items().Append(edit_item);
+	flyout.Items().Append(dup);
 	flyout.Items().Append(exp);
 	flyout.Items().Append(controls::MenuFlyoutSeparator());
 	flyout.Items().Append(del);
