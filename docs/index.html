@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fairlead — WireGuard &amp; AmneziaWG for macOS and Windows</title>
+    <meta name="description" content="Fairlead is a desktop client for WireGuard and AmneziaWG. Import a config, connect, and choose what goes through the tunnel.">
+    <meta name="theme-color" content="#0b0d0c">
+    <link rel="icon" href="icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="icon.png">
+
+    <meta property="og:title" content="Fairlead">
+    <meta property="og:description" content="WireGuard and AmneziaWG for macOS and Windows. Import a config, connect, and choose what goes through the tunnel.">
+    <meta property="og:image" content="screenshots/overview.png">
+    <meta property="og:type" content="website">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #0b0d0c;
+            --bg-elev: #121614;
+            --ink: #eef3ef;
+            --muted: #8b968e;
+            --line: rgba(238, 243, 239, 0.1);
+            --mint: #7cdbb6;
+            --mint-deep: #4fad8a;
+            --mint-soft: rgba(124, 219, 182, 0.14);
+            --mint-wash: rgba(124, 219, 182, 0.08);
+            --danger-ink: #c9d4cc;
+            --radius: 18px;
+            --max: 1120px;
+            --ease: cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        * { box-sizing: border-box; }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            color: var(--ink);
+            background:
+                radial-gradient(ellipse 90% 55% at 50% -10%, rgba(124, 219, 182, 0.16), transparent 55%),
+                radial-gradient(ellipse 50% 40% at 100% 20%, rgba(124, 219, 182, 0.06), transparent 50%),
+                radial-gradient(ellipse 40% 35% at 0% 60%, rgba(79, 173, 138, 0.07), transparent 55%),
+                var(--bg);
+            font: 400 16px/1.55 "IBM Plex Sans", "Helvetica Neue", Helvetica, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.35;
+            background-image:
+                linear-gradient(rgba(238, 243, 239, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(238, 243, 239, 0.03) 1px, transparent 1px);
+            background-size: 64px 64px;
+            mask-image: radial-gradient(ellipse 70% 60% at 50% 20%, #000 20%, transparent 75%);
+        }
+
+        a {
+            color: var(--mint);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+
+        code {
+            font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+            font-size: 0.92em;
+            color: var(--mint);
+            background: var(--mint-wash);
+            padding: 0.12em 0.38em;
+            border-radius: 6px;
+        }
+
+        .wrap {
+            position: relative;
+            z-index: 1;
+            width: min(100% - 40px, var(--max));
+            margin-inline: auto;
+        }
+
+        /* ---------- top bar ---------- */
+        .bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 22px 0 8px;
+        }
+
+        .bar-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--ink);
+            text-decoration: none;
+        }
+
+        .bar-mark:hover {
+            text-decoration: none;
+        }
+
+        .bar-mark img {
+            width: 36px;
+            height: 36px;
+            border-radius: 9px;
+        }
+
+        .bar-mark span {
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .bar-nav {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+        }
+
+        .bar-nav a {
+            color: var(--muted);
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+        }
+
+        .bar-nav a:hover {
+            color: var(--ink);
+        }
+
+        .bar-nav .ghost {
+            display: none;
+        }
+
+        /* ---------- hero ---------- */
+        .hero {
+            padding: 48px 0 0;
+            text-align: center;
+        }
+
+        .brand {
+            margin: 0 auto 18px;
+            font-family: Syne, sans-serif;
+            font-weight: 800;
+            font-size: clamp(56px, 12vw, 112px);
+            line-height: 0.92;
+            letter-spacing: -0.04em;
+            color: var(--ink);
+        }
+
+        .brand em {
+            font-style: normal;
+            color: var(--mint);
+        }
+
+        .lede {
+            margin: 0 auto 12px;
+            max-width: 18ch;
+            font-family: Syne, sans-serif;
+            font-weight: 600;
+            font-size: clamp(22px, 3.4vw, 34px);
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+        }
+
+        .sub {
+            margin: 0 auto 28px;
+            max-width: 38ch;
+            color: var(--muted);
+            font-size: 17px;
+            line-height: 1.5;
+        }
+
+        .cta {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 48px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            min-height: 48px;
+            padding: 0 22px;
+            border-radius: 12px;
+            border: 1px solid transparent;
+            font: 600 15px/1 "IBM Plex Sans", sans-serif;
+            text-decoration: none;
+            cursor: pointer;
+            transition: transform 180ms var(--ease), background 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease);
+        }
+
+        .btn:hover {
+            text-decoration: none;
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            color: #062218;
+            background: var(--mint);
+        }
+
+        .btn-primary:hover {
+            background: #93e6c4;
+        }
+
+        .btn-secondary {
+            color: var(--ink);
+            background: transparent;
+            border-color: var(--line);
+        }
+
+        .btn-secondary:hover {
+            border-color: rgba(124, 219, 182, 0.45);
+            background: var(--mint-wash);
+        }
+
+        .btn svg {
+            width: 16px;
+            height: 16px;
+            flex: 0 0 auto;
+        }
+
+        .hero-stage {
+            position: relative;
+            margin: 0 calc(50% - 50vw);
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        .hero-stage::before,
+        .hero-stage::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 96px;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .hero-stage::before {
+            top: 0;
+            background: linear-gradient(to bottom, var(--bg), transparent);
+        }
+
+        .hero-stage::after {
+            bottom: 0;
+            height: 140px;
+            background: linear-gradient(to top, var(--bg) 18%, transparent);
+        }
+
+        .hero-shot {
+            width: min(100%, 1280px);
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .hero-shot img {
+            width: 100%;
+            border-radius: var(--radius) var(--radius) 0 0;
+            border: 1px solid var(--line);
+            border-bottom: 0;
+            box-shadow: 0 40px 80px rgba(0, 0, 0, 0.45);
+        }
+
+        /* ---------- sections ---------- */
+        section {
+            padding: 88px 0;
+        }
+
+        .section-kicker {
+            margin: 0 0 10px;
+            color: var(--mint);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .section-title {
+            margin: 0 0 14px;
+            max-width: 16ch;
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: clamp(28px, 4.5vw, 44px);
+            line-height: 1.08;
+            letter-spacing: -0.03em;
+        }
+
+        .section-copy {
+            margin: 0 0 40px;
+            max-width: 46ch;
+            color: var(--muted);
+            font-size: 17px;
+        }
+
+        /* ---------- feature strip ---------- */
+        .features {
+            border-top: 1px solid var(--line);
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(18, 22, 20, 0.55), transparent);
+        }
+
+        .feature-list {
+            display: grid;
+            gap: 0;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            border-top: 1px solid var(--line);
+        }
+
+        .feature-list li {
+            display: grid;
+            grid-template-columns: 72px 1fr;
+            gap: 18px;
+            align-items: start;
+            padding: 26px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .feature-num {
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.12em;
+            color: var(--mint);
+            padding-top: 5px;
+        }
+
+        .feature-list h3 {
+            margin: 0 0 6px;
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: 22px;
+            letter-spacing: -0.02em;
+        }
+
+        .feature-list p {
+            margin: 0;
+            max-width: 52ch;
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        /* ---------- product views ---------- */
+        .views {
+            display: grid;
+            gap: 56px;
+        }
+
+        .view {
+            display: grid;
+            gap: 22px;
+        }
+
+        .view-copy h3 {
+            margin: 0 0 8px;
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: 26px;
+            letter-spacing: -0.02em;
+        }
+
+        .view-copy p {
+            margin: 0;
+            max-width: 46ch;
+            color: var(--muted);
+        }
+
+        .frame {
+            border-radius: var(--radius);
+            border: 1px solid var(--line);
+            background: var(--bg-elev);
+            overflow: hidden;
+        }
+
+        .frame img {
+            width: 100%;
+        }
+
+        /* ---------- get ---------- */
+        .get {
+            position: relative;
+            overflow: hidden;
+            border-radius: 28px;
+            border: 1px solid var(--line);
+            background:
+                radial-gradient(ellipse 80% 90% at 100% 0%, var(--mint-soft), transparent 55%),
+                var(--bg-elev);
+            padding: clamp(32px, 5vw, 56px);
+        }
+
+        .get .section-title {
+            max-width: 14ch;
+        }
+
+        .get-note {
+            margin: -18px 0 28px;
+            max-width: 48ch;
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        .platform-row {
+            display: grid;
+            gap: 16px;
+        }
+
+        .platform {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 18px 0;
+            border-top: 1px solid var(--line);
+        }
+
+        .platform:last-child {
+            border-bottom: 1px solid var(--line);
+        }
+
+        .platform h3 {
+            margin: 0 0 4px;
+            font-family: Syne, sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .platform p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        /* ---------- foot ---------- */
+        footer {
+            padding: 48px 0 64px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .foot-grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .foot-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--ink);
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-size: 13px;
+        }
+
+        .foot-brand img {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+        }
+
+        .foot-meta {
+            max-width: 52ch;
+            line-height: 1.55;
+        }
+
+        .foot-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .foot-links a {
+            color: var(--danger-ink);
+        }
+
+        /* ---------- motion ---------- */
+        .reveal {
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity 700ms var(--ease), transform 700ms var(--ease);
+        }
+
+        .reveal.is-in {
+            opacity: 1;
+            transform: none;
+        }
+
+        .hero .brand,
+        .hero .lede,
+        .hero .sub,
+        .hero .cta,
+        .hero-shot {
+            opacity: 0;
+            transform: translateY(22px);
+            animation: rise 900ms var(--ease) forwards;
+        }
+
+        .hero .brand { animation-delay: 60ms; }
+        .hero .lede { animation-delay: 160ms; }
+        .hero .sub { animation-delay: 240ms; }
+        .hero .cta { animation-delay: 320ms; }
+        .hero-shot { animation-delay: 420ms; }
+
+        @keyframes rise {
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+
+            .reveal,
+            .hero .brand,
+            .hero .lede,
+            .hero .sub,
+            .hero .cta,
+            .hero-shot {
+                opacity: 1;
+                transform: none;
+                animation: none;
+                transition: none;
+            }
+
+            .btn:hover {
+                transform: none;
+            }
+        }
+
+        @media (min-width: 720px) {
+            .bar-nav .ghost {
+                display: inline-flex;
+            }
+
+            .feature-list li {
+                grid-template-columns: 96px 1fr;
+                gap: 28px;
+                padding: 32px 0;
+            }
+
+            .view {
+                grid-template-columns: 0.9fr 1.1fr;
+                align-items: center;
+                gap: 40px;
+            }
+
+            .view:nth-child(even) .view-copy {
+                order: 2;
+            }
+
+            .platform-row {
+                gap: 0;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .wrap {
+                width: min(100% - 28px, var(--max));
+            }
+
+            .bar-nav a:not(.btn) {
+                display: none;
+            }
+
+            .hero {
+                padding-top: 28px;
+            }
+
+            .cta {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
+
+            section {
+                padding: 64px 0;
+            }
+
+            .feature-list li {
+                grid-template-columns: 48px 1fr;
+                gap: 12px;
+            }
+
+            .get {
+                border-radius: 20px;
+                padding: 28px 22px;
+            }
+
+            .platform {
+                align-items: stretch;
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <header class="bar">
+            <a class="bar-mark" href="#top" aria-label="Fairlead home">
+                <img src="icon.png" width="36" height="36" alt="">
+                <span>Fairlead</span>
+            </a>
+            <nav class="bar-nav" aria-label="Primary">
+                <a href="#features">Features</a>
+                <a href="#product">Product</a>
+                <a class="btn btn-secondary ghost" href="https://github.com/razor-4eg/fairlead">GitHub</a>
+            </nav>
+        </header>
+    </div>
+
+    <main id="top">
+        <section class="hero">
+            <div class="wrap">
+                <h1 class="brand">Fair<em>lead</em></h1>
+                <p class="lede">Choose what rides the tunnel.</p>
+                <p class="sub">WireGuard and AmneziaWG for macOS and Windows — import a config, connect, and keep the rest of the network yours.</p>
+                <div class="cta">
+                    <a class="btn btn-primary" href="https://github.com/razor-4eg/fairlead/releases">
+                        <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+                            <path d="M8 1.5a.75.75 0 0 1 .75.75v7.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V2.25A.75.75 0 0 1 8 1.5Z"/>
+                            <path d="M2.5 11.25a.75.75 0 0 1 .75.75v.5A1.5 1.5 0 0 0 4.75 14h6.5a1.5 1.5 0 0 0 1.5-1.5v-.5a.75.75 0 0 1 1.5 0v.5A3 3 0 0 1 11.25 15.5h-6.5A3 3 0 0 1 1.75 12.5v-.5a.75.75 0 0 1 .75-.75Z"/>
+                        </svg>
+                        Download
+                    </a>
+                    <a class="btn btn-secondary" href="https://github.com/razor-4eg/fairlead">View source</a>
+                </div>
+            </div>
+
+            <div class="hero-stage">
+                <div class="hero-shot">
+                    <img src="screenshots/overview.png" width="1120" height="760" alt="Fairlead tunnel overview with Direct routing and live traffic meters" fetchpriority="high">
+                </div>
+            </div>
+        </section>
+
+        <section class="features" id="features">
+            <div class="wrap">
+                <p class="section-kicker reveal">Routing</p>
+                <h2 class="section-title reveal">Honest paths, not cargo-cult VPN theater.</h2>
+                <p class="section-copy reveal">Allowed IPs still define what the peer can carry. Fairlead decides which of your traffic actually uses the tunnel — by address, domain, or running app.</p>
+
+                <ol class="feature-list">
+                    <li class="reveal">
+                        <span class="feature-num">01</span>
+                        <div>
+                            <h3>WireGuard &amp; AmneziaWG</h3>
+                            <p>One client for both. Import <code>.conf</code>, JSON shares, or Amnezia <code>vpn://</code> links. Amnezia configs show an AmneziaWG badge.</p>
+                        </div>
+                    </li>
+                    <li class="reveal">
+                        <span class="feature-num">02</span>
+                        <div>
+                            <h3>Direct / Through</h3>
+                            <p>Exclude a list from the tunnel, or send only that list through it. Rules apply while connected — the engine restarts cleanly so routes stay honest.</p>
+                        </div>
+                    </li>
+                    <li class="reveal">
+                        <span class="feature-num">03</span>
+                        <div>
+                            <h3>Apps, domains, LAN</h3>
+                            <p>Match programs by path, keep local network off the tunnel, and optionally block QUIC so browsers stay on TCP when you need them to.</p>
+                        </div>
+                    </li>
+                    <li class="reveal">
+                        <span class="feature-num">04</span>
+                        <div>
+                            <h3>Status you can trust</h3>
+                            <p>Connected means the system path actually uses the tunnel. Live rates, totals, and menu bar / tray so closing the window never drops you.</p>
+                        </div>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
+        <section id="product">
+            <div class="wrap">
+                <p class="section-kicker reveal">Product</p>
+                <h2 class="section-title reveal">Built like a tool, not a brochure.</h2>
+                <p class="section-copy reveal">Configs stay on this computer. Keys never leave. The helper elevates only to manage the tunnel.</p>
+
+                <div class="views">
+                    <article class="view reveal">
+                        <div class="view-copy">
+                            <h3>Routes that mean something</h3>
+                            <p>Add IPs, domains, or apps. Flip Direct and Through without rewriting the peer config. Each rule can sleep without being deleted.</p>
+                        </div>
+                        <div class="frame">
+                            <img src="screenshots/routes.png" width="1120" height="760" alt="Fairlead routes panel with Direct mode, local network, and app rules" loading="lazy">
+                        </div>
+                    </article>
+
+                    <article class="view reveal">
+                        <div class="view-copy">
+                            <h3>Configs as fields or text</h3>
+                            <p>Edit the tunnel as structured fields, or drop into the raw WireGuard / AmneziaWG text when you want the full surface.</p>
+                        </div>
+                        <div class="frame">
+                            <img src="screenshots/config.png" width="1120" height="760" alt="Fairlead config editor showing interface fields and AmneziaWG options" loading="lazy">
+                        </div>
+                    </article>
+
+                    <article class="view reveal">
+                        <div class="view-copy">
+                            <h3>Quiet defaults</h3>
+                            <p>Open at login, start hidden, pick a default tunnel, set the language. Eight locales plus Auto that follows the system.</p>
+                        </div>
+                        <div class="frame">
+                            <img src="screenshots/settings.png" width="1120" height="760" alt="Fairlead settings for login, language, and default tunnel" loading="lazy">
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="download">
+            <div class="wrap">
+                <div class="get reveal">
+                    <p class="section-kicker">Get Fairlead</p>
+                    <h2 class="section-title">Download the build for your machine.</h2>
+                    <p class="get-note">Unzip and run. First connect installs a helper with administrator rights; later connects do not ask again. Builds from GitHub are not notarized — Gatekeeper / SmartScreen may warn once.</p>
+
+                    <div class="platform-row">
+                        <div class="platform">
+                            <div>
+                                <h3>macOS 15+</h3>
+                                <p>Move Fairlead.app to Applications. Helper returns after reboot.</p>
+                            </div>
+                            <a class="btn btn-primary" href="https://github.com/razor-4eg/fairlead/releases">macOS release</a>
+                        </div>
+                        <div class="platform">
+                            <div>
+                                <h3>Windows 10 / 11</h3>
+                                <p>Keep the unzipped folder intact next to Fairlead.exe.</p>
+                            </div>
+                            <a class="btn btn-secondary" href="https://github.com/razor-4eg/fairlead/releases">Windows release</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="wrap foot-grid">
+            <div>
+                <div class="foot-brand">
+                    <img src="icon.png" width="28" height="28" alt="">
+                    Fairlead
+                </div>
+                <p class="foot-meta">
+                    WireGuard is a trademark of Jason A. Donenfeld. AmneziaWG is part of the Amnezia project.
+                    Fairlead is an independent client and is not affiliated with either.
+                </p>
+            </div>
+            <div class="foot-links">
+                <a href="https://github.com/razor-4eg/fairlead">Repository</a>
+                <a href="https://github.com/razor-4eg/fairlead/releases">Releases</a>
+                <a href="https://github.com/razor-4eg/fairlead/blob/main/README.md">README</a>
+            </div>
+        </div>
+    </footer>
+
+<script>
+(function () {
+'use strict';
+
+/*
+==================
+ prefersReducedMotion
+==================
+*/
+function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/*
+==================
+ revealOnScroll
+==================
+*/
+function revealOnScroll() {
+    const nodes = document.querySelectorAll('.reveal');
+
+    if (!nodes.length) {
+        return;
+    }
+
+    if (prefersReducedMotion() || !('IntersectionObserver' in window)) {
+        for (let i = 0; i < nodes.length; i++) {
+            nodes[i].classList.add('is-in');
+        }
+        return;
+    }
+
+    const observer = new IntersectionObserver(function (entries) {
+        for (let i = 0; i < entries.length; i++) {
+            if (entries[i].isIntersecting) {
+                entries[i].target.classList.add('is-in');
+                observer.unobserve(entries[i].target);
+            }
+        }
+    }, {
+        rootMargin: '0px 0px -8% 0px',
+        threshold: 0.12
+    });
+
+    for (let i = 0; i < nodes.length; i++) {
+        observer.observe(nodes[i]);
+    }
+}
+
+/*
+==================
+ softParallax
+==================
+*/
+function softParallax() {
+    const shot = document.querySelector('.hero-shot');
+
+    if (!shot || prefersReducedMotion()) {
+        return;
+    }
+
+    let ticking = false;
+
+    function update() {
+        const y = window.scrollY || 0;
+        const shift = Math.min(y * 0.08, 48);
+
+        shot.style.transform = 'translate3d(0, ' + shift + 'px, 0)';
+        ticking = false;
+    }
+
+    window.addEventListener('scroll', function () {
+        if (!ticking) {
+            window.requestAnimationFrame(update);
+            ticking = true;
+        }
+    }, { passive: true });
+}
+
+/*
+==================
+ main
+==================
+*/
+function main() {
+    revealOnScroll();
+    softParallax();
+}
+
+main();
+
+})();
+</script>
+</body>
+</html>
