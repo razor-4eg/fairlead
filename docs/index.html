@@ -102,11 +102,27 @@
         }
 
         /* ---------- top bar ---------- */
+        .site-bar {
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            background: transparent;
+            border-bottom: 1px solid transparent;
+            transition: background 180ms var(--ease), border-color 180ms var(--ease), backdrop-filter 180ms var(--ease);
+        }
+
+        .site-bar.is-stuck {
+            background: rgba(11, 13, 12, 0.78);
+            -webkit-backdrop-filter: blur(14px) saturate(1.2);
+            backdrop-filter: blur(14px) saturate(1.2);
+            border-bottom-color: var(--line);
+        }
+
         .bar {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 22px 0 8px;
+            padding: 22px 0 14px;
         }
 
         .bar-mark {
@@ -254,35 +270,31 @@
         }
 
         .hero-stage {
+            /* pocket: clip to ~half the window so the rest tucks under Features */
+            --shot-w: min(100vw - 40px, 1240px);
+            --shot-h: calc(var(--shot-w) * 760 / 1120);
             position: relative;
             margin: 0 calc(50% - 50vw);
             width: 100vw;
+            max-height: calc(var(--shot-h) * 2 / 3);
             overflow: hidden;
         }
 
-        .hero-stage::before,
+        /* shade into the pocket lip */
         .hero-stage::after {
             content: "";
             position: absolute;
             left: 0;
             right: 0;
-            height: 96px;
+            bottom: 0;
+            height: 88px;
             z-index: 2;
             pointer-events: none;
-        }
-
-        .hero-stage::before {
-            top: 0;
-            background: linear-gradient(to bottom, var(--bg), transparent);
-        }
-
-        .hero-stage::after {
-            bottom: 0;
-            height: 140px;
-            background: linear-gradient(to top, var(--bg) 18%, transparent);
+            background: linear-gradient(to top, rgba(11, 13, 12, 0.92), transparent);
         }
 
         .hero-shot {
+            position: relative;
             width: min(100%, 1280px);
             margin: 0 auto;
             padding: 0 20px;
@@ -290,15 +302,18 @@
 
         .hero-shot img {
             width: 100%;
-            border-radius: var(--radius) var(--radius) 0 0;
             border: 1px solid var(--line);
-            border-bottom: 0;
-            box-shadow: 0 40px 80px rgba(0, 0, 0, 0.45);
+            border-radius: var(--radius);
+            background: var(--bg-elev);
+            box-shadow:
+                0 4px 12px rgba(0, 0, 0, 0.25),
+                0 28px 64px -12px rgba(0, 0, 0, 0.55);
         }
 
         /* ---------- sections ---------- */
         section {
             padding: 88px 0;
+            scroll-margin-top: 72px;
         }
 
         .section-kicker {
@@ -329,9 +344,14 @@
 
         /* ---------- feature strip ---------- */
         .features {
+            position: relative;
+            z-index: 3;
             border-top: 1px solid var(--line);
             border-bottom: 1px solid var(--line);
-            background: linear-gradient(180deg, rgba(18, 22, 20, 0.55), transparent);
+            /* solid lip so the clipped shot reads as tucked under this panel */
+            background:
+                linear-gradient(180deg, var(--bg) 0%, var(--bg) 72px, transparent 220px),
+                linear-gradient(180deg, rgba(18, 22, 20, 0.55), transparent);
         }
 
         .feature-list {
@@ -402,7 +422,8 @@
         }
 
         .frame {
-            border-radius: var(--radius);
+            /* closer to macOS window corners than the hero radius */
+            border-radius: 10px;
             border: 1px solid var(--line);
             background: var(--bg-elev);
             overflow: hidden;
@@ -640,9 +661,9 @@
         }
     </style>
 </head>
-<body>
-    <div class="wrap">
-        <header class="bar">
+<body id="top">
+    <header class="site-bar">
+        <div class="wrap bar">
             <a class="bar-mark" href="#top" aria-label="Fairlead home">
                 <img src="icon.png" width="36" height="36" alt="">
                 <span>Fairlead</span>
@@ -650,17 +671,18 @@
             <nav class="bar-nav" aria-label="Primary">
                 <a href="#features">Features</a>
                 <a href="#product">Product</a>
+                <a href="#download">Download</a>
                 <a class="btn btn-secondary ghost" href="https://github.com/razor-4eg/fairlead">GitHub</a>
             </nav>
-        </header>
-    </div>
+        </div>
+    </header>
 
-    <main id="top">
+    <main>
         <section class="hero">
             <div class="wrap">
                 <h1 class="brand">Fair<em>lead</em></h1>
-                <p class="lede">Choose what rides the tunnel.</p>
-                <p class="sub">WireGuard and AmneziaWG for macOS and Windows — import a config, connect, and keep the rest of the network yours.</p>
+                <p class="lede">Choose what goes through the tunnel.</p>
+                <p class="sub">WireGuard and AmneziaWG client for macOS and Windows. Import a config, connect, and decide what uses the tunnel.</p>
                 <div class="cta">
                     <a class="btn btn-primary" href="https://github.com/razor-4eg/fairlead/releases">
                         <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
@@ -683,36 +705,36 @@
         <section class="features" id="features">
             <div class="wrap">
                 <p class="section-kicker reveal">Routing</p>
-                <h2 class="section-title reveal">Honest paths, not cargo-cult VPN theater.</h2>
-                <p class="section-copy reveal">Allowed IPs still define what the peer can carry. Fairlead decides which of your traffic actually uses the tunnel — by address, domain, or running app.</p>
+                <h2 class="section-title reveal">Route by IP, domain, or app.</h2>
+                <p class="section-copy reveal">Pick what goes through the tunnel and what stays on your normal network. Change the list while you’re connected.</p>
 
                 <ol class="feature-list">
                     <li class="reveal">
                         <span class="feature-num">01</span>
                         <div>
                             <h3>WireGuard &amp; AmneziaWG</h3>
-                            <p>One client for both. Import <code>.conf</code>, JSON shares, or Amnezia <code>vpn://</code> links. Amnezia configs show an AmneziaWG badge.</p>
+                            <p>One app for both. Import <code>.conf</code>, JSON, or Amnezia <code>vpn://</code> links — or just drag them onto the window.</p>
                         </div>
                     </li>
                     <li class="reveal">
                         <span class="feature-num">02</span>
                         <div>
                             <h3>Direct / Through</h3>
-                            <p>Exclude a list from the tunnel, or send only that list through it. Rules apply while connected — the engine restarts cleanly so routes stay honest.</p>
+                            <p>Exclude a list from the tunnel, or send only that list through it. Rules apply while connected.</p>
                         </div>
                     </li>
                     <li class="reveal">
                         <span class="feature-num">03</span>
                         <div>
                             <h3>Apps, domains, LAN</h3>
-                            <p>Match programs by path, keep local network off the tunnel, and optionally block QUIC so browsers stay on TCP when you need them to.</p>
+                            <p>Match apps by path, keep local network off the tunnel, block browser QUIC if you need TCP to behave.</p>
                         </div>
                     </li>
                     <li class="reveal">
                         <span class="feature-num">04</span>
                         <div>
-                            <h3>Status you can trust</h3>
-                            <p>Connected means the system path actually uses the tunnel. Live rates, totals, and menu bar / tray so closing the window never drops you.</p>
+                            <h3>Live status</h3>
+                            <p>Rates, totals, and a real Connected state. Close the window — it stays in the menu bar or tray and keeps the tunnel up.</p>
                         </div>
                     </li>
                 </ol>
@@ -722,14 +744,14 @@
         <section id="product">
             <div class="wrap">
                 <p class="section-kicker reveal">Product</p>
-                <h2 class="section-title reveal">Built like a tool, not a brochure.</h2>
-                <p class="section-copy reveal">Configs stay on this computer. Keys never leave. The helper elevates only to manage the tunnel.</p>
+                <h2 class="section-title reveal">Configs stay on this computer.</h2>
+                <p class="section-copy reveal">Keys don’t go anywhere. Admin rights only for the tunnel helper.</p>
 
                 <div class="views">
                     <article class="view reveal">
                         <div class="view-copy">
-                            <h3>Routes that mean something</h3>
-                            <p>Add IPs, domains, or apps. Flip Direct and Through without rewriting the peer config. Each rule can sleep without being deleted.</p>
+                            <h3>Routes</h3>
+                            <p>Add IPs, domains, or apps. Flip Direct / Through without rewriting the peer config. Disable a rule without deleting it.</p>
                         </div>
                         <div class="frame">
                             <img src="screenshots/routes.png" width="1120" height="760" alt="Fairlead routes panel with Direct mode, local network, and app rules" loading="lazy">
@@ -738,8 +760,8 @@
 
                     <article class="view reveal">
                         <div class="view-copy">
-                            <h3>Configs as fields or text</h3>
-                            <p>Edit the tunnel as structured fields, or drop into the raw WireGuard / AmneziaWG text when you want the full surface.</p>
+                            <h3>Config editor</h3>
+                            <p>Edit as fields or as raw WireGuard / AmneziaWG text.</p>
                         </div>
                         <div class="frame">
                             <img src="screenshots/config.png" width="1120" height="760" alt="Fairlead config editor showing interface fields and AmneziaWG options" loading="lazy">
@@ -748,8 +770,8 @@
 
                     <article class="view reveal">
                         <div class="view-copy">
-                            <h3>Quiet defaults</h3>
-                            <p>Open at login, start hidden, pick a default tunnel, set the language. Eight locales plus Auto that follows the system.</p>
+                            <h3>Settings</h3>
+                            <p>Open at login, start hidden, default tunnel, language (Auto or fixed).</p>
                         </div>
                         <div class="frame">
                             <img src="screenshots/settings.png" width="1120" height="760" alt="Fairlead settings for login, language, and default tunnel" loading="lazy">
@@ -763,14 +785,14 @@
             <div class="wrap">
                 <div class="get reveal">
                     <p class="section-kicker">Get Fairlead</p>
-                    <h2 class="section-title">Download the build for your machine.</h2>
-                    <p class="get-note">Unzip and run. First connect installs a helper with administrator rights; later connects do not ask again. Builds from GitHub are not notarized — Gatekeeper / SmartScreen may warn once.</p>
+                    <h2 class="section-title">Download</h2>
+                    <p class="get-note">Unzip and run. First connect asks for admin to install the helper; after that it just works. Builds aren’t notarized, so Gatekeeper / SmartScreen may warn once.</p>
 
                     <div class="platform-row">
                         <div class="platform">
                             <div>
                                 <h3>macOS 15+</h3>
-                                <p>Move Fairlead.app to Applications. Helper returns after reboot.</p>
+                                <p>Move Fairlead.app to Applications.</p>
                             </div>
                             <a class="btn btn-primary" href="https://github.com/razor-4eg/fairlead/releases">macOS release</a>
                         </div>
@@ -888,12 +910,48 @@ function softParallax() {
 
 /*
 ==================
+ bindStickyBar
+==================
+*/
+function bindStickyBar() {
+    const bar = document.querySelector('.site-bar');
+
+    if (!bar) {
+        return;
+    }
+
+    let ticking = false;
+
+    function update() {
+        // paint the lip only after the page has actually moved
+        if ((window.scrollY || 0) > 8) {
+            bar.classList.add('is-stuck');
+        } else {
+            bar.classList.remove('is-stuck');
+        }
+
+        ticking = false;
+    }
+
+    window.addEventListener('scroll', function () {
+        if (!ticking) {
+            window.requestAnimationFrame(update);
+            ticking = true;
+        }
+    }, { passive: true });
+
+    update();
+}
+
+/*
+==================
  main
 ==================
 */
 function main() {
     revealOnScroll();
     softParallax();
+    bindStickyBar();
 }
 
 main();
