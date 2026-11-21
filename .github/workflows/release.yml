@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and upload (e.g. v1.2.1)"
+        description: "Release tag to build and upload (e.g. v1.2.2)"
         required: true
-        default: "v1.2.1"
+        default: "v1.2.2"
       ref:
         description: "Git ref to build from (commit/branch/tag). Empty = the release tag."
         required: false
