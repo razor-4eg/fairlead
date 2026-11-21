@@ -31,6 +31,7 @@ struct MainWindow : MainWindowT<MainWindow> {
 	void OnEscape(Microsoft::UI::Xaml::Input::KeyboardAccelerator const&, Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
 	void SearchChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::TextChangedEventArgs const&);
 	void TunnelChosen(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+	void TunnelDragStarting(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& args);
 	void TunnelReorder(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const& args);
 	void NewTunnel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 	void ImportTunnel(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -90,6 +91,7 @@ private:
 	std::string chrome_language;
 	std::string route_auto_name;
 	std::string list_sig;
+	bool tunnel_dragging = false;
 	std::unique_ptr<Tunnel> draft;
 	Tunnel* edit = nullptr;
 	RouteList* editing_list = nullptr;
@@ -168,6 +170,7 @@ private:
 	void AskDeleteTunnel(Tunnel* tunnel);
 	void OnTunnelMenu(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::RightTappedRoutedEventArgs const& args);
 	void SyncTunnelReorder(bool allow);
+	void FinishTunnelDrag();
 	void HookHwnd();
 	void RestoreBounds();
 	void SaveBounds();

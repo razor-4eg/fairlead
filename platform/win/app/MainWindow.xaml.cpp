@@ -749,7 +749,22 @@ void MainWindow::SyncTunnelReorder(bool allow) {
 	TunnelList().AllowDrop(allow);
 }
 
+void MainWindow::TunnelDragStarting(IInspectable const&, controls::DragItemsStartingEventArgs const& args) {
+	if (!trim_copy(session.query).empty()) {
+		args.Cancel(true);
+		return;
+	}
+
+	tunnel_dragging = true;
+	args.Data().RequestedOperation(winrt::Windows::ApplicationModel::DataTransfer::DataPackageOperation::Move);
+}
+
+void MainWindow::FinishTunnelDrag() {
+	tunnel_dragging = false;
+}
+
 void MainWindow::TunnelReorder(IInspectable const&, controls::DragItemsCompletedEventArgs const&) {
+	FinishTunnelDrag();
 	if (!trim_copy(session.query).empty()) {
 		list_sig.clear();
 		RebuildList();
@@ -802,6 +817,11 @@ void MainWindow::RebuildList() {
 
 		return grid.Children().GetAt(0).try_as<shapes::Ellipse>();
 	};
+
+	/* Mid-drag Clear() kills reorder and stacks rows on the ghost. Dots can wait. */
+	if (tunnel_dragging) {
+		return;
+	}
 
 	if (content == list_sig) {
 		bool was = quiet;

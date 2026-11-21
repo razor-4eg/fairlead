@@ -57,71 +57,41 @@
             <FontIcon Glyph="&#xE721;" FontSize="12" Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" IsHitTestVisible="False"/>
             </Grid>
             <TextBlock x:Name="TunnelsCaption" Grid.Row="2" Text="TUNNELS" Margin="4,18,0,8" FontSize="10" FontWeight="SemiBold" CharacterSpacing="80" Foreground="{StaticResource FaintBrush}"/>
-            <ListView x:Name="TunnelList" Grid.Row="3" SelectionChanged="TunnelChosen" CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="TunnelReorder" Background="Transparent" BorderThickness="0" Padding="0" ItemContainerTransitions="{x:Null}">
-                    <ListView.ItemContainerStyle>
+            <ListView x:Name="TunnelList" Grid.Row="3" SelectionChanged="TunnelChosen" CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsStarting="TunnelDragStarting" DragItemsCompleted="TunnelReorder" Background="Transparent" BorderThickness="0" Padding="0">
+                <!-- Keep ReorderThemeTransition so neighbors slide; drop Entrance* so RebuildList does not flash. -->
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <ReorderThemeTransition/>
+                    </TransitionCollection>
+                </ListView.ItemContainerTransitions>
+                <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="Margin" Value="0,2"/>
                         <Setter Property="Padding" Value="0"/>
                         <Setter Property="MinHeight" Value="0"/>
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="VerticalContentAlignment" Value="Stretch"/>
                         <Setter Property="UseSystemFocusVisuals" Value="False"/>
+                        <Setter Property="Background" Value="Transparent"/>
                         <Setter Property="Template">
                             <Setter.Value>
+                                <!-- ListViewItemPresenter owns drag/reorder visuals; a plain Grid left a full opacity copy in the old slot. -->
                                 <ControlTemplate TargetType="ListViewItem">
-                                    <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
-                                        <Grid.RenderTransform>
-                                            <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1"/>
-                                        </Grid.RenderTransform>
-                                        <Border x:Name="Plate" CornerRadius="9" Background="Transparent"/>
-                                        <ContentPresenter/>
-                                        <VisualStateManager.VisualStateGroups>
-                                            <VisualStateGroup x:Name="CommonStates">
-                                                <VisualState x:Name="Normal">
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
-                                                    </Storyboard>
-                                                </VisualState>
-                                                <VisualState x:Name="PointerOver">
-                                                    <VisualState.Setters>
-                                                        <Setter Target="Plate.Background" Value="#09FFFFFF"/>
-                                                    </VisualState.Setters>
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
-                                                    </Storyboard>
-                                                </VisualState>
-                                                <VisualState x:Name="Pressed">
-                                                    <VisualState.Setters>
-                                                        <Setter Target="Plate.Background" Value="#14FFFFFF"/>
-                                                    </VisualState.Setters>
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.08"/>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.08"/>
-                                                    </Storyboard>
-                                                </VisualState>
-                                                <VisualState x:Name="Selected">
-                                                    <VisualState.Setters>
-                                                        <Setter Target="Plate.Background" Value="#12FFFFFF"/>
-                                                    </VisualState.Setters>
-                                                </VisualState>
-                                                <VisualState x:Name="PointerOverSelected">
-                                                    <VisualState.Setters>
-                                                        <Setter Target="Plate.Background" Value="#18FFFFFF"/>
-                                                    </VisualState.Setters>
-                                                </VisualState>
-                                                <VisualState x:Name="PressedSelected">
-                                                    <VisualState.Setters>
-                                                        <Setter Target="Plate.Background" Value="#1CFFFFFF"/>
-                                                    </VisualState.Setters>
-                                                    <Storyboard>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.08"/>
-                                                        <DoubleAnimation Storyboard.TargetName="PressScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.08"/>
-                                                    </Storyboard>
-                                                </VisualState>
-                                            </VisualStateGroup>
-                                        </VisualStateManager.VisualStateGroups>
-                                    </Grid>
+                                    <ListViewItemPresenter
+                                        x:Name="Root"
+                                        ContentMargin="{TemplateBinding Padding}"
+                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                        Background="Transparent"
+                                        PointerOverBackground="#09FFFFFF"
+                                        PressedBackground="#14FFFFFF"
+                                        SelectedBackground="#12FFFFFF"
+                                        SelectedPointerOverBackground="#18FFFFFF"
+                                        SelectedPressedBackground="#1CFFFFFF"
+                                        CornerRadius="9"
+                                        DragOpacity="0"
+                                        ReorderHintOffset="{ThemeResource ListViewItemReorderHintThemeOffset}"
+                                        SelectionCheckMarkVisualEnabled="False"/>
                                 </ControlTemplate>
                             </Setter.Value>
                         </Setter>
