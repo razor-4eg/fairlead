@@ -400,6 +400,19 @@ static void emit_quic_reject(ybuf_t *b) {
 
 /*
 ===============
+emit_dns_proxy
+System DNS is pushed to 1.1.1.1/8.8.8.8 (or Interface DNS). Keep those queries on PROXY
+even when MATCH is DIRECT (Through mode) or a Direct app would otherwise send :53 to the ISP.
+LAN GEOIP still wins first so a forgotten router DNS stays local when Exclude LAN is on.
+===============
+*/
+static void emit_dns_proxy(ybuf_t *b) {
+	y_add(b, "  - AND,((NETWORK,UDP),(DST-PORT,53)),PROXY\n");
+	y_add(b, "  - AND,((NETWORK,TCP),(DST-PORT,53)),PROXY\n");
+}
+
+/*
+===============
 emit_app_rules
 ===============
 */
@@ -464,6 +477,8 @@ static void emit_rule_lines(ybuf_t *b, const mihomo_rules_t *rules, int policy_s
 	if (exclude_lan) {
 		y_add(b, "  - GEOIP,LAN,DIRECT\n");
 	}
+
+	emit_dns_proxy(b);
 
 	/*
 	 * Host (domain/IP) rules before process rules so a Direct domain still wins when
@@ -690,6 +705,10 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 	 * dead 198.18.x.x addresses until the tunnel is bounced. Public resolvers keep
 	 * DIRECT apps alive; WG DNS stays on the proxy via remote-dns-resolve.
 	 */
+	/*
+	 * default-nameserver stays on plain IPs (bootstrap). nameserver uses DoH so
+	 * mihomo's own upstream lookups are not spoofable on UDP/53 when hijack answers.
+	 */
 	y_add(&b, "dns:\n");
 	y_add(&b, "  enable: true\n");
 	y_add(&b, "  enhanced-mode: redir-host\n");
@@ -698,11 +717,11 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 	y_add(&b, "    - 1.1.1.1\n");
 	y_add(&b, "    - 8.8.8.8\n");
 	y_add(&b, "  proxy-server-nameserver:\n");
-	y_add(&b, "    - 1.1.1.1\n");
-	y_add(&b, "    - 8.8.8.8\n");
+	y_add(&b, "    - https://1.1.1.1/dns-query\n");
+	y_add(&b, "    - https://8.8.8.8/dns-query\n");
 	y_add(&b, "  nameserver:\n");
-	y_add(&b, "    - 1.1.1.1\n");
-	y_add(&b, "    - 8.8.8.8\n");
+	y_add(&b, "    - https://1.1.1.1/dns-query\n");
+	y_add(&b, "    - https://8.8.8.8/dns-query\n");
 
 	/*
 	 * Chrome Secure DNS (DoH) bypasses dns-hijack, so DOMAIN-SUFFIX never sees a host
@@ -851,6 +870,8 @@ char *mihomo_config(const char *wg_text, int policy_selected, int exclude_lan, i
 		if (exclude_lan) {
 			y_add(&b, "  - GEOIP,LAN,DIRECT\n");
 		}
+
+		emit_dns_proxy(&b);
 
 		/* Hosts before apps — same priority as the full-tunnel path. */
 		emit_host_rules(&b, rules, "DIRECT");

@@ -69,6 +69,8 @@ typedef struct session_s {
 static session_t s_session;
 
 static int tunnel_path_ready(void);
+static void system_dns_restore(void);
+static void system_dns_push(const char *wg);
 
 /*
 ===============
@@ -1580,6 +1582,7 @@ int win_tun_down(win_tun_result_t *out) {
 
 	stop_proc();
 	session_clear();
+	system_dns_restore();
 
 	if (out) {
 		out->ok = 1;
@@ -1646,6 +1649,465 @@ void win_tun_reconcile(void) {
 	}
 
 	DeleteFileA(path);
+	/* Orphan mihomo is gone — put hardware DNS back if a previous session left a backup. */
+	system_dns_restore();
+}
+
+
+/*
+===============
+dns_backup_path
+ProgramData\Fairlead\dns-backup.txt — survives reboot; holds pre-tunnel DNS per adapter GUID.
+===============
+*/
+static int dns_backup_path(char *path, int cap) {
+	DWORD	n;
+
+	n = GetEnvironmentVariableA("ProgramData", path, (DWORD)cap);
+
+	if (n == 0 || (int)n >= cap - 40) {
+		return 0;
+	}
+
+	strncat(path, "\\Fairlead", (size_t)cap - strlen(path) - 1);
+	CreateDirectoryA(path, NULL);
+	strncat(path, "\\dns-backup.txt", (size_t)cap - strlen(path) - 1);
+	return 1;
+}
+
+/*
+===============
+dns_servers_from_wg
+Interface DNS when set; otherwise 1.1.1.1 and 8.8.8.8 (same as Amnezia / macOS push).
+===============
+*/
+static void dns_servers_from_wg(const char *wg, wchar_t *out, int cap) {
+	doc_t	doc;
+	char	dns[512];
+	char	items[8][256];
+	int		n;
+	int		i;
+	int		pos;
+
+	out[0] = 0;
+	doc_init(&doc);
+	doc_parse(&doc, wg ? wg : "");
+	doc_dns(&doc, dns, (int)sizeof(dns));
+	doc_free(&doc);
+	n = 0;
+
+	if (dns[0]) {
+		/* split_commas lives in mihomo.c — parse here */
+		char	*p;
+		char	buf[512];
+
+		snprintf(buf, sizeof(buf), "%s", dns);
+		p = buf;
+
+		while (*p && n < 8) {
+			char	*comma;
+			char	*start;
+
+			while (*p == ' ' || *p == '\t') {
+				p++;
+			}
+
+			if (!*p) {
+				break;
+			}
+
+			comma = strchr(p, ',');
+
+			if (comma) {
+				*comma = 0;
+			}
+
+			start = p;
+
+			while (*p) {
+				p++;
+			}
+
+			while (p > start && (p[-1] == ' ' || p[-1] == '\t')) {
+				p--;
+			}
+
+			*p = 0;
+
+			if (start[0]) {
+				snprintf(items[n++], sizeof(items[0]), "%s", start);
+			}
+
+			if (!comma) {
+				break;
+			}
+
+			p = comma + 1;
+		}
+	}
+
+	if (n < 1) {
+		snprintf(items[0], sizeof(items[0]), "1.1.1.1");
+		snprintf(items[1], sizeof(items[1]), "8.8.8.8");
+		n = 2;
+	}
+
+	pos = 0;
+
+	for (i = 0; i < n && pos + 1 < cap; i++) {
+		int	wrote;
+
+		if (i > 0 && pos + 1 < cap) {
+			out[pos++] = L',';
+			out[pos] = 0;
+		}
+
+		wrote = MultiByteToWideChar(CP_UTF8, 0, items[i], -1, out + pos, cap - pos);
+
+		if (wrote < 1) {
+			break;
+		}
+
+		pos += wrote - 1;
+	}
+}
+
+/*
+===============
+guid_to_str
+===============
+*/
+static void guid_to_str(const GUID *g, char *out, int cap) {
+	snprintf(out, (size_t)cap, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		(unsigned long)g->Data1, g->Data2, g->Data3,
+		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+}
+
+/*
+===============
+str_to_guid
+===============
+*/
+static int str_to_guid(const char *text, GUID *g) {
+	unsigned int	d1, d2, d3;
+	unsigned int	b[8];
+	int				i;
+
+	if (sscanf(text, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		&d1, &d2, &d3, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]) != 11) {
+		return 0;
+	}
+
+	g->Data1 = (DWORD)d1;
+	g->Data2 = (WORD)d2;
+	g->Data3 = (WORD)d3;
+
+	for (i = 0; i < 8; i++) {
+		g->Data4[i] = (BYTE)b[i];
+	}
+
+	return 1;
+}
+
+/* MinGW may lack these — match the Win10 iphlpapi shape. */
+#ifndef DNS_INTERFACE_SETTINGS_VERSION1
+#define DNS_INTERFACE_SETTINGS_VERSION1 1
+#endif
+#ifndef DNS_SETTING_NAMESERVER
+#define DNS_SETTING_NAMESERVER 0x0002ULL
+#endif
+
+typedef struct fairlead_dns_settings_s {
+	ULONG Version;
+	ULONG64 Flags;
+	PWSTR Domain;
+	PWSTR NameServer;
+	PWSTR SearchList;
+	DWORD RegistrationEnabled;
+	DWORD RegisterAdapterName;
+	DWORD EnableLLMNR;
+	DWORD QueryAdapterName;
+	PWSTR ProfileName;
+} fairlead_dns_settings_t;
+
+typedef DWORD (WINAPI *get_iface_dns_fn)(GUID, fairlead_dns_settings_t *);
+typedef DWORD (WINAPI *set_iface_dns_fn)(GUID, const fairlead_dns_settings_t *);
+typedef VOID (WINAPI *free_iface_dns_fn)(fairlead_dns_settings_t *);
+
+static get_iface_dns_fn s_get_dns;
+static set_iface_dns_fn s_set_dns;
+static free_iface_dns_fn s_free_dns;
+static int s_dns_api_ready;
+
+/*
+===============
+dns_api_load
+===============
+*/
+static int dns_api_load(void) {
+	HMODULE	mod;
+
+	if (s_dns_api_ready) {
+		return s_get_dns && s_set_dns;
+	}
+
+	s_dns_api_ready = 1;
+	mod = LoadLibraryW(L"iphlpapi.dll");
+
+	if (!mod) {
+		return 0;
+	}
+
+	s_get_dns = (get_iface_dns_fn)GetProcAddress(mod, "GetInterfaceDnsSettings");
+	s_set_dns = (set_iface_dns_fn)GetProcAddress(mod, "SetInterfaceDnsSettings");
+	s_free_dns = (free_iface_dns_fn)GetProcAddress(mod, "FreeInterfaceDnsSettings");
+	return s_get_dns && s_set_dns;
+}
+
+/*
+===============
+dns_flush
+===============
+*/
+static void dns_flush(void) {
+	HMODULE	mod;
+	BOOL (WINAPI *flush)(void);
+
+	mod = LoadLibraryW(L"dnsapi.dll");
+
+	if (!mod) {
+		return;
+	}
+
+	flush = (BOOL (WINAPI *)(void))GetProcAddress(mod, "DnsFlushResolverCache");
+
+	if (flush) {
+		flush();
+	}
+}
+
+/*
+===============
+adapter_is_tunnel
+Skip mihomo / Wintun / WireGuard NICs when pushing DNS onto the physical path.
+===============
+*/
+static int adapter_is_tunnel(const IP_ADAPTER_ADDRESSES *a) {
+	char	desc[256];
+	char	name[256];
+
+	desc[0] = 0;
+	name[0] = 0;
+
+	if (a->Description) {
+		WideCharToMultiByte(CP_UTF8, 0, a->Description, -1, desc, (int)sizeof(desc), NULL, NULL);
+	}
+
+	if (a->FriendlyName) {
+		WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, name, (int)sizeof(name), NULL, NULL);
+	}
+
+	if (strstr(desc, "Wintun") || strstr(desc, "WireGuard") || strstr(desc, "mihomo") ||
+		strstr(desc, "Meta") || strstr(desc, "Clash") || strstr(desc, "TUN") ||
+		strstr(name, "mihomo") || strstr(name, "Wintun")) {
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+===============
+dns_set_adapter
+===============
+*/
+static DWORD dns_set_adapter(GUID guid, const wchar_t *servers) {
+	fairlead_dns_settings_t	settings;
+
+	memset(&settings, 0, sizeof(settings));
+	settings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+	settings.Flags = DNS_SETTING_NAMESERVER;
+	settings.NameServer = (PWSTR)servers;
+	return s_set_dns(guid, &settings);
+}
+
+/*
+===============
+system_dns_push
+Save current DNS for up adapters, then point them at tunnel resolvers.
+===============
+*/
+static void system_dns_push(const char *wg) {
+	ULONG					size;
+	IP_ADAPTER_ADDRESSES	*list;
+	IP_ADAPTER_ADDRESSES	*a;
+	wchar_t					wanted[256];
+	char					backup[MAX_PATH];
+	FILE					*f;
+	int						have_backup;
+
+	if (!dns_api_load()) {
+		log_line("fairlead: system DNS API unavailable");
+		return;
+	}
+
+	dns_servers_from_wg(wg, wanted, 256);
+
+	if (!wanted[0] || !dns_backup_path(backup, MAX_PATH)) {
+		return;
+	}
+
+	have_backup = file_exists(backup);
+	size = 0;
+	list = NULL;
+	GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS, NULL, NULL, &size);
+
+	if (size < sizeof(*list)) {
+		return;
+	}
+
+	list = (IP_ADAPTER_ADDRESSES *)malloc(size);
+
+	if (!list || GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS, NULL, list, &size) != NO_ERROR) {
+		free(list);
+		return;
+	}
+
+	if (!have_backup) {
+		f = fopen(backup, "w");
+
+		if (!f) {
+			free(list);
+			return;
+		}
+
+		for (a = list; a; a = a->Next) {
+			GUID					guid;
+			fairlead_dns_settings_t	cur;
+			char					id[64];
+			char					servers[512];
+
+			if (a->OperStatus != IfOperStatusUp || adapter_is_tunnel(a)) {
+				continue;
+			}
+
+			if (a->IfType != IF_TYPE_ETHERNET_CSMACD && a->IfType != IF_TYPE_IEEE80211 &&
+				a->IfType != IF_TYPE_PPP) {
+				continue;
+			}
+
+			if (!str_to_guid(a->AdapterName, &guid)) {
+				continue;
+			}
+
+			memset(&cur, 0, sizeof(cur));
+			cur.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+
+			if (s_get_dns(guid, &cur) != NO_ERROR) {
+				continue;
+			}
+
+			guid_to_str(&guid, id, (int)sizeof(id));
+			servers[0] = 0;
+
+			if (cur.NameServer && cur.NameServer[0]) {
+				WideCharToMultiByte(CP_UTF8, 0, cur.NameServer, -1, servers, (int)sizeof(servers), NULL, NULL);
+			}
+
+			fprintf(f, "%s|%s\n", id, servers);
+
+			if (s_free_dns) {
+				s_free_dns(&cur);
+			}
+		}
+
+		fclose(f);
+		log_line("fairlead: saved system DNS backup");
+	}
+
+	for (a = list; a; a = a->Next) {
+		GUID	guid;
+
+		if (a->OperStatus != IfOperStatusUp || adapter_is_tunnel(a)) {
+			continue;
+		}
+
+		if (a->IfType != IF_TYPE_ETHERNET_CSMACD && a->IfType != IF_TYPE_IEEE80211 &&
+			a->IfType != IF_TYPE_PPP) {
+			continue;
+		}
+
+		if (!str_to_guid(a->AdapterName, &guid)) {
+			continue;
+		}
+
+		if (dns_set_adapter(guid, wanted) == NO_ERROR) {
+			log_line("fairlead: system DNS pushed");
+		}
+	}
+
+	free(list);
+	dns_flush();
+}
+
+/*
+===============
+system_dns_restore
+===============
+*/
+static void system_dns_restore(void) {
+	char	backup[MAX_PATH];
+	char	line[768];
+	FILE	*f;
+
+	if (!dns_api_load() || !dns_backup_path(backup, MAX_PATH) || !file_exists(backup)) {
+		return;
+	}
+
+	f = fopen(backup, "r");
+
+	if (!f) {
+		return;
+	}
+
+	while (fgets(line, (int)sizeof(line), f)) {
+		char	*bar;
+		char	*nl;
+		GUID	guid;
+		wchar_t	servers[512];
+
+		nl = strchr(line, '\n');
+
+		if (nl) {
+			*nl = 0;
+		}
+
+		bar = strchr(line, '|');
+
+		if (!bar) {
+			continue;
+		}
+
+		*bar = 0;
+
+		if (!str_to_guid(line, &guid)) {
+			continue;
+		}
+
+		servers[0] = 0;
+
+		if (bar[1]) {
+			MultiByteToWideChar(CP_UTF8, 0, bar + 1, -1, servers, 512);
+		}
+
+		dns_set_adapter(guid, servers);
+	}
+
+	fclose(f);
+	DeleteFileA(backup);
+	dns_flush();
+	log_line("fairlead: restored system DNS");
 }
 
 /*
@@ -1712,8 +2174,12 @@ int win_tun_up(const char *slug, const char *config, const char **cidrs, int cid
 	if (!wait_ready(out->error, (int)sizeof(out->error))) {
 		log_line(out->error);
 		stop_proc();
+		system_dns_restore();
 		return 0;
 	}
+
+	/* Physical NIC DNS never enters the TUN (on-link route wins). Push public resolvers. */
+	system_dns_push(config);
 
 	snprintf(s_session.slug, sizeof(s_session.slug), "%s", slug ? slug : "");
 	s_session.wg = _strdup(config);
@@ -1782,9 +2248,12 @@ int win_tun_bypass(const char **cidrs, int cidr_count, const char **domains, int
 		snprintf(out->error, sizeof(out->error), "The tunnel could not be restarted.");
 		stop_proc();
 		session_clear();
+		system_dns_restore();
 		free(exes);
 		return 0;
 	}
+
+	system_dns_push(s_session.wg);
 
 	s_session.recoveries = 0;
 	s_session.probe_fails = 0;

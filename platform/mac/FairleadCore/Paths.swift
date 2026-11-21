@@ -9,4 +9,6 @@ public enum FairleadPaths {
     /// mihomo working directory: config.yaml, mihomo.log, geo data. Root only.
     public static let mihomoDirectory = "/var/run/fairlead/mihomo"
     public static let mihomoPID = "/var/run/fairlead/mihomo.pid"
+    /// Survives reboot (/var/run does not). Holds the pre-tunnel networksetup DNS snapshot.
+    public static let dnsBackup = "/Library/Application Support/Fairlead/dns-backup.json"
 }

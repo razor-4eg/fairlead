@@ -492,6 +492,14 @@ private func reconcile() {
         }
     }
 
+    // Tunnel still up after helper restart → keep/reapply system DNS. Otherwise restore.
+    if let slug = kept.keys.first,
+       let wg = try? String(contentsOfFile: configFile(slug), encoding: .utf8) {
+        SystemDNS.push(fromWG: wg)
+    } else {
+        SystemDNS.restore()
+    }
+
     saveState()
 }
 

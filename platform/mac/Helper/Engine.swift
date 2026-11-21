@@ -558,8 +558,13 @@ func mihomoUp(wg: String, rules: MihomoRules) -> MihomoUp {
 
     if let error = waitReady() {
         stopProcess()
+        SystemDNS.restore()
         return MihomoUp(error: error)
     }
+
+    // LAN gateway DNS never enters utun (connected route on en0 wins). Push public
+    // resolvers onto hardware services so dig/Chrome/Safari all see tunnel DNS.
+    SystemDNS.push(fromWG: wg)
 
     recoveries = 0
     probeFails = 0
@@ -577,6 +582,7 @@ Stop mihomo. It drops the adapter and routes with it.
 */
 func mihomoDown() {
     stopProcess()
+    SystemDNS.restore()
     mihomoSecret = ""
     mihomoEndpoint = ""
     mihomoEndpointIP = ""
@@ -611,8 +617,12 @@ func mihomoReload(wg: String, rules: MihomoRules) -> String? {
     stopProcess()
     guard let binary = ToolLocator.locate().mihomo, spawn(binary: binary) == nil, waitReady() == nil else {
         stopProcess()
+        SystemDNS.restore()
         return FairleadL10n.text("The tunnel could not be restarted.")
     }
+
+    // Keep system DNS pushed across rule reloads; refresh if the WG DNS list changed.
+    SystemDNS.push(fromWG: wg)
 
     recoveries = 0
     probeFails = 0
